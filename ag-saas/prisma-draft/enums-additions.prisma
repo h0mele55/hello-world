@@ -1,0 +1,141 @@
+// ─────────────────────────────────────────────────────────────────
+//  AG PHASE 0/1 — enum additions
+//
+//  DESTINATION: append to `prisma/schema/enums.prisma` in the
+//  product fork. Kept separate here so the draft is reviewable in
+//  one place. House rules apply (see enums.prisma header):
+//
+//    • Adding a value → non-breaking, needs a migration
+//      (ALTER TYPE … ADD VALUE).
+//    • Removing/reordering → breaking; plan a data migration.
+//    • Renaming → prefer @@map() to keep the SQL value stable.
+// ─────────────────────────────────────────────────────────────────
+
+/// WP-2 — per-tenant module gating. A module is available when
+/// (plan allows it) ∧ (tenant enabled it); resolved in
+/// `src/lib/entitlements.ts` and enforced by `requireModule()` at
+/// page + API boundaries. Coverage guardrail:
+/// `tests/guardrails/module-gate-coverage.test.ts`.
+enum ModuleKey {
+  JOURNAL
+  INVENTORY
+  PLANNING
+  CERTIFICATION // gated compliance domain (Framework/Control/Evidence/Audit)
+  RISK
+  VENDORS
+  AUTOMATION
+  PROCESSES
+  AI
+}
+
+/// Location taxonomy (LiteFarm-derived). FIELD/GREENHOUSE/BED carry
+/// geometry; STORAGE_BIN carries capacity attributes; WATER_SOURCE
+/// supports irrigation logs. Hierarchy via Location.parentId
+/// (farm → field → bed).
+enum LocationType {
+  FIELD
+  BED
+  GREENHOUSE
+  PADDOCK
+  BARN
+  STORAGE_BIN
+  WATER_SOURCE
+  BUFFER_ZONE
+  YARD
+  OTHER
+}
+
+/// Journal entry types — farmOS log-type ontology, reimplemented.
+/// Each type drives the quick-entry form variant and which link
+/// tables are expected (e.g. INPUT_APPLICATION requires a lot link;
+/// HARVEST produces one).
+enum LogEntryType {
+  ACTIVITY
+  OBSERVATION
+  INPUT_APPLICATION // fertilizer / pesticide / amendment — traceability-critical
+  SEEDING
+  TRANSPLANTING
+  HARVEST
+  IRRIGATION
+  MAINTENANCE // equipment service — pairs with Equipment link
+  LAB_TEST // soil / water / tissue analysis
+  GRAZING
+}
+
+/// PLANNED entries double as scheduled field work (mirrors the
+/// farmOS "pending log = task" pattern). A LogEntry may also be
+/// spawned from a Task — see LogEntry.taskId.
+enum LogEntryStatus {
+  PLANNED
+  DONE
+}
+
+/// Quantity dimensions (farmOS measure vocabulary + grain trade
+/// additions). The Unit table constrains units to a dimension.
+enum QuantityMeasure {
+  COUNT
+  WEIGHT
+  VOLUME
+  AREA
+  LENGTH
+  DURATION
+  RATE // e.g. kg/ha application rate
+  TEMPERATURE
+  MOISTURE // grain moisture %
+  OTHER
+}
+
+enum SeasonStatus {
+  PLANNED
+  ACTIVE
+  CLOSED
+}
+
+/// Inventory item categories. SEED and HARVESTED_PRODUCE may link
+/// to a CropVariety for variety-level traceability.
+enum ItemCategory {
+  SEED
+  FERTILIZER
+  PESTICIDE
+  AMENDMENT
+  FUEL
+  FEED
+  HARVESTED_PRODUCE
+  PACKAGING
+  PART // equipment spares
+  OTHER
+}
+
+/// Append-only stock ledger event types (ERPNext stock-ledger
+/// concept). HARVEST_IN and CONSUMPTION carry a LogEntry link so
+/// the journal and the ledger reconcile (field → lot → buyer).
+enum StockTransactionType {
+  RECEIPT // purchase in
+  CONSUMPTION // applied / used in the field
+  HARVEST_IN // harvest creates stock
+  TRANSFER // bin → bin movement
+  ADJUSTMENT // count correction (signed)
+  SALE_OUT
+  DISPOSAL
+}
+
+enum PlantingMethod {
+  DIRECT_SEED
+  TRANSPLANT
+  PERENNIAL
+}
+
+enum PlantingStatus {
+  PLANNED
+  SEEDED
+  IN_GROUND
+  HARVESTING
+  COMPLETE
+  FAILED // crop loss — keeps the record, frees the location
+}
+
+enum CropPlanStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}

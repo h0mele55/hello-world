@@ -1,0 +1,178 @@
+// ─────────────────────────────────────────────────────────────────
+//  AG PHASE 1 — inventory.prisma (items, lots, append-only ledger)
+//
+//  DESTINATION: `prisma/schema/inventory.prisma` in the product fork.
+//
+//  Design lineage:
+//    • Item / lot / location tree — InvenTree (MIT; schema translated,
+//      attribution in THIRD_PARTY_NOTICES.md).
+//    • Append-only StockTransaction ledger — ERPNext stock-ledger
+//      concept (reimplemented), hardened with the in-house AuditLog
+//      hash-chain pattern: entryHash = SHA-256(canonical(fields,
+//      previousHash)), UPDATE/DELETE forbidden by DB trigger, chain
+//      verified by an inventory twin of scripts/verify-audit-chain.ts.
+//      This is the food-safety traceability spine: spray lot → field
+//      (LogEntry link) → harvest lot → buyer.
+//
+//  Invariants enforced at the usecase layer (and worth DB triggers):
+//    • InventoryLot.quantityOnHand is a DENORMALIZED cache of
+//      SUM(StockTransaction.quantityDelta) for the lot — recomputed
+//      in the same transaction as every ledger append; never edited.
+//    • CONSUMPTION/HARVEST_IN transactions must carry a logEntryId —
+//      stock can't appear from or vanish into thin air on a farm
+//      without a journal event (ADJUSTMENT is the audited escape
+//      hatch, reason required).
+//
+//  REQUIRED EDITS ELSEWHERE:
+//    • auth.prisma Tenant: add back-relations
+//        items Item[] ; inventoryLots InventoryLot[] ;
+//        stockTransactions StockTransaction[]
+//    • auth.prisma User: "ItemCreator", "StockTxActor" relations.
+// ─────────────────────────────────────────────────────────────────
+
+/// Catalog entry — a thing you stock (a seed variety, a fertilizer
+/// product, diesel, harvested milling wheat). Physical stock lives
+/// in InventoryLot; this row is identity + defaults.
+model Item {
+  id              String       @id @default(cuid())
+  tenantId        String
+  name            String
+  category        ItemCategory
+  sku             String?
+  /// SEED / HARVESTED_PRODUCE → variety link for traceability and
+  /// for the planning engine's seed-quantity math (Phase 2).
+  cropVarietyId   String?
+  defaultUnitId   String
+  /// Low-stock alert threshold in defaultUnit (InvenTree pattern).
+  /// The existing automation engine raises the in-app/email
+  /// notification when the cached on-hand sum crosses it.
+  reorderLevel    Decimal?     @db.Decimal(14, 3)
+  /// Regulatory metadata for inputs (active ingredient, registration
+  /// no., REI/PHI days) — JSON until the certification module
+  /// (Phase 2) promotes required fields.
+  attributesJson  Json?
+  createdByUserId String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  deletedAt       DateTime?
+  deletedByUserId String?
+  retentionUntil  DateTime?
+  tenant          Tenant       @relation(fields: [tenantId], references: [id])
+  cropVariety     CropVariety? @relation(fields: [cropVarietyId], references: [id])
+  defaultUnit     Unit         @relation(fields: [defaultUnitId], references: [id])
+  createdBy       User?        @relation("ItemCreator", fields: [createdByUserId], references: [id])
+  lots            InventoryLot[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, category])
+}
+
+/// A physical batch of an Item: one seed-bag delivery, one chemical
+/// batch, the contents of bin 4 from field A. Lot granularity is
+/// what certification audits and recalls operate on.
+model InventoryLot {
+  id                String    @id @default(cuid())
+  tenantId          String
+  itemId            String
+  /// Supplier batch no. or internal harvest-lot code
+  /// ("2027-FIELD-A-W1"). Unique per item within a tenant.
+  lotCode           String
+  /// Where the lot physically sits (STORAGE_BIN/BARN Location).
+  /// Moves are TRANSFER ledger entries; this column tracks current
+  /// position only.
+  locationId        String?
+  expiresAt         DateTime?
+  receivedAt        DateTime?
+  /// Denormalized ledger sum — see file-header invariant.
+  quantityOnHand    Decimal   @db.Decimal(16, 4) @default(0)
+  /// Unit is fixed at lot creation (defaults from Item.defaultUnit);
+  /// mixed-unit lots are forbidden — convert at transaction time.
+  unitId            String
+  /// Grain-quality / batch attributes: moisture %, test weight,
+  /// protein, germination rate, organic-certified flag …
+  attributesJson    Json?
+  /// Per-unit acquisition or valuation cost — feeds Phase 3
+  /// per-activity costing via CONSUMPTION entries.
+  unitCostAmount    Decimal?  @db.Decimal(14, 4)
+  unitCostCurrency  String?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  deletedAt         DateTime?
+  deletedByUserId   String?
+  retentionUntil    DateTime?
+  tenant            Tenant    @relation(fields: [tenantId], references: [id])
+  item              Item      @relation(fields: [itemId, tenantId], references: [id, tenantId])
+  location          Location? @relation(fields: [locationId, tenantId], references: [id, tenantId])
+  unit              Unit      @relation(fields: [unitId], references: [id])
+  transactions      StockTransaction[]
+  /// Lot genealogy (OFBiz pattern): grain blending / splitting.
+  /// A child lot records which parents fed it.
+  parentLinks       LotLink[] @relation("LotLinkChild")
+  childLinks        LotLink[] @relation("LotLinkParent")
+  plantingsAsSeed   Planting[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, itemId, lotCode])
+  @@index([tenantId, locationId])
+  @@index([tenantId, expiresAt])
+}
+
+/// Split/merge genealogy edge — created alongside the TRANSFER
+/// ledger entries that move quantity between parent and child.
+model LotLink {
+  id          String       @id @default(cuid())
+  tenantId    String
+  parentLotId String
+  childLotId  String
+  createdAt   DateTime     @default(now())
+  parentLot   InventoryLot @relation("LotLinkParent", fields: [parentLotId, tenantId], references: [id, tenantId])
+  childLot    InventoryLot @relation("LotLinkChild", fields: [childLotId, tenantId], references: [id, tenantId])
+
+  @@unique([parentLotId, childLotId])
+  @@index([tenantId, childLotId])
+}
+
+/// THE LEDGER. Append-only; immutability enforced exactly like
+/// AuditLog (no-UPDATE/no-DELETE trigger + a no-direct-writes
+/// guardrail so every append flows through the one usecase that
+/// computes the hash chain and refreshes the lot cache atomically).
+model StockTransaction {
+  id             String               @id @default(cuid())
+  tenantId       String
+  lotId          String
+  type           StockTransactionType
+  /// Signed delta in `unitId` units: positive for RECEIPT/HARVEST_IN
+  /// /TRANSFER-in, negative for CONSUMPTION/SALE_OUT/DISPOSAL/
+  /// TRANSFER-out. ADJUSTMENT may be either sign — reason required.
+  quantityDelta  Decimal              @db.Decimal(16, 4)
+  unitId         String
+  occurredAt     DateTime
+  /// Journal linkage — required for CONSUMPTION and HARVEST_IN
+  /// (usecase-enforced); the traceability walk pivots here.
+  logEntryId     String?
+  fromLocationId String?
+  toLocationId   String?
+  reason         String?
+  /// Cost snapshot for this movement (valuation at transaction time).
+  costAmount     Decimal?             @db.Decimal(14, 2)
+  costCurrency   String?
+  actorUserId    String?
+  createdAt      DateTime             @default(now())
+  /// Hash chain — per-tenant chain, same canonicalization helper as
+  /// AuditLog. previousHash of the first entry is the tenant genesis
+  /// constant.
+  previousHash   String
+  entryHash      String
+  tenant         Tenant               @relation(fields: [tenantId], references: [id])
+  lot            InventoryLot         @relation(fields: [lotId, tenantId], references: [id, tenantId])
+  unit           Unit                 @relation(fields: [unitId], references: [id])
+  logEntry       LogEntry?            @relation(fields: [logEntryId, tenantId], references: [id, tenantId])
+  fromLocation   Location?            @relation("StockTxFromLocation", fields: [fromLocationId, tenantId], references: [id, tenantId])
+  toLocation     Location?            @relation("StockTxToLocation", fields: [toLocationId, tenantId], references: [id, tenantId])
+  actor          User?                @relation("StockTxActor", fields: [actorUserId], references: [id])
+
+  @@unique([id, tenantId])
+  @@index([tenantId, lotId, occurredAt])
+  @@index([tenantId, type, occurredAt])
+  @@index([tenantId, logEntryId])
+}

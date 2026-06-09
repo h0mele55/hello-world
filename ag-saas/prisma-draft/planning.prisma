@@ -1,0 +1,116 @@
+// ─────────────────────────────────────────────────────────────────
+//  AG PHASE 1/2 — planning.prisma (crop plans & plantings)
+//
+//  DESTINATION: `prisma/schema/planning.prisma` in the product fork.
+//
+//  Design lineage: Qrop / CropPlanning succession model (GPL —
+//  concepts reimplemented, no code), Permastead (MIT) for the
+//  planting-record shape, frappe/agriculture crop_cycle as a schema
+//  checklist. Phase 1 ships the MODELS (so harvest logs and seed
+//  lots have something to link to); the planning ENGINE — date
+//  arithmetic, succession generation, auto-task creation, bed
+//  allocation — is Phase 2 usecase work, not schema.
+//
+//  Date math contract (Phase 2 engine, kept out of the DB):
+//    fieldDate   = sowDate + daysToTransplant   (TRANSPLANT method)
+//    harvestFrom = sowDate + daysToMaturity     (merged variety/crop
+//                                                defaultsJson)
+//    harvestTo   = harvestFrom + harvestWindowDays
+//  Planned dates are stored; actuals come from linked LogEntries
+//  (SEEDING / TRANSPLANTING / HARVEST via LogPlanting) — plan vs.
+//  actual is a query, not a second set of columns to keep honest.
+//
+//  REQUIRED EDITS ELSEWHERE:
+//    • auth.prisma Tenant: add `cropPlans CropPlan[]` and
+//      `plantings Planting[]` back-relations.
+//    • auth.prisma User: "CropPlanCreator", "PlantingCreator".
+// ─────────────────────────────────────────────────────────────────
+
+/// A season's cultivation plan — the container the planning board
+/// renders. Usually one ACTIVE plan per Season; DRAFT copies support
+/// what-if planning (Qrop pattern) cheaply at this granularity.
+model CropPlan {
+  id              String         @id @default(cuid())
+  tenantId        String
+  seasonId        String
+  name            String
+  status          CropPlanStatus @default(DRAFT)
+  notes           String?
+  createdByUserId String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  deletedAt       DateTime?
+  deletedByUserId String?
+  retentionUntil  DateTime?
+  tenant          Tenant         @relation(fields: [tenantId], references: [id])
+  season          Season         @relation(fields: [seasonId, tenantId], references: [id, tenantId])
+  createdBy       User?          @relation("CropPlanCreator", fields: [createdByUserId], references: [id])
+  plantings       Planting[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, seasonId, status])
+}
+
+/// One sowing/planting of one variety in one place — the unit both
+/// markets share: a market gardener's "succession 3 of Nantes 2 in
+/// bed 12" and a grain producer's "winter wheat, field North-40".
+/// Scale is expressed by quantity + unit (bed-meters, hectares,
+/// plant count), not by different models.
+model Planting {
+  id               String         @id @default(cuid())
+  tenantId         String
+  cropPlanId       String?
+  seasonId         String
+  cropVarietyId    String
+  locationId       String?
+  method           PlantingMethod
+  status           PlantingStatus @default(PLANNED)
+  /// Planned dates (engine-written, user-editable). Actuals live in
+  /// linked LogEntries — see header.
+  sowDate          DateTime?
+  fieldDate        DateTime? // transplant / in-ground date
+  harvestFromDate  DateTime?
+  harvestToDate    DateTime?
+  /// Extent of this planting in `extentUnitId` units (AREA or LENGTH
+  /// or COUNT measure — ha for grain, bed-m for market garden).
+  extentValue      Decimal?       @db.Decimal(14, 3)
+  extentUnitId     String?
+  /// Expected yield in `yieldUnitId` per extent unit (t/ha, kg/bed-m).
+  /// The dashboard compares against HARVEST LogQuantity sums.
+  expectedYieldValue Decimal?     @db.Decimal(14, 4)
+  yieldUnitId      String?
+  /// Seed traceability: which lot went into the ground. Drives the
+  /// seed-quantity purchase list (Phase 2) and the recall walk
+  /// (seed lot → planting → harvest lot).
+  seedLotId        String?
+  /// Succession ordinal within (cropPlan, variety) — display +
+  /// engine bookkeeping ("succession 3 of 8").
+  successionIndex  Int?
+  notes            String?
+  createdByUserId  String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  deletedAt        DateTime?
+  deletedByUserId  String?
+  retentionUntil   DateTime?
+  tenant           Tenant         @relation(fields: [tenantId], references: [id])
+  cropPlan         CropPlan?      @relation(fields: [cropPlanId, tenantId], references: [id, tenantId])
+  season           Season         @relation(fields: [seasonId, tenantId], references: [id, tenantId])
+  cropVariety      CropVariety    @relation(fields: [cropVarietyId], references: [id])
+  location         Location?      @relation(fields: [locationId, tenantId], references: [id, tenantId])
+  seedLot          InventoryLot?  @relation(fields: [seedLotId, tenantId], references: [id, tenantId])
+  extentUnit       Unit?          @relation("PlantingExtentUnit", fields: [extentUnitId], references: [id])
+  yieldUnit        Unit?          @relation("PlantingYieldUnit", fields: [yieldUnitId], references: [id])
+  createdBy        User?          @relation("PlantingCreator", fields: [createdByUserId], references: [id])
+  logLinks         LogPlanting[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, seasonId, status])
+  @@index([tenantId, locationId])
+  @@index([tenantId, cropVarietyId])
+}
+
+// NOTE for the Unit model (agriculture.prisma): the two named
+// relations above require matching back-relations there —
+//   plantingExtents Planting[] @relation("PlantingExtentUnit")
+//   plantingYields  Planting[] @relation("PlantingYieldUnit")

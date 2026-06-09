@@ -1,0 +1,354 @@
+// ─────────────────────────────────────────────────────────────────
+//  AG PHASE 0/1 — agriculture.prisma (journal + reference data)
+//
+//  DESTINATION: `prisma/schema/agriculture.prisma` in the product
+//  fork. New domain file per the GAP-09 multi-file split — no
+//  generator/datasource here (base.prisma owns those).
+//
+//  Conventions inherited from compliance.prisma:
+//    • `@id @default(cuid())`, createdAt/updatedAt timestamps.
+//    • Soft-delete trio: deletedAt / deletedByUserId / retentionUntil.
+//    • Cross-tenant row barrier: `@@unique([id, tenantId])` on every
+//      tenant-scoped parent; children reference via composite FK
+//      `fields: [xId, tenantId], references: [id, tenantId]`.
+//    • RLS: every table with a tenantId column gets the standard
+//      tenant_isolation policies in its migration —
+//      `tests/guardrails/rls-coverage.test.ts` fails CI otherwise.
+//      Tables where tenantId is NULLABLE (global catalog rows:
+//      CropType, CropVariety, Unit) need the catalog variant:
+//        USING ("tenantId" IS NULL
+//               OR "tenantId" = current_setting('app.tenant_id', true))
+//      …with INSERT/UPDATE/DELETE restricted to tenant-owned rows.
+//
+//  REQUIRED EDITS ELSEWHERE (Prisma needs both relation sides):
+//    • auth.prisma Tenant: add back-relations
+//        moduleSettings   TenantModuleSettings?
+//        locations        Location[]
+//        seasons          Season[]
+//        equipment        Equipment[]
+//        logEntries       LogEntry[]
+//        cropTypes        CropType[]
+//        cropVarieties    CropVariety[]
+//    • auth.prisma User: add named back-relations for each
+//        "XCreator" / "XAssignee" relation declared below.
+//    • Task (schema.prisma): add `logEntries LogEntry[]`
+//      back-relation for LogEntry.taskId.
+// ─────────────────────────────────────────────────────────────────
+
+/// WP-2 — module gating. One row per tenant; absence = product
+/// defaults (ag modules on, CERTIFICATION off). Mirrors the
+/// TenantSecuritySettings one-to-one pattern.
+model TenantModuleSettings {
+  id             String      @id @default(cuid())
+  tenantId       String      @unique
+  /// Postgres enum array — resolved into the PermissionSet/entitlement
+  /// check in `src/lib/entitlements.ts`. Plan limits still apply on
+  /// top: enabling a module a plan doesn't include has no effect.
+  enabledModules ModuleKey[]
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+  tenant         Tenant      @relation(fields: [tenantId], references: [id])
+}
+
+/// Ekylibre "campaign" concept — the season/production-year axis.
+/// Plantings, crop plans and (later) per-season costing hang off it.
+/// Overlap is allowed (winter wheat 2026/27 vs. spring 2027).
+model Season {
+  id              String       @id @default(cuid())
+  tenantId        String
+  name            String // "2027", "Spring 2027", "Winter wheat 26/27"
+  startsOn        DateTime
+  endsOn          DateTime
+  status          SeasonStatus @default(PLANNED)
+  createdByUserId String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  deletedAt       DateTime?
+  deletedByUserId String?
+  retentionUntil  DateTime?
+  tenant          Tenant       @relation(fields: [tenantId], references: [id])
+  createdBy       User?        @relation("SeasonCreator", fields: [createdByUserId], references: [id])
+  cropPlans       CropPlan[]
+  plantings       Planting[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, status])
+}
+
+/// WP-4 vertical slice. Hierarchical place model (farm → field →
+/// bed) covering both grown-in places and storage/infrastructure.
+/// Geometry is PostGIS via Unsupported — Prisma reads/writes it
+/// only through the typed helpers in `src/lib/db/geo.ts`
+/// (guardrail: geo-raw-sql-containment).
+model Location {
+  id              String       @id @default(cuid())
+  tenantId        String
+  parentId        String?
+  name            String
+  type            LocationType
+  /// WGS84 polygon. Nullable — STORAGE_BIN/BARN rows may carry only
+  /// a point or nothing. Area is denormalized into areaHa on write
+  /// (ST_Area on the geography cast) for list views and plan math.
+  geometry        Unsupported("geometry(Geometry, 4326)")?
+  areaHa          Decimal?     @db.Decimal(12, 4)
+  soilType        String?
+  /// Grain storage attributes (STORAGE_BIN): capacity in the unit
+  /// referenced below; current fill is derived from the stock ledger,
+  /// never stored here.
+  capacityValue   Decimal?     @db.Decimal(14, 3)
+  capacityUnitId  String?
+  /// Free-form extras (drainage class, organic-certified flag, lease
+  /// reference …) until a column earns its keep. Same JSON-first
+  /// pattern as Tenant.readinessWeightsJson.
+  attributesJson  Json?
+  notes           String?
+  createdByUserId String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  deletedAt       DateTime?
+  deletedByUserId String?
+  retentionUntil  DateTime?
+  tenant          Tenant       @relation(fields: [tenantId], references: [id])
+  parent          Location?    @relation("LocationTree", fields: [parentId, tenantId], references: [id, tenantId])
+  children        Location[]   @relation("LocationTree")
+  capacityUnit    Unit?        @relation(fields: [capacityUnitId], references: [id])
+  createdBy       User?        @relation("LocationCreator", fields: [createdByUserId], references: [id])
+  logLinks        LogLocation[]
+  plantings       Planting[]
+  lots            InventoryLot[]
+  stockTxFrom     StockTransaction[] @relation("StockTxFromLocation")
+  stockTxTo       StockTransaction[] @relation("StockTxToLocation")
+
+  @@unique([id, tenantId])
+  @@index([tenantId, type])
+  @@index([tenantId, parentId])
+}
+
+/// Machinery & tools. Split out of the old compliance Asset model —
+/// service scheduling reuses the ControlTestPlan frequency/nextDueAt
+/// machinery in Phase 3; Phase 0/1 only needs identity + journal links.
+model Equipment {
+  id              String      @id @default(cuid())
+  tenantId        String
+  name            String
+  category        String? // tractor, drill, sprayer, combine …
+  make            String?
+  model           String?
+  serialNumber    String?
+  year            Int?
+  /// Hour-meter / odometer snapshot; updated from MAINTENANCE and
+  /// ACTIVITY log entries, not edited directly.
+  meterValue      Decimal?    @db.Decimal(12, 1)
+  attributesJson  Json?
+  createdByUserId String?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  deletedAt       DateTime?
+  deletedByUserId String?
+  retentionUntil  DateTime?
+  tenant          Tenant      @relation(fields: [tenantId], references: [id])
+  createdBy       User?       @relation("EquipmentCreator", fields: [createdByUserId], references: [id])
+  logLinks        LogEquipment[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, category])
+}
+
+// ── Reference data: crops & units ────────────────────────────────
+//
+// Catalog pattern (mirrors Control's nullable tenantId): rows with
+// tenantId = NULL are globally seeded (OpenFarm CC0 import via
+// scripts/import-crops.ts) and read-only to tenants; rows with a
+// tenantId are tenant-custom. RLS uses the catalog policy variant
+// (see file header).
+
+model CropType {
+  id          String        @id @default(cuid())
+  tenantId    String?
+  name        String // "Winter wheat", "Carrot"
+  /// Stable key for global rows ("wheat-winter"); null for custom.
+  catalogKey  String?       @unique
+  binomial    String? // "Triticum aestivum"
+  family      String?
+  /// Agronomic defaults inherited by varieties (days to maturity,
+  /// spacing, GDD base temp …). JSON until the planning engine
+  /// (Phase 2) promotes fields it computes with.
+  defaultsJson Json?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  tenant      Tenant?       @relation(fields: [tenantId], references: [id])
+  varieties   CropVariety[]
+
+  @@index([tenantId])
+}
+
+model CropVariety {
+  id           String     @id @default(cuid())
+  tenantId     String?
+  cropTypeId   String
+  name         String // "Mulika", "Nantes 2"
+  supplier     String?
+  /// Variety-level overrides of CropType.defaultsJson (maturity days,
+  /// seeding rate). Qrop/CropPlanning succession math reads the
+  /// merged result.
+  defaultsJson Json?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  tenant       Tenant?    @relation(fields: [tenantId], references: [id])
+  cropType     CropType   @relation(fields: [cropTypeId], references: [id])
+  plantings    Planting[]
+  items        Item[]
+
+  @@index([tenantId])
+  @@index([cropTypeId])
+}
+
+/// Global UOM table (seeded by scripts/import-units.ts; no tenant
+/// rows — custom units are a deliberate non-feature until demanded).
+/// Conversion: value_in_base = value * toBaseFactor. Base units per
+/// dimension: kg, L, m², m, s, count.
+model Unit {
+  id           String          @id @default(cuid())
+  key          String          @unique // "kg", "lb", "bu-wheat", "L/ha"
+  name         String
+  symbol       String
+  measure      QuantityMeasure
+  toBaseFactor Decimal         @db.Decimal(20, 10)
+  createdAt    DateTime        @default(now())
+  quantities   LogQuantity[]
+  items        Item[]
+  stockTx      StockTransaction[]
+  locations    Location[]
+}
+
+// ── The journal ──────────────────────────────────────────────────
+
+/// farmOS Log ontology, reimplemented. One row = one field event
+/// (work done, observation made, input applied, harvest taken).
+/// Quantities, locations, equipment and inventory lots attach via
+/// child tables so a single entry can say: "Sprayed fields A+B with
+/// lot X at 2.5 L/ha using sprayer S, 3.5 h" — and the traceability
+/// graph (existing src/lib/traceability-graph) can walk it.
+model LogEntry {
+  id              String         @id @default(cuid())
+  tenantId        String
+  type            LogEntryType
+  status          LogEntryStatus @default(DONE)
+  /// When the event happened (or is planned for). Date-level
+  /// precision is fine; time matters for spray records.
+  occurredAt      DateTime
+  title           String
+  /// Free text — runs through sanitizePlainText() at the usecase
+  /// boundary like every write path (Epic D.2). Add to the encrypted
+  /// -fields manifest if commercially sensitive in practice.
+  notes           String?
+  /// Spray-record compliance fields (INPUT_APPLICATION): wind, temp,
+  /// operator cert no., REI/PHI … JSON now; the certification module
+  /// (Phase 2) promotes what schemes require.
+  conditionsJson  Json?
+  /// Cost attribution (Ekylibre intervention concept, Phase 3 UI):
+  /// labour + machine + input cost snapshot for this entry.
+  costAmount      Decimal?       @db.Decimal(14, 2)
+  costCurrency    String?
+  /// Spawned-from work item; Task stays the assignment/scheduling
+  /// surface, LogEntry is the field record.
+  taskId          String?
+  seasonId        String?
+  assigneeUserId  String?
+  createdByUserId String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  deletedAt       DateTime?
+  deletedByUserId String?
+  retentionUntil  DateTime?
+  tenant          Tenant         @relation(fields: [tenantId], references: [id])
+  task            Task?          @relation(fields: [taskId, tenantId], references: [id, tenantId])
+  season          Season?        @relation(fields: [seasonId, tenantId], references: [id, tenantId])
+  assignee        User?          @relation("LogEntryAssignee", fields: [assigneeUserId], references: [id])
+  createdBy       User?          @relation("LogEntryCreator", fields: [createdByUserId], references: [id])
+  quantities      LogQuantity[]
+  locationLinks   LogLocation[]
+  equipmentLinks  LogEquipment[]
+  plantingLinks   LogPlanting[]
+  /// Photos & documents reuse FileRecord via the existing upload
+  /// pipeline (presign → scan → attach), same as Evidence.
+  files           LogEntryFile[]
+  stockTx         StockTransaction[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, type, occurredAt])
+  @@index([tenantId, status, occurredAt])
+  @@index([tenantId, seasonId])
+}
+
+/// farmOS Quantity: measure + value + unit + label. A HARVEST entry
+/// might carry { WEIGHT 12.4 t "grain" } and { MOISTURE 14.8 % }.
+model LogQuantity {
+  id         String          @id @default(cuid())
+  tenantId   String
+  logEntryId String
+  measure    QuantityMeasure
+  value      Decimal         @db.Decimal(18, 6)
+  unitId     String
+  label      String?
+  logEntry   LogEntry        @relation(fields: [logEntryId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  unit       Unit            @relation(fields: [unitId], references: [id])
+
+  @@index([tenantId, logEntryId])
+}
+
+model LogLocation {
+  id         String   @id @default(cuid())
+  tenantId   String
+  logEntryId String
+  locationId String
+  logEntry   LogEntry @relation(fields: [logEntryId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  location   Location @relation(fields: [locationId, tenantId], references: [id, tenantId])
+
+  @@unique([logEntryId, locationId])
+  @@index([tenantId, locationId])
+}
+
+model LogEquipment {
+  id          String    @id @default(cuid())
+  tenantId    String
+  logEntryId  String
+  equipmentId String
+  /// Hour-meter reading at this event (MAINTENANCE/ACTIVITY) —
+  /// source for Equipment.meterValue.
+  meterValue  Decimal?  @db.Decimal(12, 1)
+  logEntry    LogEntry  @relation(fields: [logEntryId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  equipment   Equipment @relation(fields: [equipmentId, tenantId], references: [id, tenantId])
+
+  @@unique([logEntryId, equipmentId])
+  @@index([tenantId, equipmentId])
+}
+
+model LogPlanting {
+  id         String   @id @default(cuid())
+  tenantId   String
+  logEntryId String
+  plantingId String
+  logEntry   LogEntry @relation(fields: [logEntryId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  planting   Planting @relation(fields: [plantingId, tenantId], references: [id, tenantId])
+
+  @@unique([logEntryId, plantingId])
+  @@index([tenantId, plantingId])
+}
+
+/// Attachment join — same shape as Evidence's file linkage; the
+/// FileRecord side (pathKey, sha256, scanStatus, retention) is
+/// reused untouched.
+model LogEntryFile {
+  id         String   @id @default(cuid())
+  tenantId   String
+  logEntryId String
+  fileId     String
+  caption    String?
+  createdAt  DateTime @default(now())
+  logEntry   LogEntry @relation(fields: [logEntryId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  file       FileRecord @relation(fields: [fileId], references: [id])
+
+  @@unique([logEntryId, fileId])
+  @@index([tenantId, fileId])
+}

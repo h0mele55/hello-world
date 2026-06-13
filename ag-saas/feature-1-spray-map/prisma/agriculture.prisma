@@ -1,0 +1,179 @@
+// ═══════════════════════════════════════════════════════════════════
+//  AGRICULTURE DOMAIN — Feature 1: spray-prescription map module
+// ═══════════════════════════════════════════════════════════════════
+//
+//  GAP-09 multi-file schema: new domain file. Generator + datasource
+//  remain in base.prisma.
+//
+//  House conventions mirrored from compliance.prisma:
+//    • cuid ids, createdAt/updatedAt, soft-delete trio
+//      (deletedAt / deletedByUserId / retentionUntil).
+//    • Cross-tenant row barrier `@@unique([id, tenantId])` on tenant
+//      parents I own (Location, Parcel, Item), with composite child
+//      FKs `[xId, tenantId] → [id, tenantId]`. Task lacks that barrier
+//      (only `@@unique([tenantId, key])`), so OperationParcel→Task is
+//      a simple FK; tenant isolation there is enforced by RLS + the
+//      OperationParcel.tenantId column.
+//    • Every tenant-scoped table (tenantId column) gets the canonical
+//      RLS trio (tenant_isolation + tenant_isolation_insert +
+//      superuser_bypass + FORCE) in the migration. The rls-coverage
+//      guardrail derives the tenant-scoped set from the DMMF and will
+//      fail CI otherwise. `Unit` has NO tenantId (global catalog) →
+//      no RLS, intentionally.
+//
+//  Geometry: PostGIS via `Unsupported(...)`. Prisma never reads/writes
+//  it through the client — all spatial SQL lives in `src/lib/db/geo.ts`.
+//  The `postgis` extension is created by the migration (we do not use
+//  the datasource `extensions` preview feature, so the CREATE EXTENSION
+//  is hand-authored at the top of the migration).
+//
+//  Back-relations added elsewhere (Prisma needs both sides):
+//    • auth.prisma   Tenant: locations / parcels / items / operationParcels
+//    • auth.prisma   User:   LocationOwner / LocationCreator /
+//                            ItemCreator / OperationParcelCompleter
+//    • compliance.prisma Task:       operationParcels OperationParcel[]
+//    • compliance.prisma FileRecord: locationSpatialFiles Location[]
+//                                    @relation("LocationSpatialFile")
+// ═══════════════════════════════════════════════════════════════════
+
+/// Global unit-of-measure catalog (no tenantId → not tenant-scoped,
+/// no RLS). Seeded by scripts/import-units.ts. A spray dose is a RATE
+/// unit (e.g. "L/ha"); product default units are VOLUME/WEIGHT/COUNT.
+model Unit {
+  id        String          @id @default(cuid())
+  key       String          @unique // "l-per-ha", "kg", "l"
+  name      String
+  symbol    String
+  measure   QuantityMeasure
+  createdAt DateTime        @default(now())
+
+  itemsDefault Item[]            @relation("ItemDefaultUnit")
+  doseLines    OperationParcel[] @relation("OperationParcelDoseUnit")
+}
+
+/// Tenant-scoped input-product catalog (the structured spray product).
+/// Feature 1 exercises PESTICIDE/FERTILIZER; other categories are the
+/// seed of the full inventory module. attributesJson carries
+/// regulatory metadata (active ingredient, REI/PHI) until promoted.
+model Item {
+  id              String       @id @default(cuid())
+  tenantId        String
+  name            String
+  category        ItemCategory
+  sku             String?
+  defaultUnitId   String
+  attributesJson  Json?
+  createdByUserId String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  deletedAt       DateTime?
+  deletedByUserId String?
+  retentionUntil  DateTime?
+
+  tenant         Tenant            @relation(fields: [tenantId], references: [id])
+  defaultUnit    Unit              @relation("ItemDefaultUnit", fields: [defaultUnitId], references: [id])
+  createdBy      User?             @relation("ItemCreator", fields: [createdByUserId], references: [id])
+  operationLines OperationParcel[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, category])
+  @@index([tenantId, name])
+}
+
+/// The farm/field block a farmer uploads a spatial file into. Shaped
+/// after the Asset model (key, name, owner, status, soft-delete).
+/// Holds the original uploaded FileRecord + a cached bounding box for
+/// map fit; the parcels themselves are child rows.
+model Location {
+  id              String         @id @default(cuid())
+  tenantId        String
+  key             String?
+  name            String
+  description     String?
+  status          LocationStatus @default(ACTIVE)
+  ownerUserId     String?
+  /// Original uploaded spatial file (shapefile .zip / .kml / .geojson),
+  /// stored via the existing FileRecord pipeline (domain "spatial").
+  spatialFileId   String?
+  spatialFormat   String? // "shapefile" | "kml" | "geojson"
+  /// [west, south, east, north] in WGS84, for initial map fit.
+  boundsJson      Json?
+  createdByUserId String?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+  deletedAt       DateTime?
+  deletedByUserId String?
+  retentionUntil  DateTime?
+
+  tenant      Tenant      @relation(fields: [tenantId], references: [id])
+  owner       User?       @relation("LocationOwner", fields: [ownerUserId], references: [id])
+  createdBy   User?       @relation("LocationCreator", fields: [createdByUserId], references: [id])
+  spatialFile FileRecord? @relation("LocationSpatialFile", fields: [spatialFileId], references: [id])
+  parcels     Parcel[]
+
+  @@unique([id, tenantId])
+  @@unique([tenantId, key])
+  @@index([tenantId, name])
+  @@index([tenantId, status])
+}
+
+/// One polygon imported from the spatial file. geometry is PostGIS
+/// (MultiPolygon, 4326); areaHa is denormalized via ST_Area at import
+/// (never client-written). propertiesJson preserves the source
+/// feature's attributes.
+model Parcel {
+  id              String                                       @id @default(cuid())
+  tenantId        String
+  locationId      String
+  key             String?
+  name            String
+  cropType        String?
+  geometry        Unsupported("geometry(MultiPolygon, 4326)")?
+  areaHa          Decimal?                                     @db.Decimal(12, 4)
+  propertiesJson  Json?
+  createdAt       DateTime                                     @default(now())
+  updatedAt       DateTime                                     @updatedAt
+  deletedAt       DateTime?
+  deletedByUserId String?
+  retentionUntil  DateTime?
+
+  tenant         Tenant            @relation(fields: [tenantId], references: [id])
+  location       Location          @relation(fields: [locationId, tenantId], references: [id, tenantId], onDelete: Cascade)
+  operationLines OperationParcel[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, locationId])
+}
+
+/// The per-parcel prescription line — the heart of the feature. The
+/// spray "job" is a FIELD_OPERATION Task (assignment, status,
+/// comments, notifications all reused); each parcel in the job gets
+/// one OperationParcel with its product + dose. The job auto-resolves
+/// when every line is DONE/SKIPPED.
+model OperationParcel {
+  id                String                @id @default(cuid())
+  tenantId          String
+  taskId            String // the FIELD_OPERATION Task (simple FK; Task has no [id,tenantId] barrier)
+  parcelId          String
+  productItemId     String
+  doseValue         Decimal               @db.Decimal(14, 4)
+  doseUnitId        String
+  targetNote        String?
+  status            ParcelOperationStatus @default(PENDING)
+  completedAt       DateTime?
+  completedByUserId String?
+  createdAt         DateTime              @default(now())
+  updatedAt         DateTime              @updatedAt
+
+  tenant      Tenant @relation(fields: [tenantId], references: [id])
+  task        Task   @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  parcel      Parcel @relation(fields: [parcelId, tenantId], references: [id, tenantId])
+  product     Item   @relation(fields: [productItemId, tenantId], references: [id, tenantId])
+  doseUnit    Unit   @relation("OperationParcelDoseUnit", fields: [doseUnitId], references: [id])
+  completedBy User?  @relation("OperationParcelCompleter", fields: [completedByUserId], references: [id])
+
+  @@unique([taskId, parcelId])
+  @@index([tenantId, taskId])
+  @@index([tenantId, parcelId])
+  @@index([tenantId, status])
+}

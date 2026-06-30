@@ -8,7 +8,7 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
-    
+
     <script>
         tailwind.config = {
             theme: {
@@ -26,7 +26,7 @@
             }
         }
     </script>
-    
+
     <style>
         .marquee-container {
             overflow: hidden;
@@ -67,12 +67,18 @@
                     </a>
                 </div>
                 <div class="hidden md:flex space-x-8 items-center">
-                    <a href="#about" class="text-gray-600 hover:text-brand-purple font-semibold transition">About Us</a>
-                    <a href="#services" class="text-gray-600 hover:text-brand-purple font-semibold transition">Services</a>
-                    <a href="#partners" class="text-gray-600 hover:text-brand-purple font-semibold transition">Partners</a>
-                    <a href="#contact" class="bg-brand-purple text-white px-5 py-2 rounded-md font-semibold hover:bg-purple-800 transition shadow-lg">Request a Quote</a>
+                    <a href="#about" class="text-gray-600 hover:text-brand-purple font-semibold transition" data-en="About Us" data-bg="За нас">About Us</a>
+                    <a href="#services" class="text-gray-600 hover:text-brand-purple font-semibold transition" data-en="Services" data-bg="Услуги">Services</a>
+                    <a href="#partners" class="text-gray-600 hover:text-brand-purple font-semibold transition" data-en="Partners" data-bg="Партньори">Partners</a>
+                    <a href="#contact" class="bg-brand-purple text-white px-5 py-2 rounded-md font-semibold hover:bg-purple-800 transition shadow-lg" data-en="Request a Quote" data-bg="Заявете оферта">Request a Quote</a>
+                    <button id="lang-toggle" aria-label="Switch language" class="flex items-center gap-1 text-gray-600 hover:text-brand-purple font-bold border border-gray-300 rounded-md px-3 py-1 transition">
+                        <i class="fas fa-globe"></i><span id="lang-toggle-label">BG</span>
+                    </button>
                 </div>
-                <div class="md:hidden flex items-center">
+                <div class="md:hidden flex items-center space-x-2">
+                    <button id="lang-toggle-mobile" aria-label="Switch language" class="flex items-center gap-1 text-gray-600 hover:text-brand-purple font-bold border border-gray-300 rounded-md px-2 py-1 text-sm transition">
+                        <i class="fas fa-globe"></i><span id="lang-toggle-mobile-label">BG</span>
+                    </button>
                     <button id="mobile-menu-button" aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="mobile-menu" class="text-gray-600 hover:text-gray-900 focus:outline-none">
                         <i class="fas fa-bars text-2xl"></i>
                     </button>
@@ -82,10 +88,10 @@
 
         <div id="mobile-menu" class="hidden md:hidden bg-white border-t border-gray-100 shadow-md">
             <div class="px-4 pt-2 pb-4 space-y-1">
-                <a href="#about" class="block px-3 py-2 rounded-md text-gray-600 hover:text-brand-purple hover:bg-brand-gray font-semibold transition">About Us</a>
-                <a href="#services" class="block px-3 py-2 rounded-md text-gray-600 hover:text-brand-purple hover:bg-brand-gray font-semibold transition">Services</a>
-                <a href="#partners" class="block px-3 py-2 rounded-md text-gray-600 hover:text-brand-purple hover:bg-brand-gray font-semibold transition">Partners</a>
-                <a href="#contact" class="block px-3 py-2 rounded-md bg-brand-purple text-white font-semibold hover:bg-purple-800 transition text-center">Request a Quote</a>
+                <a href="#about" class="block px-3 py-2 rounded-md text-gray-600 hover:text-brand-purple hover:bg-brand-gray font-semibold transition" data-en="About Us" data-bg="За нас">About Us</a>
+                <a href="#services" class="block px-3 py-2 rounded-md text-gray-600 hover:text-brand-purple hover:bg-brand-gray font-semibold transition" data-en="Services" data-bg="Услуги">Services</a>
+                <a href="#partners" class="block px-3 py-2 rounded-md text-gray-600 hover:text-brand-purple hover:bg-brand-gray font-semibold transition" data-en="Partners" data-bg="Партньори">Partners</a>
+                <a href="#contact" class="block px-3 py-2 rounded-md bg-brand-purple text-white font-semibold hover:bg-purple-800 transition text-center" data-en="Request a Quote" data-bg="Заявете оферта">Request a Quote</a>
             </div>
         </div>
     </nav>
@@ -95,15 +101,15 @@
             <img src="1.jpg" alt="Aerial view of logistics and warehouse" class="w-full h-full object-cover opacity-50 blur-sm transform scale-105">
         </div>
         <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center md:text-left">
-            <h1 class="text-4xl md:text-6xl font-bold text-white leading-tight mb-6 shadow-sm drop-shadow-lg">
+            <h1 class="text-4xl md:text-6xl font-bold text-white leading-tight mb-6 shadow-sm drop-shadow-lg" data-en='Your Logistics Partner <br><span class="text-brand-gold">in Bulgaria &amp; Europe</span>' data-bg='Вашият логистичен партньор <br><span class="text-brand-gold">в България и Европа</span>'>
                 Your Logistics Partner <br><span class="text-brand-gold">in Bulgaria & Europe</span>
             </h1>
-            <p class="text-xl text-gray-200 mb-8 max-w-2xl mx-auto md:mx-0 font-medium drop-shadow-md">
+            <p class="text-xl text-gray-200 mb-8 max-w-2xl mx-auto md:mx-0 font-medium drop-shadow-md" data-en="Fast, secure, and reliable freight forwarding and road transport services. Connecting local businesses to global markets." data-bg="Бързи, сигурни и надеждни услуги по спедиция и автомобилен транспорт. Свързваме местния бизнес с глобалните пазари.">
                 Fast, secure, and reliable freight forwarding and road transport services. Connecting local businesses to global markets.
             </p>
             <div class="flex flex-col sm:flex-row gap-4 justify-center md:justify-start">
-                <a href="#services" class="bg-brand-gold text-white px-8 py-3 rounded-md font-bold text-lg hover:bg-brand-goldHover transition shadow-lg text-center">Explore Services</a>
-                <a href="#contact" class="bg-transparent border-2 border-white text-white px-8 py-3 rounded-md font-bold text-lg hover:bg-white hover:text-gray-900 transition text-center backdrop-blur-sm">Contact Us</a>
+                <a href="#services" class="bg-brand-gold text-white px-8 py-3 rounded-md font-bold text-lg hover:bg-brand-goldHover transition shadow-lg text-center" data-en="Explore Services" data-bg="Разгледайте услугите">Explore Services</a>
+                <a href="#contact" class="bg-transparent border-2 border-white text-white px-8 py-3 rounded-md font-bold text-lg hover:bg-white hover:text-gray-900 transition text-center backdrop-blur-sm" data-en="Contact Us" data-bg="Свържете се с нас">Contact Us</a>
             </div>
         </div>
     </section>
@@ -112,18 +118,18 @@
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
                 <div>
-                    <h2 class="text-3xl font-bold text-brand-purple mb-4">Moving Business Forward</h2>
+                    <h2 class="text-3xl font-bold text-brand-purple mb-4" data-en="Moving Business Forward" data-bg="Движим бизнеса напред">Moving Business Forward</h2>
                     <div class="w-20 h-1 bg-brand-gold mb-6"></div>
-                    <p class="text-gray-600 mb-4 leading-relaxed">
+                    <p class="text-gray-600 mb-4 leading-relaxed" data-en='Headquartered in Lovech, Bulgaria, <strong>SP Transport</strong> has established itself as a premier logistics provider. We specialize in international road transport, groupage shipments, and comprehensive supply chain solutions across the European Union, Scandinavia, and the Balkans.' data-bg='Със седалище в Ловеч, България, <strong>SP Transport</strong> се утвърди като водещ доставчик на логистични услуги. Специализираме в международен автомобилен транспорт, групажни пратки и цялостни решения за веригата на доставки в Европейския съюз, Скандинавия и Балканите.'>
                         Headquartered in Lovech, Bulgaria, <strong>SP Transport</strong> has established itself as a premier logistics provider. We specialize in international road transport, groupage shipments, and comprehensive supply chain solutions across the European Union, Scandinavia, and the Balkans.
                     </p>
-                    <p class="text-gray-600 mb-6 leading-relaxed">
+                    <p class="text-gray-600 mb-6 leading-relaxed" data-en="With over a decade of industry expertise, an EU-licensed modern fleet, and a dedicated team of dispatchers, we ensure that your cargo arrives safely, on time, and on budget." data-bg="С над десетилетие опит в бранша, модерен автопарк с EU лиценз и отдаден екип от диспечери, ние гарантираме, че вашият товар пристига безопасно, навреме и в рамките на бюджета.">
                         With over a decade of industry expertise, an EU-licensed modern fleet, and a dedicated team of dispatchers, we ensure that your cargo arrives safely, on time, and on budget.
                     </p>
                     <ul class="space-y-3 text-gray-700 font-semibold">
-                        <li><i class="fas fa-check-circle text-brand-gold mr-2"></i> ISO 9001 Certified Quality Standards</li>
-                        <li><i class="fas fa-check-circle text-brand-gold mr-2"></i> 24/7 Satellite Tracking & Dispatch</li>
-                        <li><i class="fas fa-check-circle text-brand-gold mr-2"></i> Multi-lingual Support Team</li>
+                        <li><i class="fas fa-check-circle text-brand-gold mr-2"></i> <span data-en="ISO 9001 Certified Quality Standards" data-bg="Сертифицирани стандарти за качество ISO 9001">ISO 9001 Certified Quality Standards</span></li>
+                        <li><i class="fas fa-check-circle text-brand-gold mr-2"></i> <span data-en="24/7 Satellite Tracking &amp; Dispatch" data-bg="Сателитно проследяване и диспечиране 24/7">24/7 Satellite Tracking & Dispatch</span></li>
+                        <li><i class="fas fa-check-circle text-brand-gold mr-2"></i> <span data-en="Multi-lingual Support Team" data-bg="Многоезичен екип за поддръжка">Multi-lingual Support Team</span></li>
                     </ul>
                 </div>
                 <div class="relative h-96 rounded-lg overflow-hidden shadow-2xl">
@@ -136,53 +142,53 @@
     <section id="services" class="py-20 bg-brand-gray">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-center mb-16">
-                <h2 class="text-3xl font-bold text-brand-purple mb-4">Our Services</h2>
+                <h2 class="text-3xl font-bold text-brand-purple mb-4" data-en="Our Services" data-bg="Нашите услуги">Our Services</h2>
                 <div class="w-20 h-1 bg-brand-gold mx-auto mb-6"></div>
-                <p class="text-gray-600 max-w-2xl mx-auto text-lg">We provide tailored transportation and warehousing solutions to meet the specific needs of your industry.</p>
+                <p class="text-gray-600 max-w-2xl mx-auto text-lg" data-en="We provide tailored transportation and warehousing solutions to meet the specific needs of your industry." data-bg="Предлагаме индивидуални решения за транспорт и складиране, съобразени със специфичните нужди на вашия бранш.">We provide tailored transportation and warehousing solutions to meet the specific needs of your industry.</p>
             </div>
-            
+
             <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
                 <div class="bg-white p-8 rounded-lg shadow-lg hover:-translate-y-2 transition duration-300">
                     <div class="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center text-brand-purple mb-6">
                         <i class="fas fa-truck text-2xl"></i>
                     </div>
-                    <h3 class="text-xl font-bold mb-3 text-gray-900">Road Transport (FTL)</h3>
-                    <p class="text-gray-600 leading-relaxed">Full Truck Load services across Europe. We operate a modern fleet of Euro 6 standard trucks, ensuring rapid and eco-friendly delivery.</p>
+                    <h3 class="text-xl font-bold mb-3 text-gray-900" data-en="Road Transport (FTL)" data-bg="Автомобилен транспорт (FTL)">Road Transport (FTL)</h3>
+                    <p class="text-gray-600 leading-relaxed" data-en="Full Truck Load services across Europe. We operate a modern fleet of Euro 6 standard trucks, ensuring rapid and eco-friendly delivery." data-bg="Услуги за пълно натоварване (FTL) в цяла Европа. Разполагаме с модерен автопарк камиони по стандарт Euro 6, осигуряващи бърза и екологична доставка.">Full Truck Load services across Europe. We operate a modern fleet of Euro 6 standard trucks, ensuring rapid and eco-friendly delivery.</p>
                 </div>
                 <div class="bg-white p-8 rounded-lg shadow-lg hover:-translate-y-2 transition duration-300">
                     <div class="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center text-brand-purple mb-6">
                         <i class="fas fa-boxes text-2xl"></i>
                     </div>
-                    <h3 class="text-xl font-bold mb-3 text-gray-900">Groupage & LTL</h3>
-                    <p class="text-gray-600 leading-relaxed">Cost-effective groupage lines connecting Bulgaria with Italy, Germany, the UK, and Scandinavia. Regular weekly departures.</p>
+                    <h3 class="text-xl font-bold mb-3 text-gray-900" data-en="Groupage &amp; LTL" data-bg="Групаж и LTL">Groupage & LTL</h3>
+                    <p class="text-gray-600 leading-relaxed" data-en="Cost-effective groupage lines connecting Bulgaria with Italy, Germany, the UK, and Scandinavia. Regular weekly departures." data-bg="Изгодни групажни линии, свързващи България с Италия, Германия, Великобритания и Скандинавия. Редовни седмични тръгвания.">Cost-effective groupage lines connecting Bulgaria with Italy, Germany, the UK, and Scandinavia. Regular weekly departures.</p>
                 </div>
                 <div class="bg-white p-8 rounded-lg shadow-lg hover:-translate-y-2 transition duration-300">
                     <div class="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center text-brand-purple mb-6">
                         <i class="fas fa-exclamation-triangle text-2xl"></i>
                     </div>
-                    <h3 class="text-xl font-bold mb-3 text-gray-900">ADR / Dangerous Goods</h3>
-                    <p class="text-gray-600 leading-relaxed">Fully licensed and equipped vehicles for the safe transportation of hazardous materials, handled by specially trained and certified drivers.</p>
+                    <h3 class="text-xl font-bold mb-3 text-gray-900" data-en="ADR / Dangerous Goods" data-bg="ADR / Опасни товари">ADR / Dangerous Goods</h3>
+                    <p class="text-gray-600 leading-relaxed" data-en="Fully licensed and equipped vehicles for the safe transportation of hazardous materials, handled by specially trained and certified drivers." data-bg="Напълно лицензирани и оборудвани превозни средства за безопасен превоз на опасни материали, обслужвани от специално обучени и сертифицирани шофьори.">Fully licensed and equipped vehicles for the safe transportation of hazardous materials, handled by specially trained and certified drivers.</p>
                 </div>
                 <div class="bg-white p-8 rounded-lg shadow-lg hover:-translate-y-2 transition duration-300">
                     <div class="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center text-brand-purple mb-6">
                         <i class="fas fa-warehouse text-2xl"></i>
                     </div>
-                    <h3 class="text-xl font-bold mb-3 text-gray-900">Warehousing & Logistics</h3>
-                    <p class="text-gray-600 leading-relaxed">Secure, strategically located warehousing facilities. Offering cross-docking, palletization, and comprehensive inventory management.</p>
+                    <h3 class="text-xl font-bold mb-3 text-gray-900" data-en="Warehousing &amp; Logistics" data-bg="Складиране и логистика">Warehousing & Logistics</h3>
+                    <p class="text-gray-600 leading-relaxed" data-en="Secure, strategically located warehousing facilities. Offering cross-docking, palletization, and comprehensive inventory management." data-bg="Сигурни и стратегически разположени складови бази. Предлагаме крос-докинг, палетизация и цялостно управление на складовите наличности.">Secure, strategically located warehousing facilities. Offering cross-docking, palletization, and comprehensive inventory management.</p>
                 </div>
                 <div class="bg-white p-8 rounded-lg shadow-lg hover:-translate-y-2 transition duration-300">
                     <div class="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center text-brand-purple mb-6">
                         <i class="fas fa-ship text-2xl"></i>
                     </div>
-                    <h3 class="text-xl font-bold mb-3 text-gray-900">Multimodal Forwarding</h3>
-                    <p class="text-gray-600 leading-relaxed">Integration of road, sea, and rail transport to optimize your supply chain costs, providing flexible and scalable freight solutions.</p>
+                    <h3 class="text-xl font-bold mb-3 text-gray-900" data-en="Multimodal Forwarding" data-bg="Мултимодална спедиция">Multimodal Forwarding</h3>
+                    <p class="text-gray-600 leading-relaxed" data-en="Integration of road, sea, and rail transport to optimize your supply chain costs, providing flexible and scalable freight solutions." data-bg="Интеграция на автомобилен, морски и железопътен транспорт за оптимизиране на разходите по веригата на доставки, осигурявайки гъвкави и мащабируеми решения.">Integration of road, sea, and rail transport to optimize your supply chain costs, providing flexible and scalable freight solutions.</p>
                 </div>
                 <div class="bg-white p-8 rounded-lg shadow-lg hover:-translate-y-2 transition duration-300">
                     <div class="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center text-brand-purple mb-6">
                         <i class="fas fa-clipboard-check text-2xl"></i>
                     </div>
-                    <h3 class="text-xl font-bold mb-3 text-gray-900">Customs Clearance</h3>
-                    <p class="text-gray-600 leading-relaxed">Comprehensive customs agency services, INTRASTAT processing, and documentation assistance for seamless import/export operations.</p>
+                    <h3 class="text-xl font-bold mb-3 text-gray-900" data-en="Customs Clearance" data-bg="Митническо оформяне">Customs Clearance</h3>
+                    <p class="text-gray-600 leading-relaxed" data-en="Comprehensive customs agency services, INTRASTAT processing, and documentation assistance for seamless import/export operations." data-bg="Цялостни митнически агентски услуги, обработка на ИНТРАСТАТ и съдействие с документация за безпроблемни операции по внос и износ.">Comprehensive customs agency services, INTRASTAT processing, and documentation assistance for seamless import/export operations.</p>
                 </div>
             </div>
         </div>
@@ -190,9 +196,9 @@
 
     <section id="partners" class="py-16 bg-brand-purple border-t-4 border-brand-gold">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-8 text-center">
-            <h3 class="text-lg font-bold uppercase tracking-widest text-purple-200">Trusted Logistics Partner For</h3>
+            <h3 class="text-lg font-bold uppercase tracking-widest text-purple-200" data-en="Trusted Logistics Partner For" data-bg="Доверен логистичен партньор на">Trusted Logistics Partner For</h3>
         </div>
-        
+
         <div class="marquee-container w-full">
             <div class="marquee-content">
                 <span>Lidl</span>
@@ -201,7 +207,7 @@
                 <span>METRO</span>
                 <span>T-Market</span>
                 <span>Fantastico</span>
-                
+
                 <span>Lidl</span>
                 <span>Kaufland</span>
                 <span>BILLA</span>
@@ -215,41 +221,41 @@
     <section id="contact" class="py-20 bg-white">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div class="text-center mb-16">
-                <h2 class="text-3xl font-bold text-brand-purple mb-4">Contact Us</h2>
+                <h2 class="text-3xl font-bold text-brand-purple mb-4" data-en="Contact Us" data-bg="Свържете се с нас">Contact Us</h2>
                 <div class="w-20 h-1 bg-brand-gold mx-auto mb-6"></div>
-                <p class="text-gray-600 max-w-2xl mx-auto text-lg">Ready to optimize your supply chain? Get in touch with our dispatch team today.</p>
+                <p class="text-gray-600 max-w-2xl mx-auto text-lg" data-en="Ready to optimize your supply chain? Get in touch with our dispatch team today." data-bg="Готови ли сте да оптимизирате веригата си на доставки? Свържете се с нашия диспечерски екип днес.">Ready to optimize your supply chain? Get in touch with our dispatch team today.</p>
             </div>
-            
+
             <div class="grid grid-cols-1 md:grid-cols-2 gap-12">
                 <div class="bg-brand-gray p-8 rounded-lg shadow-sm">
-                    <h3 class="text-2xl font-bold text-gray-900 mb-6">Headquarters</h3>
+                    <h3 class="text-2xl font-bold text-gray-900 mb-6" data-en="Headquarters" data-bg="Централен офис">Headquarters</h3>
                     <div class="space-y-6">
                         <div class="flex items-start">
                             <i class="fas fa-map-marker-alt text-brand-gold mt-1 mr-4 text-xl"></i>
                             <div>
-                                <h4 class="font-bold text-gray-900">Address</h4>
-                                <p class="text-gray-600">28 Targovska str.<br>5500 Lovech,<br>Bulgaria</p>
+                                <h4 class="font-bold text-gray-900" data-en="Address" data-bg="Адрес">Address</h4>
+                                <p class="text-gray-600" data-en="28 Targovska str.<br>5500 Lovech,<br>Bulgaria" data-bg="ул. Търговска 28<br>5500 Ловеч,<br>България">28 Targovska str.<br>5500 Lovech,<br>Bulgaria</p>
                             </div>
                         </div>
                         <div class="flex items-start">
                             <i class="fas fa-phone-alt text-brand-gold mt-1 mr-4 text-xl"></i>
                             <div>
-                                <h4 class="font-bold text-gray-900">Phone & Dispatch</h4>
+                                <h4 class="font-bold text-gray-900" data-en="Phone &amp; Dispatch" data-bg="Телефон и диспечер">Phone & Dispatch</h4>
                                 <p class="text-gray-600">+359 88 714 5923</p>
                             </div>
                         </div>
                         <div class="flex items-start">
                             <i class="fas fa-envelope text-brand-gold mt-1 mr-4 text-xl"></i>
                             <div>
-                                <h4 class="font-bold text-gray-900">Email</h4>
+                                <h4 class="font-bold text-gray-900" data-en="Email" data-bg="Имейл">Email</h4>
                                 <p class="text-gray-600">sales@sptransportltd.com</p>
                             </div>
                         </div>
                         <div class="flex items-start">
                             <i class="fas fa-user-tie text-brand-gold mt-1 mr-4 text-xl"></i>
                             <div>
-                                <h4 class="font-bold text-gray-900">Team</h4>
-                                <p class="text-gray-600">Tsvetoslav Pachevski - CEO</p>
+                                <h4 class="font-bold text-gray-900" data-en="Team" data-bg="Екип">Team</h4>
+                                <p class="text-gray-600" data-en="Tsvetoslav Pachevski - CEO" data-bg="Цветослав Пачевски - Управител">Tsvetoslav Pachevski - CEO</p>
                             </div>
                         </div>
                     </div>
@@ -259,23 +265,23 @@
                     <form action="mailto:sales@sptransportltd.com" method="POST" enctype="text/plain" class="space-y-6">
                         <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
                             <div>
-                                <label class="block text-sm font-medium text-gray-700">First name</label>
-                                <input type="text" name="First_Name" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-purple focus:ring-brand-purple px-4 py-3 border" placeholder="Ivan" required>
+                                <label class="block text-sm font-medium text-gray-700" data-en="First name" data-bg="Име">First name</label>
+                                <input type="text" name="First_Name" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-purple focus:ring-brand-purple px-4 py-3 border" placeholder="Ivan" data-en-ph="Ivan" data-bg-ph="Иван" required>
                             </div>
                             <div>
-                                <label class="block text-sm font-medium text-gray-700">Last name</label>
-                                <input type="text" name="Last_Name" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-purple focus:ring-brand-purple px-4 py-3 border" placeholder="Ivanov">
+                                <label class="block text-sm font-medium text-gray-700" data-en="Last name" data-bg="Фамилия">Last name</label>
+                                <input type="text" name="Last_Name" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-purple focus:ring-brand-purple px-4 py-3 border" placeholder="Ivanov" data-en-ph="Ivanov" data-bg-ph="Иванов">
                             </div>
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-700">Email</label>
-                            <input type="email" name="Email" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-purple focus:ring-brand-purple px-4 py-3 border" placeholder="ivan@company.com" required>
+                            <label class="block text-sm font-medium text-gray-700" data-en="Email" data-bg="Имейл">Email</label>
+                            <input type="email" name="Email" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-purple focus:ring-brand-purple px-4 py-3 border" placeholder="ivan@company.com" data-en-ph="ivan@company.com" data-bg-ph="ivan@company.com" required>
                         </div>
                         <div>
-                            <label class="block text-sm font-medium text-gray-700">Message / Route Details</label>
-                            <textarea name="Message" rows="4" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-purple focus:ring-brand-purple px-4 py-3 border" placeholder="Tell us about your cargo (weight, volume, pickup and delivery locations)..." required></textarea>
+                            <label class="block text-sm font-medium text-gray-700" data-en="Message / Route Details" data-bg="Съобщение / Детайли за маршрута">Message / Route Details</label>
+                            <textarea name="Message" rows="4" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-purple focus:ring-brand-purple px-4 py-3 border" placeholder="Tell us about your cargo (weight, volume, pickup and delivery locations)..." data-en-ph="Tell us about your cargo (weight, volume, pickup and delivery locations)..." data-bg-ph="Разкажете ни за вашия товар (тегло, обем, места за натоварване и доставка)..." required></textarea>
                         </div>
-                        <button type="submit" class="w-full bg-brand-purple text-white font-bold py-3 px-4 rounded-md hover:bg-purple-800 transition shadow-md">
+                        <button type="submit" class="w-full bg-brand-purple text-white font-bold py-3 px-4 rounded-md hover:bg-purple-800 transition shadow-md" data-en="Send Inquiry" data-bg="Изпратете запитване">
                             Send Inquiry
                         </button>
                     </form>
@@ -290,13 +296,13 @@
                 <img src="3.jpg" alt="Aerial view of trucks at logistics hub" class="w-full h-full object-cover">
             </div>
             <div class="h-96 md:h-[500px] w-full">
-                <iframe 
-                    src="https://maps.google.com/maps?q=28%20Targovska%20str.,%205500%20Lovech,%20Bulgaria&t=&z=16&ie=UTF8&iwloc=&output=embed" 
-                    width="100%" 
-                    height="100%" 
-                    style="border:0;" 
-                    allowfullscreen="" 
-                    loading="lazy" 
+                <iframe
+                    src="https://maps.google.com/maps?q=28%20Targovska%20str.,%205500%20Lovech,%20Bulgaria&t=&z=16&ie=UTF8&iwloc=&output=embed"
+                    width="100%"
+                    height="100%"
+                    style="border:0;"
+                    allowfullscreen=""
+                    loading="lazy"
                     referrerpolicy="no-referrer-when-downgrade">
                 </iframe>
             </div>
@@ -310,29 +316,29 @@
                     <a href="#" class="text-2xl font-bold text-brand-purple tracking-tighter mb-4 inline-block">
                         SP<span class="text-brand-gold">TRANSPORT</span>
                     </a>
-                    <p class="text-sm mt-4 pr-12 leading-relaxed">
+                    <p class="text-sm mt-4 pr-12 leading-relaxed" data-en="Your trusted logistics partner in Bulgaria. Delivering excellence across the supply chain with modern vehicles, experienced drivers, and an unwavering commitment to quality." data-bg="Вашият доверен логистичен партньор в България. Доставяме съвършенство по веригата на доставки с модерни превозни средства, опитни шофьори и неотклонна отдаденост към качеството.">
                         Your trusted logistics partner in Bulgaria. Delivering excellence across the supply chain with modern vehicles, experienced drivers, and an unwavering commitment to quality.
                     </p>
                 </div>
                 <div>
-                    <h4 class="text-white font-bold mb-4 uppercase text-sm tracking-wider">Quick Links</h4>
+                    <h4 class="text-white font-bold mb-4 uppercase text-sm tracking-wider" data-en="Quick Links" data-bg="Бързи връзки">Quick Links</h4>
                     <ul class="space-y-2 text-sm">
-                        <li><a href="#about" class="hover:text-white transition">About the Company</a></li>
-                        <li><a href="#services" class="hover:text-white transition">Transport Services</a></li>
-                        <li><a href="#partners" class="hover:text-white transition">Our Partners</a></li>
+                        <li><a href="#about" class="hover:text-white transition" data-en="About the Company" data-bg="За компанията">About the Company</a></li>
+                        <li><a href="#services" class="hover:text-white transition" data-en="Transport Services" data-bg="Транспортни услуги">Transport Services</a></li>
+                        <li><a href="#partners" class="hover:text-white transition" data-en="Our Partners" data-bg="Нашите партньори">Our Partners</a></li>
                     </ul>
                 </div>
                 <div>
-                    <h4 class="text-white font-bold mb-4 uppercase text-sm tracking-wider">Legal</h4>
+                    <h4 class="text-white font-bold mb-4 uppercase text-sm tracking-wider" data-en="Legal" data-bg="Правна информация">Legal</h4>
                     <ul class="space-y-2 text-sm">
-                        <li><a href="#" class="hover:text-white transition">General Terms</a></li>
-                        <li><a href="#" class="hover:text-white transition">Privacy Policy</a></li>
-                        <li><a href="#" class="hover:text-white transition">CMR Convention</a></li>
+                        <li><a href="#" class="hover:text-white transition" data-en="General Terms" data-bg="Общи условия">General Terms</a></li>
+                        <li><a href="#" class="hover:text-white transition" data-en="Privacy Policy" data-bg="Политика за поверителност">Privacy Policy</a></li>
+                        <li><a href="#" class="hover:text-white transition" data-en="CMR Convention" data-bg="CMR Конвенция">CMR Convention</a></li>
                     </ul>
                 </div>
             </div>
             <div class="border-t border-gray-800 mt-12 pt-8 flex flex-col md:flex-row justify-between items-center">
-                <p class="text-sm">© 2026 SP Transport Ltd. All rights reserved. Bulgaria.</p>
+                <p class="text-sm" data-en="© 2026 SP Transport Ltd. All rights reserved. Bulgaria." data-bg="© 2026 SP Transport Ltd. Всички права запазени. България.">© 2026 SP Transport Ltd. All rights reserved. Bulgaria.</p>
                 <div class="flex space-x-6 mt-4 md:mt-0">
                     <a href="#" class="text-gray-400 hover:text-white"><i class="fab fa-linkedin text-xl"></i></a>
                     <a href="#" class="text-gray-400 hover:text-white"><i class="fab fa-facebook text-xl"></i></a>
@@ -342,6 +348,7 @@
     </footer>
 
     <script>
+        // Mobile navigation toggle
         (function () {
             const button = document.getElementById('mobile-menu-button');
             const menu = document.getElementById('mobile-menu');
@@ -370,6 +377,60 @@
             menu.querySelectorAll('a').forEach(function (link) {
                 link.addEventListener('click', closeMenu);
             });
+        })();
+
+        // Language switching (EN / BG)
+        (function () {
+            const STORAGE_KEY = 'sp-lang';
+            const meta = {
+                en: {
+                    title: 'SP Transport | International Freight & Logistics Bulgaria',
+                    desc: 'SP Transport provides reliable international road transport, forwarding, and logistics solutions from our headquarters in Lovech, Bulgaria.'
+                },
+                bg: {
+                    title: 'SP Transport | Международен транспорт и логистика, България',
+                    desc: 'SP Transport предлага надежден международен автомобилен транспорт, спедиция и логистични решения със седалище в Ловеч, България.'
+                }
+            };
+
+            const label = document.getElementById('lang-toggle-label');
+            const labelMobile = document.getElementById('lang-toggle-mobile-label');
+
+            function apply(lang) {
+                document.documentElement.lang = lang;
+
+                document.querySelectorAll('[data-' + lang + ']').forEach(function (el) {
+                    el.innerHTML = el.getAttribute('data-' + lang);
+                });
+                document.querySelectorAll('[data-' + lang + '-ph]').forEach(function (el) {
+                    el.setAttribute('placeholder', el.getAttribute('data-' + lang + '-ph'));
+                });
+
+                document.title = meta[lang].title;
+                const desc = document.querySelector('meta[name="description"]');
+                if (desc) desc.setAttribute('content', meta[lang].desc);
+
+                // The button shows the language you can switch TO
+                const other = lang === 'en' ? 'BG' : 'EN';
+                if (label) label.textContent = other;
+                if (labelMobile) labelMobile.textContent = other;
+
+                try { localStorage.setItem(STORAGE_KEY, lang); } catch (e) {}
+            }
+
+            let saved = null;
+            try { saved = localStorage.getItem(STORAGE_KEY); } catch (e) {}
+            apply(saved === 'bg' ? 'bg' : 'en');
+
+            function switchLang() {
+                const current = document.documentElement.lang === 'bg' ? 'bg' : 'en';
+                apply(current === 'en' ? 'bg' : 'en');
+            }
+
+            const toggle = document.getElementById('lang-toggle');
+            const toggleMobile = document.getElementById('lang-toggle-mobile');
+            if (toggle) toggle.addEventListener('click', switchLang);
+            if (toggleMobile) toggleMobile.addEventListener('click', switchLang);
         })();
     </script>
 

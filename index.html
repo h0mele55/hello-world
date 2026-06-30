@@ -73,10 +73,19 @@
                     <a href="#contact" class="bg-brand-purple text-white px-5 py-2 rounded-md font-semibold hover:bg-purple-800 transition shadow-lg">Request a Quote</a>
                 </div>
                 <div class="md:hidden flex items-center">
-                    <button class="text-gray-600 hover:text-gray-900 focus:outline-none">
+                    <button id="mobile-menu-button" aria-label="Toggle navigation menu" aria-expanded="false" aria-controls="mobile-menu" class="text-gray-600 hover:text-gray-900 focus:outline-none">
                         <i class="fas fa-bars text-2xl"></i>
                     </button>
                 </div>
+            </div>
+        </div>
+
+        <div id="mobile-menu" class="hidden md:hidden bg-white border-t border-gray-100 shadow-md">
+            <div class="px-4 pt-2 pb-4 space-y-1">
+                <a href="#about" class="block px-3 py-2 rounded-md text-gray-600 hover:text-brand-purple hover:bg-brand-gray font-semibold transition">About Us</a>
+                <a href="#services" class="block px-3 py-2 rounded-md text-gray-600 hover:text-brand-purple hover:bg-brand-gray font-semibold transition">Services</a>
+                <a href="#partners" class="block px-3 py-2 rounded-md text-gray-600 hover:text-brand-purple hover:bg-brand-gray font-semibold transition">Partners</a>
+                <a href="#contact" class="block px-3 py-2 rounded-md bg-brand-purple text-white font-semibold hover:bg-purple-800 transition text-center">Request a Quote</a>
             </div>
         </div>
     </nav>
@@ -331,6 +340,38 @@
             </div>
         </div>
     </footer>
+
+    <script>
+        (function () {
+            const button = document.getElementById('mobile-menu-button');
+            const menu = document.getElementById('mobile-menu');
+            const icon = button.querySelector('i');
+
+            function closeMenu() {
+                menu.classList.add('hidden');
+                button.setAttribute('aria-expanded', 'false');
+                icon.classList.remove('fa-times');
+                icon.classList.add('fa-bars');
+            }
+
+            button.addEventListener('click', function () {
+                const isOpen = !menu.classList.contains('hidden');
+                if (isOpen) {
+                    closeMenu();
+                } else {
+                    menu.classList.remove('hidden');
+                    button.setAttribute('aria-expanded', 'true');
+                    icon.classList.remove('fa-bars');
+                    icon.classList.add('fa-times');
+                }
+            });
+
+            // Close the menu after tapping any link inside it
+            menu.querySelectorAll('a').forEach(function (link) {
+                link.addEventListener('click', closeMenu);
+            });
+        })();
+    </script>
 
 </body>
 </html>

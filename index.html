@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SP Transport | International Freight & Logistics Bulgaria</title>
+    <meta name="description" content="SP Transport provides reliable international road transport, forwarding, and logistics solutions from our headquarters in Lovech, Bulgaria.">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700;800&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: { sans: ['Inter', 'sans-serif'] },
+                    colors: {
+                        brand: {
+                            purple: '#5b21b6',     /* Rich Royal Purple */
+                            gold: '#b8860b',       /* Rich Dark Gold */
+                            goldHover: '#966d09',  /* Slightly darker for hover states */
+                            gray: '#f3f4f6',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    
+    <style>
+        .marquee-container {
+            overflow: hidden;
+            white-space: nowrap;
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+        .marquee-content {
+            display: inline-flex;
+            animation: marquee 25s linear infinite;
+        }
+        .marquee-content span {
+            margin: 0 4rem;
+            font-size: 2rem;
+            font-weight: 800;
+            color: rgba(255, 255, 255, 0.9);
+            letter-spacing: -0.025em;
+        }
+        @keyframes marquee {
+            0% { transform: translateX(0); }
+            100% { transform: translateX(-50%); }
+        }
+        /* Hover pause effect for the slider */
+        .marquee-container:hover .marquee-content {
+            animation-play-state: paused;
+        }
+    </style>
+</head>
+<body class="font-sans text-gray-800 antialiased bg-white">
+
+    <nav class="fixed w-full z-50 bg-white shadow-md">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-20 items-center">
+                <div class="flex-shrink-0 flex items-center">
+                    <a href="#" class="text-3xl font-bold text-brand-purple tracking-tighter">
+                        SP<span class="text-brand-gold">TRANSPORT</span>
+                    </a>
+                </div>
+                <div class="hidden md:flex space-x-8 items-center">
+                    <a href="#about" class="text-gray-600 hover:text-brand-purple font-semibold transition">About Us</a>
+                    <a href="#services" class="text-gray-600 hover:text-brand-purple font-semibold transition">Services</a>
+                    <a href="#partners" class="text-gray-600 hover:text-brand-purple font-semibold transition">Partners</a>
+                    <a href="#contact" class="bg-brand-purple text-white px-5 py-2 rounded-md font-semibold hover:bg-purple-800 transition shadow-lg">Request a Quote</a>
+                </div>
+                <div class="md:hidden flex items-center">
+                    <button class="text-gray-600 hover:text-gray-900 focus:outline-none">
+                        <i class="fas fa-bars text-2xl"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <section class="relative bg-black h-screen flex items-center pt-20 overflow-hidden">
+        <div class="absolute inset-0">
+            <img src="1.jpg" alt="Aerial view of logistics and warehouse" class="w-full h-full object-cover opacity-50 blur-sm transform scale-105">
+        </div>
+        <div class="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center md:text-left">
+            <h1 class="text-4xl md:text-6xl font-bold text-white leading-tight mb-6 shadow-sm drop-shadow-lg">
+                Your Logistics Partner <br><span class="text-brand-gold">in Bulgaria & Europe</span>
+            </h1>
+            <p class="text-xl text-gray-200 mb-8 max-w-2xl mx-auto md:mx-0 font-medium drop-shadow-md">
+                Fast, secure, and reliable freight forwarding and road transport services. Connecting local businesses to global markets.
+            </p>
+            <div class="flex flex-col sm:flex-row gap-4 justify-center md:justify-start">
+                <a href="#services" class="bg-brand-gold text-white px-8 py-3 rounded-md font-bold text-lg hover:bg-brand-goldHover transition shadow-lg text-center">Explore Services</a>
+                <a href="#contact" class="bg-transparent border-2 border-white text-white px-8 py-3 rounded-md font-bold text-lg hover:bg-white hover:text-gray-900 transition text-center backdrop-blur-sm">Contact Us</a>
+            </div>
+        </div>
+    </section>
+
+    <section id="about" class="py-20 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-12 items-center">
+                <div>
+                    <h2 class="text-3xl font-bold text-brand-purple mb-4">Moving Business Forward</h2>
+                    <div class="w-20 h-1 bg-brand-gold mb-6"></div>
+                    <p class="text-gray-600 mb-4 leading-relaxed">
+                        Headquartered in Lovech, Bulgaria, <strong>SP Transport</strong> has established itself as a premier logistics provider. We specialize in international road transport, groupage shipments, and comprehensive supply chain solutions across the European Union, Scandinavia, and the Balkans.
+                    </p>
+                    <p class="text-gray-600 mb-6 leading-relaxed">
+                        With over a decade of industry expertise, an EU-licensed modern fleet, and a dedicated team of dispatchers, we ensure that your cargo arrives safely, on time, and on budget.
+                    </p>
+                    <ul class="space-y-3 text-gray-700 font-semibold">
+                        <li><i class="fas fa-check-circle text-brand-gold mr-2"></i> ISO 9001 Certified Quality Standards</li>
+                        <li><i class="fas fa-check-circle text-brand-gold mr-2"></i> 24/7 Satellite Tracking & Dispatch</li>
+                        <li><i class="fas fa-check-circle text-brand-gold mr-2"></i> Multi-lingual Support Team</li>
+                    </ul>
+                </div>
+                <div class="relative h-96 rounded-lg overflow-hidden shadow-2xl">
+                    <img src="2.jpg" alt="Transport truck in motion" class="w-full h-full object-cover">
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="services" class="py-20 bg-brand-gray">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-16">
+                <h2 class="text-3xl font-bold text-brand-purple mb-4">Our Services</h2>
+                <div class="w-20 h-1 bg-brand-gold mx-auto mb-6"></div>
+                <p class="text-gray-600 max-w-2xl mx-auto text-lg">We provide tailored transportation and warehousing solutions to meet the specific needs of your industry.</p>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-8">
+                <div class="bg-white p-8 rounded-lg shadow-lg hover:-translate-y-2 transition duration-300">
+                    <div class="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center text-brand-purple mb-6">
+                        <i class="fas fa-truck text-2xl"></i>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3 text-gray-900">Road Transport (FTL)</h3>
+                    <p class="text-gray-600 leading-relaxed">Full Truck Load services across Europe. We operate a modern fleet of Euro 6 standard trucks, ensuring rapid and eco-friendly delivery.</p>
+                </div>
+                <div class="bg-white p-8 rounded-lg shadow-lg hover:-translate-y-2 transition duration-300">
+                    <div class="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center text-brand-purple mb-6">
+                        <i class="fas fa-boxes text-2xl"></i>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3 text-gray-900">Groupage & LTL</h3>
+                    <p class="text-gray-600 leading-relaxed">Cost-effective groupage lines connecting Bulgaria with Italy, Germany, the UK, and Scandinavia. Regular weekly departures.</p>
+                </div>
+                <div class="bg-white p-8 rounded-lg shadow-lg hover:-translate-y-2 transition duration-300">
+                    <div class="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center text-brand-purple mb-6">
+                        <i class="fas fa-exclamation-triangle text-2xl"></i>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3 text-gray-900">ADR / Dangerous Goods</h3>
+                    <p class="text-gray-600 leading-relaxed">Fully licensed and equipped vehicles for the safe transportation of hazardous materials, handled by specially trained and certified drivers.</p>
+                </div>
+                <div class="bg-white p-8 rounded-lg shadow-lg hover:-translate-y-2 transition duration-300">
+                    <div class="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center text-brand-purple mb-6">
+                        <i class="fas fa-warehouse text-2xl"></i>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3 text-gray-900">Warehousing & Logistics</h3>
+                    <p class="text-gray-600 leading-relaxed">Secure, strategically located warehousing facilities. Offering cross-docking, palletization, and comprehensive inventory management.</p>
+                </div>
+                <div class="bg-white p-8 rounded-lg shadow-lg hover:-translate-y-2 transition duration-300">
+                    <div class="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center text-brand-purple mb-6">
+                        <i class="fas fa-ship text-2xl"></i>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3 text-gray-900">Multimodal Forwarding</h3>
+                    <p class="text-gray-600 leading-relaxed">Integration of road, sea, and rail transport to optimize your supply chain costs, providing flexible and scalable freight solutions.</p>
+                </div>
+                <div class="bg-white p-8 rounded-lg shadow-lg hover:-translate-y-2 transition duration-300">
+                    <div class="w-16 h-16 bg-purple-100 rounded-full flex items-center justify-center text-brand-purple mb-6">
+                        <i class="fas fa-clipboard-check text-2xl"></i>
+                    </div>
+                    <h3 class="text-xl font-bold mb-3 text-gray-900">Customs Clearance</h3>
+                    <p class="text-gray-600 leading-relaxed">Comprehensive customs agency services, INTRASTAT processing, and documentation assistance for seamless import/export operations.</p>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section id="partners" class="py-16 bg-brand-purple border-t-4 border-brand-gold">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-8 text-center">
+            <h3 class="text-lg font-bold uppercase tracking-widest text-purple-200">Trusted Logistics Partner For</h3>
+        </div>
+        
+        <div class="marquee-container w-full">
+            <div class="marquee-content">
+                <span>Lidl</span>
+                <span>Kaufland</span>
+                <span>BILLA</span>
+                <span>METRO</span>
+                <span>T-Market</span>
+                <span>Fantastico</span>
+                
+                <span>Lidl</span>
+                <span>Kaufland</span>
+                <span>BILLA</span>
+                <span>METRO</span>
+                <span>T-Market</span>
+                <span>Fantastico</span>
+            </div>
+        </div>
+    </section>
+
+    <section id="contact" class="py-20 bg-white">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="text-center mb-16">
+                <h2 class="text-3xl font-bold text-brand-purple mb-4">Contact Us</h2>
+                <div class="w-20 h-1 bg-brand-gold mx-auto mb-6"></div>
+                <p class="text-gray-600 max-w-2xl mx-auto text-lg">Ready to optimize your supply chain? Get in touch with our dispatch team today.</p>
+            </div>
+            
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-12">
+                <div class="bg-brand-gray p-8 rounded-lg shadow-sm">
+                    <h3 class="text-2xl font-bold text-gray-900 mb-6">Headquarters</h3>
+                    <div class="space-y-6">
+                        <div class="flex items-start">
+                            <i class="fas fa-map-marker-alt text-brand-gold mt-1 mr-4 text-xl"></i>
+                            <div>
+                                <h4 class="font-bold text-gray-900">Address</h4>
+                                <p class="text-gray-600">28 Targovska str.<br>5500 Lovech,<br>Bulgaria</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start">
+                            <i class="fas fa-phone-alt text-brand-gold mt-1 mr-4 text-xl"></i>
+                            <div>
+                                <h4 class="font-bold text-gray-900">Phone & Dispatch</h4>
+                                <p class="text-gray-600">+359 88 714 5923</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start">
+                            <i class="fas fa-envelope text-brand-gold mt-1 mr-4 text-xl"></i>
+                            <div>
+                                <h4 class="font-bold text-gray-900">Email</h4>
+                                <p class="text-gray-600">sales@sptransportltd.com</p>
+                            </div>
+                        </div>
+                        <div class="flex items-start">
+                            <i class="fas fa-user-tie text-brand-gold mt-1 mr-4 text-xl"></i>
+                            <div>
+                                <h4 class="font-bold text-gray-900">Team</h4>
+                                <p class="text-gray-600">Tsvetoslav Pachevski - CEO</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <form action="mailto:sales@sptransportltd.com" method="POST" enctype="text/plain" class="space-y-6">
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">First name</label>
+                                <input type="text" name="First_Name" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-purple focus:ring-brand-purple px-4 py-3 border" placeholder="Ivan" required>
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700">Last name</label>
+                                <input type="text" name="Last_Name" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-purple focus:ring-brand-purple px-4 py-3 border" placeholder="Ivanov">
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">Email</label>
+                            <input type="email" name="Email" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-purple focus:ring-brand-purple px-4 py-3 border" placeholder="ivan@company.com" required>
+                        </div>
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700">Message / Route Details</label>
+                            <textarea name="Message" rows="4" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-brand-purple focus:ring-brand-purple px-4 py-3 border" placeholder="Tell us about your cargo (weight, volume, pickup and delivery locations)..." required></textarea>
+                        </div>
+                        <button type="submit" class="w-full bg-brand-purple text-white font-bold py-3 px-4 rounded-md hover:bg-purple-800 transition shadow-md">
+                            Send Inquiry
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <section class="w-full bg-gray-100 border-t border-gray-200">
+        <div class="grid grid-cols-1 md:grid-cols-2">
+            <div class="h-96 md:h-[500px]">
+                <img src="3.jpg" alt="Aerial view of trucks at logistics hub" class="w-full h-full object-cover">
+            </div>
+            <div class="h-96 md:h-[500px] w-full">
+                <iframe 
+                    src="https://maps.google.com/maps?q=28%20Targovska%20str.,%205500%20Lovech,%20Bulgaria&t=&z=16&ie=UTF8&iwloc=&output=embed" 
+                    width="100%" 
+                    height="100%" 
+                    style="border:0;" 
+                    allowfullscreen="" 
+                    loading="lazy" 
+                    referrerpolicy="no-referrer-when-downgrade">
+                </iframe>
+            </div>
+        </div>
+    </section>
+
+    <footer class="bg-gray-900 text-gray-300 py-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-8">
+                <div class="col-span-1 md:col-span-2">
+                    <a href="#" class="text-2xl font-bold text-brand-purple tracking-tighter mb-4 inline-block">
+                        SP<span class="text-brand-gold">TRANSPORT</span>
+                    </a>
+                    <p class="text-sm mt-4 pr-12 leading-relaxed">
+                        Your trusted logistics partner in Bulgaria. Delivering excellence across the supply chain with modern vehicles, experienced drivers, and an unwavering commitment to quality.
+                    </p>
+                </div>
+                <div>
+                    <h4 class="text-white font-bold mb-4 uppercase text-sm tracking-wider">Quick Links</h4>
+                    <ul class="space-y-2 text-sm">
+                        <li><a href="#about" class="hover:text-white transition">About the Company</a></li>
+                        <li><a href="#services" class="hover:text-white transition">Transport Services</a></li>
+                        <li><a href="#partners" class="hover:text-white transition">Our Partners</a></li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 class="text-white font-bold mb-4 uppercase text-sm tracking-wider">Legal</h4>
+                    <ul class="space-y-2 text-sm">
+                        <li><a href="#" class="hover:text-white transition">General Terms</a></li>
+                        <li><a href="#" class="hover:text-white transition">Privacy Policy</a></li>
+                        <li><a href="#" class="hover:text-white transition">CMR Convention</a></li>
+                    </ul>
+                </div>
+            </div>
+            <div class="border-t border-gray-800 mt-12 pt-8 flex flex-col md:flex-row justify-between items-center">
+                <p class="text-sm">© 2026 SP Transport Ltd. All rights reserved. Bulgaria.</p>
+                <div class="flex space-x-6 mt-4 md:mt-0">
+                    <a href="#" class="text-gray-400 hover:text-white"><i class="fab fa-linkedin text-xl"></i></a>
+                    <a href="#" class="text-gray-400 hover:text-white"><i class="fab fa-facebook text-xl"></i></a>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+</body>
+</html>

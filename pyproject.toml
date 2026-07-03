@@ -1,0 +1,9 @@
+[project]
+name = "insbot"
+version = "0.1.0"
+description = "Bulgarian motor-insurance assistant bot (MTPL/Casco quotes + expiry reminders)"
+requires-python = ">=3.11"
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]

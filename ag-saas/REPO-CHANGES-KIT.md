@@ -5,6 +5,14 @@ Decisions locked with the user: brand **Agrent (agrent.bg)**, logo **prompt-only
 **metallic gold #D4AF37** (replaces METRO yellow #FFCD11); Exchange/Offers/insurer/climate =
 **lead-gen placeholders**; journal = **official Bulgarian dnevnik columns**.
 
+> **Rescanned against current main** of `inflect-compliance/agri-saas` (the same repo as
+> `h0mele55/agri-saas` — transferred into the org; old URL redirects), HEAD `80c8e3d`, **0 open
+> ag PRs**. Drift folded in below. **Global i18n caveat:** the ag UI is now `next-intl` and test
+> `#179` fails any raw literal — every prompt that adds/edits visible text must use message keys
+> and add both `en.json` + `bg.json` entries. Key drift: #11 (no category enum — commodity+region),
+> #3 (wizard is 6-step), #2 (4 tabs, default map), #16 (appName now i18n), #18 (light-theme brand
+> override to PwC orange must also change).
+
 ⚠️ Confirm two readings before running: **#2** (add per-culture filter + drop the overview
 Farm-Records block + sort parcels by size — I did NOT delete the dnevnik PDF register) and **#3**
 ("crop selectable" read as **Fertilizer XOR Product** on the spray screen).
@@ -48,8 +56,9 @@ standalone apply-rate calculator. Inline the sections on one screen: an EXCLUSIV
 Fertilizer XOR Product (never both) — then dose + unit (/units?measure=RATE), water carrier,
 operator (UserCombobox), application technique (БАБХ), note; running total via the shared
 rate-calc.ts totals panel (totalLabel/haToDca), not a bespoke calculator. Retire the 7-step
-SprayJobWizard (fold fertilizer/water/technique + 'repeat last job' + offline submit in; keep
-StepWizard only if a phone truly needs paging). Enforce fertilizer-XOR-product in
+SprayJobWizard (now 6 steps: parcels/fertilizer/fertilizer-rate/product/rate/confirm — fold
+fertilizer/water/technique + 'repeat last job' + offline submit in; keep StepWizard only if a
+phone truly needs paging). Enforce fertilizer-XOR-product in
 CreateFieldOperationSchema + createFieldOperation. Keep POST /locations/{id}/operations + OperationParcel.
 Done: one click -> one screen; no QR, no separate calculator/wizard; fertilizer/product exclusive
 (schema-enforced); totals from inputs; tsc 0. Commit feat/spray-single-screen, push, MEMORY EXPORT.
@@ -106,15 +115,19 @@ Done: dnevnik columns render; filters work; screen == PDF; tsc 0. Commit feat/jo
 push, MEMORY EXPORT.
 ```
 
-### #11 — Exchange: buy categories + map filter · extend existing
+### #11 — Exchange: product-kind + map filter · extend existing (drift-adjusted)
 ```
-Goal: buy culture/fertilizer/seeds/products in the existing Exchange, filter the map by category.
-Build: add categories CULTURE, FERTILIZER, SEEDS, PRODUCT to the listing category enum +
-CreateOfferModal + exchange/filter-defs.ts + listings API. Add a category filter to ExchangeMap
-(reuse exchange-map-utils.ts) and the list. "Buy" = lead-gen: reuse InquiryModal (no cart/payment).
-Category-color the markers.
-Done: four categories browsable; map filters by category; inquiry per listing; tsc 0.
-Commit feat/exchange-categories, push, MEMORY EXPORT.
+Goal: buy/sell culture, fertilizer, seeds, products in the existing Exchange, filter the map by kind.
+NOTE (rescan): ExchangeListing has NO category enum — it's `side` (BUY/SELL) + `commodity`
+(free-text String) + regionCode/regionName (prisma/schema/exchange.prisma); filters =
+side + commodity + region (map filter is region-based).
+Build: add a typed `kind` enum to ExchangeListing — CULTURE(crop), FERTILIZER, SEEDS, PRODUCT —
+migration + backfill from commodity; wire into CreateOfferModal, exchange/filter-defs.ts (a kind
+filter), the listings API, and a kind filter on ExchangeMap (reuse exchange-map-utils.ts; color
+markers by kind) + the list. "Buy" = lead-gen: reuse ExchangeInquiry/InquiryModal (no payment).
+All new UI text via next-intl (en.json + bg.json) — no raw literals (#179).
+Done: listings by kind; map + list filter by kind (alongside region); inquiry per listing; tsc 0;
+i18n + rls guards green. Commit feat/exchange-kinds, push, MEMORY EXPORT.
 ```
 
 ### #12 — Offers page (company promotions feed) · net-new
@@ -179,7 +192,8 @@ Build: create an Agrent logo (SVG mark + wordmark) as a React component / public
 golden brand tokens (--brand-*), working light + dark with animate-nav-brand-pulse. Use it in
 NavBarBrand (nav-bar.tsx). Fix the stale legacy 'IC' mark in the sidebar header (SidebarNav.tsx
 ~L262) and the org initial (OrgSidebarNav.tsx, org-switcher.tsx). Keep link->dashboard, aria-label
-"Agrent — go to dashboard", data-testid nav-bar-brand.
+"Agrent — go to dashboard", data-testid nav-bar-brand. NOTE (rescan): appName is now an i18n
+message (tc('appName')), not a JS constant.
 Done: Agrent logo top-left (+ sidebar/org); no AG/IC initials; gold tokens + dark + reduced-motion;
 tsc 0. Commit feat/agrent-logo, push, MEMORY EXPORT.
 ```
@@ -203,6 +217,9 @@ Build: in src/styles/tokens.css set:
   --brand-subtle:rgba(212,175,55,0.16); --bg-inverted:#D4AF37;
   --ring-default:rgba(212,175,55,0.55); --primary:#D4AF37;
   --chart-series-1-start:#D4AF37; --chart-series-1-end:#B8860B;
+CRITICAL (rescan): tokens.css ALSO has a [data-theme="light"] override setting --brand-default
+to #D04A02 (PwC orange) — re-point the gold tokens in that block too (and any [data-theme="dark"]),
+not just :root, or light mode stays orange.
 Verify --content-inverted (#001830 navy) on gold meets WCAG AA for buttons (keep it). Grep for
 hardcoded #FFCD11/#E6B800/#FFE066 and replace. Do NOT touch the unrelated legacy numeric `brand`
 (indigo #6366f1) scale in tailwind.config.js. Check light + dark + the nav-brand pulse.

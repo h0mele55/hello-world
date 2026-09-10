@@ -6,6 +6,8 @@
 <title>Black Chef — пиле на шиш · Ловеч</title>
 <meta name="description" content="Мобилна кухня за пиле на шиш в центъра на Ловеч. Бавно се върти, бързо се яде.">
 <meta name="theme-color" content="#0D0D0D">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Crect width='48' height='48' fill='%230D0D0D'/%3E%3Crect x='5' y='12' width='38' height='24' fill='none' stroke='%23F0EEE9' stroke-width='3.4'/%3E%3Ccircle cx='13' cy='24' r='3' fill='%23E0762B'/%3E%3Ccircle cx='20.3' cy='24' r='3' fill='%23E0762B'/%3E%3Ccircle cx='27.6' cy='24' r='3' fill='%23E0762B'/%3E%3Ccircle cx='34.9' cy='24' r='3' fill='%23E0762B'/%3E%3C/svg%3E">
+<link rel="apple-touch-icon" href="img/logo.png">
 
 <meta property="og:title" content="Black Chef — пиле на шиш · Ловеч">
 <meta property="og:description" content="Мобилна кухня за пиле на шиш в центъра на Ловеч. Бавно се върти, бързо се яде.">
@@ -300,11 +302,11 @@ p{margin:0}
 }
 .band--dark .ph{border-color:var(--rule-dark); background:var(--ink-2); color:var(--on-dark-mute)}
 .ph--wide{aspect-ratio:16/9}
-/* Declared after .ph — and doubled up on specificity — so the dark logo
-   plate is not overridden by the generic light-band .ph styling. */
-.ph.ph--logo{
-  aspect-ratio:4/5; border:3px solid var(--accent);
-  background:var(--ink); color:var(--on-dark-mute);
+/* The logo artwork already sits on flat ink, so the plate behind it matches
+   and the orange rule reads as the frame it has on the truck itself. */
+.logocard img{
+  width:100%; height:auto;
+  background:var(--ink); border:3px solid var(--accent);
 }
 .pgrid img{width:100%; height:100%; object-fit:cover; aspect-ratio:4/3; border:2px solid var(--rule-light)}
 .pgrid--wide img{aspect-ratio:16/9}
@@ -509,7 +511,11 @@ section[id]{scroll-margin-top:var(--header-h)}
       </div>
 
       <figure class="logocard">
-        <div class="ph ph--logo" data-bg="Лого — Black Chef · сложете logo.png тук" data-en="Logo — Black Chef · drop logo.png here">Лого — Black Chef · сложете logo.png тук</div>
+        <img src="img/logo.png" width="860" height="900" loading="lazy"
+             alt="Black Chef — готвач с цяло печено пиле на поднос"
+             data-attr="alt"
+             data-bg="Black Chef — готвач с цяло печено пиле на поднос"
+             data-en="Black Chef — a chef holding a whole roast chicken on a platter">
       </figure>
     </div>
   </div>
@@ -915,7 +921,8 @@ section[id]{scroll-margin-top:var(--header-h)}
     $$("[data-bg]").forEach(function(el){
       var v = el.getAttribute("data-" + lang);
       if(v === null) return;
-      if(el.hasAttribute("data-html")) el.innerHTML = v;
+      if(el.hasAttribute("data-attr")) el.setAttribute(el.getAttribute("data-attr"), v);
+      else if(el.hasAttribute("data-html")) el.innerHTML = v;
       else el.textContent = v;
     });
     $$("[data-ph-bg]").forEach(function(el){

@@ -61,7 +61,7 @@ a{color:inherit}
 button{font:inherit; color:inherit; background:none; border:none; cursor:pointer}
 
 h1,h2,h3{font-weight:800; line-height:1.04; letter-spacing:-.022em; margin:0}
-h1{font-size:clamp(2.5rem,11.5vw,5rem)}
+h1{font-size:clamp(2.15rem,9.9vw,4.6rem)}
 h2{font-size:clamp(2.05rem,8.6vw,3.5rem)}
 h3{font-size:clamp(1.15rem,4.4vw,1.4rem); letter-spacing:-.01em}
 p{margin:0}
@@ -176,9 +176,19 @@ p{margin:0}
   border-bottom:1px solid var(--rule-dark);
 }
 
-.hero h1{margin-bottom:24px}
-.hero h1 em{font-style:normal; color:var(--accent)}
-.hero__cta{display:flex; flex-wrap:wrap; gap:14px; margin-top:38px}
+.hero h1{margin-bottom:0}
+/* Location strapline above the headline — MUTED grey, not the orange
+   section eyebrow. It reads as an address, not as a section label. */
+.hero__where{
+  font-family:var(--mono); font-size:.72rem; font-weight:400;
+  letter-spacing:.2em; text-transform:uppercase; line-height:2;
+  color:var(--on-dark-mute); margin-bottom:26px; max-width:34ch;
+}
+.hero__rule{border:0; border-top:1px solid var(--on-dark); margin:30px 0 26px; opacity:.9}
+
+/* Stacked and full-width on a phone; side by side once there is room. */
+.hero__cta{display:grid; gap:14px; margin-top:36px}
+@media(min-width:640px){ .hero__cta{grid-auto-flow:column; justify-content:start} }
 
 .btn{
   display:inline-flex; align-items:center; justify-content:center; gap:10px;
@@ -193,8 +203,7 @@ p{margin:0}
 .band--light .btn--ghost:hover{background:var(--ink); color:var(--paper)}
 
 .hero__meta{
-  display:flex; flex-wrap:wrap; gap:10px 26px; margin-top:44px;
-  font-family:var(--mono); font-size:.72rem; letter-spacing:.16em; text-transform:uppercase;
+  margin-top:40px; font-family:var(--mono); font-size:.78rem; line-height:2.1;
   color:var(--on-dark-mute);
 }
 .hero__meta b{color:var(--on-dark); font-weight:500}
@@ -204,6 +213,7 @@ p{margin:0}
 @media(min-width:900px){ .split{grid-template-columns:1.05fr .95fr; align-items:center; gap:70px} }
 
 .truckcard{background:var(--paper); border:3px solid var(--accent); padding:26px}
+.logocard{margin:0}
 .truckcard svg{width:100%; height:auto}
 
 .facts{display:grid; gap:22px; margin-top:34px}
@@ -225,6 +235,31 @@ p{margin:0}
   letter-spacing:.14em; color:var(--accent); padding-top:.35em;
 }
 .step p{color:var(--on-light-soft); margin-top:7px; font-size:.99rem}
+
+/* ═══ RECEIPT CARDS ("Чек") ════════════════════════════════ */
+.cheks{display:grid; gap:26px; margin-top:40px}
+@media(min-width:900px){ .cheks{grid-template-columns:repeat(3,1fr)} }
+
+.chek{
+  position:relative; background:var(--paper); color:var(--on-light);
+  padding:30px 26px 44px;   /* extra bottom padding clears the scallops */
+}
+.chek__n{
+  font-family:var(--mono); font-size:.78rem; font-weight:500;
+  letter-spacing:.2em; text-transform:uppercase; color:var(--accent);
+  padding-bottom:18px; margin-bottom:20px;
+  border-bottom:2px dashed var(--rule-light);   /* the tear line */
+}
+.chek h3{margin-bottom:11px}
+.chek p{color:var(--on-light-soft); font-size:.99rem}
+
+/* Torn-receipt bottom edge: dark semicircles bitten out of the cream card.
+   Drawn in the section's ink colour, so it only works on a dark band. */
+.chek::after{
+  content:""; position:absolute; left:0; right:0; bottom:0; height:15px;
+  background-image:radial-gradient(circle at 9px 100%, var(--ink) 9px, transparent 9.5px);
+  background-size:18px 15px; background-repeat:repeat-x;
+}
 
 /* ═══ MENU ═════════════════════════════════════════════════ */
 .menu{margin-top:40px}
@@ -265,6 +300,12 @@ p{margin:0}
 }
 .band--dark .ph{border-color:var(--rule-dark); background:var(--ink-2); color:var(--on-dark-mute)}
 .ph--wide{aspect-ratio:16/9}
+/* Declared after .ph — and doubled up on specificity — so the dark logo
+   plate is not overridden by the generic light-band .ph styling. */
+.ph.ph--logo{
+  aspect-ratio:4/5; border:3px solid var(--accent);
+  background:var(--ink); color:var(--on-dark-mute);
+}
 .pgrid img{width:100%; height:100%; object-fit:cover; aspect-ratio:4/3; border:2px solid var(--rule-light)}
 .pgrid--wide img{aspect-ratio:16/9}
 
@@ -407,30 +448,38 @@ section[id]{scroll-margin-top:var(--header-h)}
 <!-- ═══ HERO ═════════════════════════════════════════════ -->
 <section class="band band--dark hero">
   <div class="wrap">
-    <div class="eyebrow"><span data-bg="Ловеч център" data-en="Lovech centre">Ловеч център</span></div>
+    <div class="hero__where"
+      data-bg="Черният камион · ул. „Княз Имеретински“ · Ловеч център"
+      data-en="The black truck · Knyaz Imeretinski St. · Lovech centre">Черният камион · ул. „Княз Имеретински“ · Ловеч център</div>
+
     <h1>
       <span data-bg="Бавно се върти." data-en="Slowly turned.">Бавно се върти.</span><br>
-      <em data-bg="Бързо се яде." data-en="Quickly eaten.">Бързо се яде.</em>
+      <span data-bg="Бързо се яде." data-en="Quickly eaten.">Бързо се яде.</span>
     </h1>
-    <p class="lede" data-bg="Мобилна кухня за пиле на шиш в центъра на Ловеч. Сол, чесън и червен пипер — нищо повече. Излиза цяло, в хартия."
-       data-en="A mobile rotisserie kitchen in the centre of Lovech. Salt, garlic and paprika — nothing more. It comes out whole, wrapped in paper.">
-      Мобилна кухня за пиле на шиш в центъра на Ловеч. Сол, чесън и червен пипер — нищо повече. Излиза цяло, в хартия.
+
+    <hr class="hero__rule">
+
+    <p class="lede" style="margin-top:0"
+       data-bg="Цели пилета на шиш, въртящи се на отворен грил в центъра на Ловеч. Грилът тръгва в 9:30 сутринта, за да е готово, когато огладнеете."
+       data-en="Whole chickens on the spit, turning on an open grill in the centre of Lovech. The grill starts at 9:30 in the morning, so it is ready when you get hungry.">
+      Цели пилета на шиш, въртящи се на отворен грил в центъра на Ловеч. Грилът тръгва в 9:30 сутринта, за да е готово, когато огладнеете.
     </p>
+
     <div class="hero__cta">
-      <a class="btn btn--solid" href="#menu" data-bg="Вижте менюто" data-en="See the menu">Вижте менюто</a>
-      <a class="btn btn--ghost" href="tel:+359879279745">087 927 9745</a>
+      <a class="btn btn--solid" href="tel:+359879279745" data-bg="Поръчайте по телефона" data-en="Order by phone">Поръчайте по телефона</a>
+      <a class="btn btn--ghost" href="#menu" data-bg="Вижте менюто" data-en="See the menu">Вижте менюто</a>
     </div>
+
     <div class="hero__meta">
-      <span><b>09:30 – 19:00</b> <span data-bg="ч." data-en="">ч.</span></span>
-      <span data-bg="Веган опции" data-en="Vegan options">Веган опции</span>
-      <span data-bg="Безплатен Wi-Fi" data-en="Free Wi-Fi">Безплатен Wi-Fi</span>
-      <span data-bg="Кучета — добре дошли" data-en="Dogs welcome">Кучета — добре дошли</span>
+      <p><b>5,0 ★</b> <span data-bg="от 2 отзива в Google" data-en="from 2 Google reviews">от 2 отзива в Google</span></p>
+      <p><b>09:30 – 19:00</b> <span data-bg="ч. на място" data-en="on site">ч. на място</span></p>
+      <p><span data-bg="Веган опции · Wi-Fi" data-en="Vegan options · Wi-Fi">Веган опции · Wi-Fi</span></p>
     </div>
   </div>
 </section>
 
 <!-- ═══ КАМИОНЪТ ═════════════════════════════════════════ -->
-<section class="band band--dark" id="truck">
+<section class="band band--light" id="truck" data-band="light">
   <div class="wrap">
     <div class="eyebrow"><span data-bg="Камионът" data-en="The truck">Камионът</span></div>
     <div class="split">
@@ -459,69 +508,46 @@ section[id]{scroll-margin-top:var(--header-h)}
         </div>
       </div>
 
-      <div class="truckcard">
-        <svg viewBox="0 0 420 200" aria-hidden="true">
-          <!-- body -->
-          <rect x="14" y="42" width="250" height="106" fill="#0D0D0D"/>
-          <!-- rotisserie window -->
-          <rect x="38" y="62" width="150" height="42" fill="none" stroke="#F0EEE9" stroke-width="5"/>
-          <line x1="52" y1="83" x2="174" y2="83" stroke="#F0EEE9" stroke-width="2.5"/>
-          <circle cx="63"  cy="83" r="9" fill="#F0EEE9"/>
-          <circle cx="93"  cy="83" r="9" fill="#F0EEE9"/>
-          <circle cx="123" cy="83" r="9" fill="#F0EEE9"/>
-          <circle cx="153" cy="83" r="9" fill="#F0EEE9"/>
-          <!-- side hatch -->
-          <rect x="204" y="62" width="44" height="34" fill="none" stroke="#F0EEE9" stroke-width="5"/>
-          <!-- cab -->
-          <path d="M264 70 h44 l38 44 v34 h-82 z" fill="#0D0D0D"/>
-          <!-- flames -->
-          <path d="M32 148 q22 -34 44 0 q22 -34 44 0 q22 -34 44 0 q22 -34 44 0 v10 H32 z" fill="#E0762B"/>
-          <rect x="32" y="140" width="176" height="18" fill="#E0762B"/>
-          <!-- ground -->
-          <rect x="14" y="158" width="332" height="7" fill="#0D0D0D"/>
-          <!-- wheels -->
-          <circle cx="86"  cy="170" r="20" fill="#0D0D0D"/><circle cx="86"  cy="170" r="7" fill="#F0EEE9"/>
-          <circle cx="292" cy="170" r="20" fill="#0D0D0D"/><circle cx="292" cy="170" r="7" fill="#F0EEE9"/>
-        </svg>
-      </div>
+      <figure class="logocard">
+        <div class="ph ph--logo" data-bg="Лого — Black Chef · сложете logo.png тук" data-en="Logo — Black Chef · drop logo.png here">Лого — Black Chef · сложете logo.png тук</div>
+      </figure>
     </div>
   </div>
 </section>
 
 <!-- ═══ КАК СТАВА ════════════════════════════════════════ -->
-<section class="band band--light" id="how" data-band="light">
+<section class="band band--dark" id="how">
   <div class="wrap">
     <div class="eyebrow"><span data-bg="Как става" data-en="How it works">Как става</span></div>
-    <h2 data-bg="Четири стъпки, две минути" data-en="Four steps, two minutes">Четири стъпки, две минути</h2>
-    <div class="steps">
-      <div class="step">
-        <div class="step__n">01</div>
-        <div>
-          <h3 data-bg="Избирате" data-en="Choose">Избирате</h3>
-          <p data-bg="Цяло пиле, половин, четвъртинка или крилца. Има и веган опции." data-en="A whole chicken, half, a quarter or wings. There are vegan options too.">Цяло пиле, половин, четвъртинка или крилца. Има и веган опции.</p>
-        </div>
-      </div>
-      <div class="step">
-        <div class="step__n">02</div>
-        <div>
-          <h3 data-bg="Обаждате се — по желание" data-en="Call ahead — optional">Обаждате се — по желание</h3>
-          <p data-bg="За цяло пиле в определен час е добре да звъннете предварително, за да е готово, когато дойдете." data-en="For a whole chicken at a set time, call ahead so it is ready when you arrive.">За цяло пиле в определен час е добре да звъннете предварително, за да е готово, когато дойдете.</p>
-        </div>
-      </div>
-      <div class="step">
-        <div class="step__n">03</div>
-        <div>
-          <h3 data-bg="Взимате от прозорчето" data-en="Collect at the window">Взимате от прозорчето</h3>
-          <p data-bg="Без чакане за маса и без резервация. Пилето излиза цяло, увито в хартия." data-en="No table to wait for, no booking. The chicken comes out whole, wrapped in paper.">Без чакане за маса и без резервация. Пилето излиза цяло, увито в хартия.</p>
-        </div>
-      </div>
-      <div class="step">
-        <div class="step__n">04</div>
-        <div>
-          <h3 data-bg="Ядете топло" data-en="Eat it hot">Ядете топло</h3>
-          <p data-bg="На място пред камиона или вкъщи — стига да е скоро." data-en="Right here by the truck, or at home — as long as it is soon.">На място пред камиона или вкъщи — стига да е скоро.</p>
-        </div>
-      </div>
+    <h2 data-bg="Три стъпки, една минута" data-en="Three steps, one minute">Три стъпки, една минута</h2>
+
+    <div class="cheks">
+      <article class="chek">
+        <div class="chek__n"><span data-bg="Чек" data-en="Check">Чек</span> 01</div>
+        <h3 data-bg="Спирате пред прозорчето" data-en="You stop at the window">Спирате пред прозорчето</h3>
+        <p data-bg="Камионът е на ул. „Княз Имеретински“, в центъра на Ловеч. Няма зала, няма чакане за маса — има гише и една крачка от тротоара."
+           data-en="The truck is on Knyaz Imeretinski St., in the centre of Lovech. No dining room, no waiting for a table — a hatch, and one step from the pavement.">
+          Камионът е на ул. „Княз Имеретински“, в центъра на Ловеч. Няма зала, няма чакане за маса — има гише и една крачка от тротоара.
+        </p>
+      </article>
+
+      <article class="chek">
+        <div class="chek__n"><span data-bg="Чек" data-en="Check">Чек</span> 02</div>
+        <h3 data-bg="Пилето вече се върти" data-en="The chicken is already turning">Пилето вече се върти</h3>
+        <p data-bg="Грилът тръгва в 9:30 ч. и не спира. Не пускаме пиле по поръчка — то се върти цял ден, за да е готово точно когато го поискате."
+           data-en="The grill starts at 9:30 and does not stop. We do not put a chicken on to order — it turns all day, so it is ready exactly when you ask for it.">
+          Грилът тръгва в 9:30 ч. и не спира. Не пускаме пиле по поръчка — то се върти цял ден, за да е готово точно когато го поискате.
+        </p>
+      </article>
+
+      <article class="chek">
+        <div class="chek__n"><span data-bg="Чек" data-en="Check">Чек</span> 03</div>
+        <h3 data-bg="Тръгвате след минута" data-en="You are away in a minute">Тръгвате след минута</h3>
+        <p data-bg="Плащате на гишето и пилето излиза цяло, увито в хартия. Ядете на място пред камиона или го взимате вкъщи, докато е топло."
+           data-en="You pay at the hatch and the chicken comes out whole, wrapped in paper. Eat it here by the truck, or take it home while it is hot.">
+          Плащате на гишето и пилето излиза цяло, увито в хартия. Ядете на място пред камиона или го взимате вкъщи, докато е топло.
+        </p>
+      </article>
     </div>
   </div>
 </section>

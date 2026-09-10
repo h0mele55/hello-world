@@ -1,0 +1,1023 @@
+<!DOCTYPE html>
+<html lang="bg">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Black Chef — пиле на шиш · Ловеч</title>
+<meta name="description" content="Мобилна кухня за пиле на шиш в центъра на Ловеч. Бавно се върти, бързо се яде.">
+<meta name="theme-color" content="#0D0D0D">
+
+<meta property="og:title" content="Black Chef — пиле на шиш · Ловеч">
+<meta property="og:description" content="Мобилна кухня за пиле на шиш в центъра на Ловеч. Бавно се върти, бързо се яде.">
+<meta property="og:type" content="restaurant">
+<meta property="og:locale" content="bg_BG">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+
+<style>
+/* ═══════════════════════════════════════════════════════════
+   BLACK CHEF — single-file site. No build step, no dependencies.
+   Upload this one file (plus /img if you add photos) to the host.
+   ═══════════════════════════════════════════════════════════ */
+
+:root{
+  --ink:#0D0D0D;
+  --ink-2:#151515;
+  --paper:#F0EEE9;
+  --paper-2:#E6E3DC;
+  --accent:#E0762B;
+  --accent-hot:#EC8433;
+
+  --on-dark:#F0EEE9;
+  --on-dark-soft:#B4AFA7;
+  --on-dark-mute:#8A857D;
+  --rule-dark:#2C2C2C;
+
+  --on-light:#0D0D0D;
+  --on-light-soft:#5C5851;
+  --on-light-mute:#8A857D;
+  --rule-light:#CFCAC1;
+
+  --sans:"Onest","Helvetica Neue",Arial,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+
+  --header-h:74px;
+  --gutter:22px;
+  --maxw:1180px;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0; background:var(--ink); color:var(--on-dark);
+  font-family:var(--sans); font-size:17px; line-height:1.6;
+  -webkit-font-smoothing:antialiased; overflow-x:hidden;
+}
+body.nav-open{overflow:hidden}
+img{max-width:100%; display:block}
+a{color:inherit}
+button{font:inherit; color:inherit; background:none; border:none; cursor:pointer}
+
+h1,h2,h3{font-weight:800; line-height:1.04; letter-spacing:-.022em; margin:0}
+h1{font-size:clamp(2.5rem,11.5vw,5rem)}
+h2{font-size:clamp(2.05rem,8.6vw,3.5rem)}
+h3{font-size:clamp(1.15rem,4.4vw,1.4rem); letter-spacing:-.01em}
+p{margin:0}
+
+.wrap{
+  width:100%; max-width:var(--maxw); margin:0 auto; padding-inline:var(--gutter);
+}
+/* width:100% matters: .wrap is a flex ITEM inside .hero and .navov, and a
+   flex item shrinks to fit. Without it those two self-centre and fall out of
+   line with every other section's gutter. */
+
+/* ── bands ───────────────────────────────────────────────── */
+.band{padding-block:clamp(64px,13vw,120px); position:relative}
+.band--light{background:var(--paper); color:var(--on-light)}
+.band--dark{background:var(--ink); color:var(--on-dark)}
+
+/* ── eyebrow + rule ──────────────────────────────────────── */
+.eyebrow{
+  display:flex; align-items:center; gap:18px;
+  font-family:var(--mono); font-size:.7rem; font-weight:500;
+  letter-spacing:.22em; text-transform:uppercase;
+  color:var(--accent); margin-bottom:26px;
+}
+.eyebrow::after{content:""; flex:1; height:1px; background:currentColor; opacity:.45}
+
+.lede{
+  font-size:clamp(1.02rem,3.9vw,1.2rem); max-width:44ch; margin-top:20px;
+  color:var(--on-dark-soft);
+}
+.band--light .lede{color:var(--on-light-soft)}
+
+/* mono label above a value */
+.label{
+  font-family:var(--mono); font-size:.68rem; font-weight:500;
+  letter-spacing:.2em; text-transform:uppercase;
+  color:var(--on-dark-mute); margin-bottom:8px;
+}
+.band--light .label{color:var(--on-light-mute)}
+
+.note{
+  font-family:var(--mono); font-size:.76rem; line-height:1.75;
+  border-left:2px solid var(--accent); padding-left:16px;
+  color:var(--on-dark-mute);
+}
+.band--light .note{color:var(--on-light-mute)}
+
+/* ═══ HEADER ═══════════════════════════════════════════════ */
+.hdr{
+  position:fixed; inset:0 0 auto 0; z-index:60; height:var(--header-h);
+  display:flex; align-items:center;
+  background:var(--ink); color:var(--on-dark);
+  border-bottom:1px solid var(--rule-dark);
+  transition:background .25s ease, color .25s ease, border-color .25s ease;
+}
+.hdr.on-light{background:var(--paper); color:var(--on-light); border-bottom-color:var(--rule-light)}
+.hdr__in{display:flex; align-items:center; gap:14px; width:100%; max-width:var(--maxw); margin:0 auto; padding-inline:var(--gutter)}
+
+.brand{display:flex; align-items:center; gap:12px; text-decoration:none; margin-right:auto; min-width:0}
+.brand__mark{width:42px; height:34px; flex:none}
+.brand__name{display:block; font-weight:800; font-size:1.32rem; letter-spacing:.01em; line-height:1}
+.brand__tag{
+  display:block;
+  font-family:var(--mono); font-size:.6rem; font-weight:400;
+  letter-spacing:.28em; text-transform:uppercase;
+  color:var(--on-dark-mute); margin-top:5px; white-space:nowrap;
+}
+.hdr.on-light .brand__tag{color:var(--on-light-mute)}
+
+.sqbtn{
+  width:52px; height:52px; flex:none;
+  display:grid; place-items:center;
+  border:2px solid currentColor;
+  font-family:var(--mono); font-size:.74rem; font-weight:500; letter-spacing:.12em;
+  transition:background .18s ease, color .18s ease;
+}
+.sqbtn:hover{background:currentColor}
+.sqbtn:hover > *{color:var(--ink)}
+.hdr.on-light .sqbtn:hover > *{color:var(--paper)}
+.sqbtn span{transition:color .18s ease}
+.burger{display:grid; gap:5px; width:22px}
+.burger i{display:block; height:2px; background:currentColor}
+
+/* ═══ OVERLAY NAV ══════════════════════════════════════════ */
+.navov{
+  position:fixed; inset:0; z-index:55;
+  background:var(--ink); color:var(--on-dark);
+  /* no horizontal padding — the .wrap inside owns the gutter, and doubling
+     it pushes the nav links out of line with every other section. */
+  padding:calc(var(--header-h) + 40px) 0 40px;
+  display:flex; flex-direction:column; justify-content:center;
+  opacity:0; visibility:hidden; transition:opacity .28s ease, visibility .28s;
+  overflow-y:auto;
+}
+.navov.open{opacity:1; visibility:visible}
+.navov a{
+  display:block; text-decoration:none;
+  font-size:clamp(2.1rem,9vw,3rem); font-weight:800; letter-spacing:-.02em;
+  padding-block:.28em; transition:color .16s ease;
+}
+.navov a:hover{color:var(--accent)}
+.navov__foot{
+  margin-top:44px; font-family:var(--mono); font-size:.78rem; line-height:2;
+  color:var(--on-dark-mute);
+}
+.navov__foot a{font-size:inherit; font-weight:400; display:inline; padding:0}
+
+/* ═══ HERO ═════════════════════════════════════════════════ */
+.hero{
+  min-height:min(88vh,760px);
+  padding-top:calc(var(--header-h) + 56px); padding-bottom:64px;
+  display:flex; align-items:center;
+  border-bottom:1px solid var(--rule-dark);
+}
+
+.hero h1{margin-bottom:24px}
+.hero h1 em{font-style:normal; color:var(--accent)}
+.hero__cta{display:flex; flex-wrap:wrap; gap:14px; margin-top:38px}
+
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:10px;
+  padding:19px 30px; text-decoration:none;
+  font-family:var(--mono); font-size:.78rem; font-weight:500;
+  letter-spacing:.18em; text-transform:uppercase;
+  border:2px solid currentColor; transition:background .18s ease, color .18s ease, border-color .18s ease;
+}
+.btn--solid{background:var(--accent); border-color:var(--accent); color:#fff}
+.btn--solid:hover{background:var(--accent-hot); border-color:var(--accent-hot)}
+.btn--ghost:hover{background:var(--on-dark); color:var(--ink)}
+.band--light .btn--ghost:hover{background:var(--ink); color:var(--paper)}
+
+.hero__meta{
+  display:flex; flex-wrap:wrap; gap:10px 26px; margin-top:44px;
+  font-family:var(--mono); font-size:.72rem; letter-spacing:.16em; text-transform:uppercase;
+  color:var(--on-dark-mute);
+}
+.hero__meta b{color:var(--on-dark); font-weight:500}
+
+/* ═══ TRUCK / STORY ════════════════════════════════════════ */
+.split{display:grid; gap:44px; margin-top:36px}
+@media(min-width:900px){ .split{grid-template-columns:1.05fr .95fr; align-items:center; gap:70px} }
+
+.truckcard{background:var(--paper); border:3px solid var(--accent); padding:26px}
+.truckcard svg{width:100%; height:auto}
+
+.facts{display:grid; gap:22px; margin-top:34px}
+@media(min-width:620px){ .facts{grid-template-columns:repeat(3,1fr)} }
+.fact__n{font-family:var(--mono); font-size:.7rem; letter-spacing:.2em; color:var(--accent); margin-bottom:10px}
+.fact h3{margin-bottom:8px}
+.fact p{font-size:.98rem; color:var(--on-dark-soft)}
+.band--light .fact p{color:var(--on-light-soft)}
+
+/* ═══ HOW IT WORKS ═════════════════════════════════════════ */
+.steps{display:grid; gap:0; margin-top:40px}
+.step{
+  display:grid; grid-template-columns:auto 1fr; gap:20px; align-items:start;
+  padding-block:28px; border-top:1px solid var(--rule-light);
+}
+.step:last-child{border-bottom:1px solid var(--rule-light)}
+.step__n{
+  font-family:var(--mono); font-size:.82rem; font-weight:500;
+  letter-spacing:.14em; color:var(--accent); padding-top:.35em;
+}
+.step p{color:var(--on-light-soft); margin-top:7px; font-size:.99rem}
+
+/* ═══ MENU ═════════════════════════════════════════════════ */
+.menu{margin-top:40px}
+.mrow{padding-block:20px; border-top:1px solid var(--rule-light)}
+.mrow:last-of-type{border-bottom:1px solid var(--rule-light)}
+.mrow__top{display:flex; align-items:baseline; gap:10px}
+.mrow__name{font-weight:700; font-size:clamp(1.05rem,4.3vw,1.22rem); letter-spacing:-.01em}
+.mrow__dots{flex:1; border-bottom:1px dotted var(--rule-light); transform:translateY(-.3em); min-width:14px}
+.mrow__price{text-align:right; flex:none}
+.mrow__eur{display:block; font-weight:700; font-size:clamp(1.05rem,4.3vw,1.22rem); white-space:nowrap}
+.mrow__bgn{
+  display:block; font-family:var(--mono); font-size:.82rem; color:var(--on-light-mute);
+  margin-top:3px; white-space:nowrap;
+}
+.mrow__desc{color:var(--on-light-soft); font-size:.96rem; margin-top:9px; max-width:52ch}
+.tag{
+  display:inline-block; margin-left:10px; vertical-align:1px;
+  border:1px solid var(--accent); color:var(--accent);
+  font-family:var(--mono); font-size:.62rem; font-weight:500;
+  letter-spacing:.16em; text-transform:uppercase; padding:5px 9px;
+}
+
+/* ═══ PHOTO GRIDS ══════════════════════════════════════════ */
+.pgrid{display:grid; grid-template-columns:repeat(2,1fr); gap:16px; margin-top:36px}
+.pgrid--wide{grid-template-columns:1fr}
+.pcap{
+  font-family:var(--mono); font-size:.68rem; letter-spacing:.18em;
+  text-transform:uppercase; color:var(--on-light-mute); margin-top:11px;
+}
+.band--dark .pcap{color:var(--on-dark-mute)}
+
+/* photo slot — replace the whole .ph element with <img src="img/....jpg" alt="..."> */
+.ph{
+  aspect-ratio:4/3; display:grid; place-items:center; text-align:center;
+  border:2px solid var(--rule-light); background:var(--paper-2);
+  font-family:var(--mono); font-size:.64rem; letter-spacing:.18em;
+  text-transform:uppercase; color:var(--on-light-mute); padding:14px;
+}
+.band--dark .ph{border-color:var(--rule-dark); background:var(--ink-2); color:var(--on-dark-mute)}
+.ph--wide{aspect-ratio:16/9}
+.pgrid img{width:100%; height:100%; object-fit:cover; aspect-ratio:4/3; border:2px solid var(--rule-light)}
+.pgrid--wide img{aspect-ratio:16/9}
+
+/* ═══ REVIEWS ══════════════════════════════════════════════ */
+.score{border:2px solid var(--on-light); padding:clamp(26px,6vw,40px); margin-top:36px; max-width:520px}
+.score__n{font-size:clamp(3.4rem,15vw,5rem); font-weight:800; line-height:.9; letter-spacing:-.04em}
+.score__stars{display:flex; gap:7px; margin-top:16px; color:var(--accent)}
+.score__stars svg{width:28px; height:28px}
+.score__cap{
+  font-family:var(--mono); font-size:.68rem; letter-spacing:.18em; line-height:1.9;
+  text-transform:uppercase; color:var(--on-light-mute); margin-top:18px;
+}
+.score__link{
+  display:inline-block; margin-top:24px; font-family:var(--mono); font-size:.74rem;
+  letter-spacing:.14em; text-transform:uppercase; color:var(--accent);
+}
+
+/* ═══ CONTACT ══════════════════════════════════════════════ */
+.cgrid{display:grid; gap:30px; margin-top:38px}
+@media(min-width:820px){ .cgrid{grid-template-columns:1fr 1fr; gap:52px} }
+.cblock + .cblock{margin-top:28px}
+.cblock p, .cblock a{font-size:1.02rem}
+.cblock a{color:inherit; text-underline-offset:5px}
+.cfine{font-family:var(--mono); font-size:.72rem; line-height:1.85; color:var(--on-dark-mute); margin-top:9px}
+
+.mapwrap{border:2px solid var(--rule-dark); margin-top:24px; line-height:0}
+.mapwrap iframe{width:100%; height:300px; border:0; filter:grayscale(.25)}
+
+/* ═══ FORM ═════════════════════════════════════════════════ */
+.form{margin-top:12px}
+.field{margin-bottom:22px}
+.field input, .field textarea{
+  width:100%; font-family:var(--sans); font-size:1rem;
+  background:var(--ink-2); color:var(--on-dark);
+  border:1px solid var(--rule-dark); padding:16px 17px;
+  transition:border-color .18s ease;
+}
+.field textarea{min-height:132px; resize:vertical}
+.field input::placeholder, .field textarea::placeholder{color:var(--on-dark-mute)}
+.field input:focus, .field textarea:focus{outline:none; border-color:var(--accent)}
+
+.consent{display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start; margin-bottom:24px}
+.consent input{width:26px; height:26px; accent-color:var(--accent); margin-top:2px; flex:none}
+.consent label{font-size:.94rem; color:var(--on-dark-soft); line-height:1.6}
+.consent a{color:inherit}
+
+.form .btn--solid{width:100%; padding-block:22px}
+.formmsg{margin-top:16px; font-family:var(--mono); font-size:.78rem; line-height:1.7; display:none}
+.formmsg.show{display:block}
+.formmsg.ok{color:var(--accent)}
+.formmsg.err{color:#E4685E}
+
+/* ═══ FOOTER ═══════════════════════════════════════════════ */
+.ftr{background:var(--ink); border-top:1px solid var(--rule-dark); padding-block:64px 40px}
+.ftr__grid{display:grid; gap:38px}
+@media(min-width:820px){ .ftr__grid{grid-template-columns:1.5fr 1fr 1fr; gap:48px} }
+.ftr__brand{display:flex; align-items:center; gap:14px; margin-bottom:20px}
+.ftr__brand svg{width:46px; height:38px; transform:rotate(-8deg)}
+.ftr__brand span{font-weight:800; font-size:1.32rem}
+.ftr p{color:var(--on-dark-soft); max-width:38ch}
+.ftr__links{display:grid; gap:13px; margin-top:4px}
+.ftr__links a{text-underline-offset:5px}
+.ftr__bot{
+  display:flex; flex-wrap:wrap; gap:12px 24px; justify-content:space-between;
+  border-top:1px solid var(--rule-dark); margin-top:44px; padding-top:26px;
+  font-family:var(--mono); font-size:.72rem; color:var(--on-dark-mute);
+}
+
+/* ═══ LEGAL ════════════════════════════════════════════════ */
+.legal{scroll-margin-top:calc(var(--header-h) + 20px)}
+.legal h3{margin-bottom:14px}
+.legal p{color:var(--on-dark-soft); font-size:.97rem; margin-bottom:13px; max-width:66ch}
+.legal + .legal{margin-top:44px}
+.todo{
+  display:inline-block; background:rgba(224,118,43,.14); border:1px dashed var(--accent);
+  color:var(--accent); font-family:var(--mono); font-size:.72rem; padding:3px 8px;
+}
+
+/* ═══ BACK TO TOP ══════════════════════════════════════════ */
+.totop{
+  position:fixed; right:18px; bottom:18px; z-index:50;
+  width:56px; height:56px; display:grid; place-items:center;
+  background:var(--paper); color:var(--ink); border:2px solid var(--ink);
+  opacity:0; visibility:hidden; transition:opacity .25s ease, visibility .25s;
+}
+.totop.show{opacity:1; visibility:visible}
+
+:focus-visible{outline:3px solid var(--accent); outline-offset:3px}
+@media(prefers-reduced-motion:reduce){ *{transition:none!important; scroll-behavior:auto!important} }
+html{scroll-behavior:smooth}
+section[id]{scroll-margin-top:var(--header-h)}
+</style>
+</head>
+<body>
+
+<!-- ═══ HEADER ═══════════════════════════════════════════ -->
+<header class="hdr" id="hdr">
+  <div class="hdr__in">
+    <a class="brand" href="#top" aria-label="Black Chef">
+      <svg class="brand__mark" viewBox="0 0 48 38" aria-hidden="true">
+        <rect x="2" y="2" width="44" height="34" fill="none" stroke="currentColor" stroke-width="3.4"/>
+        <line x1="9" y1="19" x2="39" y2="19" stroke="#E0762B" stroke-width="2"/>
+        <circle cx="13" cy="19" r="3" fill="#E0762B"/>
+        <circle cx="20.3" cy="19" r="3" fill="#E0762B"/>
+        <circle cx="27.6" cy="19" r="3" fill="#E0762B"/>
+        <circle cx="34.9" cy="19" r="3" fill="#E0762B"/>
+      </svg>
+      <span>
+        <span class="brand__name">BLACK CHEF</span>
+        <span class="brand__tag" data-bg="Пиле на шиш · Ловеч" data-en="Rotisserie chicken · Lovech">Пиле на шиш · Ловеч</span>
+      </span>
+    </a>
+
+    <button class="sqbtn" id="langBtn" aria-label="Смяна на езика / Change language"><span>EN</span></button>
+
+    <button class="sqbtn" id="navBtn" aria-label="Меню" aria-expanded="false" aria-controls="navov">
+      <span class="burger" id="burger" aria-hidden="true"><i></i><i></i><i></i></span>
+    </button>
+  </div>
+</header>
+
+<!-- ═══ OVERLAY NAV ══════════════════════════════════════ -->
+<nav class="navov" id="navov" aria-label="Основна навигация">
+  <div class="wrap">
+    <a href="#truck"   data-bg="Камионът"  data-en="The truck">Камионът</a>
+    <a href="#how"     data-bg="Как става" data-en="How it works">Как става</a>
+    <a href="#menu"    data-bg="Меню"      data-en="Menu">Меню</a>
+    <a href="#gallery" data-bg="Галерия"   data-en="Gallery">Галерия</a>
+    <a href="#reviews" data-bg="Отзиви"    data-en="Reviews">Отзиви</a>
+    <a href="#contact" data-bg="Контакти"  data-en="Contact">Контакти</a>
+    <div class="navov__foot">
+      <span data-bg="Ловеч Център, ул. „Княз Имеретински“" data-en="Lovech Centre, 3 Knyaz Imeretinski St.">Ловеч Център, ул. „Княз Имеретински“</span><br>
+      <a href="tel:+359879279745">087 927 9745</a>
+    </div>
+  </div>
+</nav>
+
+<main id="top">
+
+<!-- ═══ HERO ═════════════════════════════════════════════ -->
+<section class="band band--dark hero">
+  <div class="wrap">
+    <div class="eyebrow"><span data-bg="Ловеч център" data-en="Lovech centre">Ловеч център</span></div>
+    <h1>
+      <span data-bg="Бавно се върти." data-en="Slowly turned.">Бавно се върти.</span><br>
+      <em data-bg="Бързо се яде." data-en="Quickly eaten.">Бързо се яде.</em>
+    </h1>
+    <p class="lede" data-bg="Мобилна кухня за пиле на шиш в центъра на Ловеч. Сол, чесън и червен пипер — нищо повече. Излиза цяло, в хартия."
+       data-en="A mobile rotisserie kitchen in the centre of Lovech. Salt, garlic and paprika — nothing more. It comes out whole, wrapped in paper.">
+      Мобилна кухня за пиле на шиш в центъра на Ловеч. Сол, чесън и червен пипер — нищо повече. Излиза цяло, в хартия.
+    </p>
+    <div class="hero__cta">
+      <a class="btn btn--solid" href="#menu" data-bg="Вижте менюто" data-en="See the menu">Вижте менюто</a>
+      <a class="btn btn--ghost" href="tel:+359879279745">087 927 9745</a>
+    </div>
+    <div class="hero__meta">
+      <span><b>09:30 – 19:00</b> <span data-bg="ч." data-en="">ч.</span></span>
+      <span data-bg="Веган опции" data-en="Vegan options">Веган опции</span>
+      <span data-bg="Безплатен Wi-Fi" data-en="Free Wi-Fi">Безплатен Wi-Fi</span>
+      <span data-bg="Кучета — добре дошли" data-en="Dogs welcome">Кучета — добре дошли</span>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ КАМИОНЪТ ═════════════════════════════════════════ -->
+<section class="band band--dark" id="truck">
+  <div class="wrap">
+    <div class="eyebrow"><span data-bg="Камионът" data-en="The truck">Камионът</span></div>
+    <div class="split">
+      <div>
+        <h2 data-bg="Кухнята е на колела" data-en="The kitchen is on wheels">Кухнята е на колела</h2>
+        <p class="lede" data-bg="Черен камион с едно прозорче и шиш, който се върти цял ден. Няма салон, няма чакане за маса — има пиле, което излиза горещо и се яде на място или се взима вкъщи."
+           data-en="A black truck with a single window and a spit that turns all day. No dining room, no waiting for a table — just chicken that comes out hot, to eat here or take home.">
+          Черен камион с едно прозорче и шиш, който се върти цял ден. Няма салон, няма чакане за маса — има пиле, което излиза горещо и се яде на място или се взима вкъщи.
+        </p>
+        <div class="facts">
+          <div class="fact">
+            <div class="fact__n">01</div>
+            <h3 data-bg="Бавно печене" data-en="Slow roasting">Бавно печене</h3>
+            <p data-bg="Пилето се върти на шиш, докато кожата стане хрупкава, а месото остане сочно." data-en="Turned on the spit until the skin crisps and the meat stays juicy.">Пилето се върти на шиш, докато кожата стане хрупкава, а месото остане сочно.</p>
+          </div>
+          <div class="fact">
+            <div class="fact__n">02</div>
+            <h3 data-bg="Три подправки" data-en="Three seasonings">Три подправки</h3>
+            <p data-bg="Сол, чесън и червен пипер. Без маринати, без панировка, без излишни неща." data-en="Salt, garlic and paprika. No marinades, no batter, nothing extra.">Сол, чесън и червен пипер. Без маринати, без панировка, без излишни неща.</p>
+          </div>
+          <div class="fact">
+            <div class="fact__n">03</div>
+            <h3 data-bg="В центъра" data-en="In the centre">В центъра</h3>
+            <p data-bg="На ул. „Княз Имеретински“ — на две минути пеша от центъра на Ловеч." data-en="On Knyaz Imeretinski St. — two minutes' walk from the centre of Lovech.">На ул. „Княз Имеретински“ — на две минути пеша от центъра на Ловеч.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="truckcard">
+        <svg viewBox="0 0 420 200" aria-hidden="true">
+          <!-- body -->
+          <rect x="14" y="42" width="250" height="106" fill="#0D0D0D"/>
+          <!-- rotisserie window -->
+          <rect x="38" y="62" width="150" height="42" fill="none" stroke="#F0EEE9" stroke-width="5"/>
+          <line x1="52" y1="83" x2="174" y2="83" stroke="#F0EEE9" stroke-width="2.5"/>
+          <circle cx="63"  cy="83" r="9" fill="#F0EEE9"/>
+          <circle cx="93"  cy="83" r="9" fill="#F0EEE9"/>
+          <circle cx="123" cy="83" r="9" fill="#F0EEE9"/>
+          <circle cx="153" cy="83" r="9" fill="#F0EEE9"/>
+          <!-- side hatch -->
+          <rect x="204" y="62" width="44" height="34" fill="none" stroke="#F0EEE9" stroke-width="5"/>
+          <!-- cab -->
+          <path d="M264 70 h44 l38 44 v34 h-82 z" fill="#0D0D0D"/>
+          <!-- flames -->
+          <path d="M32 148 q22 -34 44 0 q22 -34 44 0 q22 -34 44 0 q22 -34 44 0 v10 H32 z" fill="#E0762B"/>
+          <rect x="32" y="140" width="176" height="18" fill="#E0762B"/>
+          <!-- ground -->
+          <rect x="14" y="158" width="332" height="7" fill="#0D0D0D"/>
+          <!-- wheels -->
+          <circle cx="86"  cy="170" r="20" fill="#0D0D0D"/><circle cx="86"  cy="170" r="7" fill="#F0EEE9"/>
+          <circle cx="292" cy="170" r="20" fill="#0D0D0D"/><circle cx="292" cy="170" r="7" fill="#F0EEE9"/>
+        </svg>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ КАК СТАВА ════════════════════════════════════════ -->
+<section class="band band--light" id="how" data-band="light">
+  <div class="wrap">
+    <div class="eyebrow"><span data-bg="Как става" data-en="How it works">Как става</span></div>
+    <h2 data-bg="Четири стъпки, две минути" data-en="Four steps, two minutes">Четири стъпки, две минути</h2>
+    <div class="steps">
+      <div class="step">
+        <div class="step__n">01</div>
+        <div>
+          <h3 data-bg="Избирате" data-en="Choose">Избирате</h3>
+          <p data-bg="Цяло пиле, половин, четвъртинка или крилца. Има и веган опции." data-en="A whole chicken, half, a quarter or wings. There are vegan options too.">Цяло пиле, половин, четвъртинка или крилца. Има и веган опции.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step__n">02</div>
+        <div>
+          <h3 data-bg="Обаждате се — по желание" data-en="Call ahead — optional">Обаждате се — по желание</h3>
+          <p data-bg="За цяло пиле в определен час е добре да звъннете предварително, за да е готово, когато дойдете." data-en="For a whole chicken at a set time, call ahead so it is ready when you arrive.">За цяло пиле в определен час е добре да звъннете предварително, за да е готово, когато дойдете.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step__n">03</div>
+        <div>
+          <h3 data-bg="Взимате от прозорчето" data-en="Collect at the window">Взимате от прозорчето</h3>
+          <p data-bg="Без чакане за маса и без резервация. Пилето излиза цяло, увито в хартия." data-en="No table to wait for, no booking. The chicken comes out whole, wrapped in paper.">Без чакане за маса и без резервация. Пилето излиза цяло, увито в хартия.</p>
+        </div>
+      </div>
+      <div class="step">
+        <div class="step__n">04</div>
+        <div>
+          <h3 data-bg="Ядете топло" data-en="Eat it hot">Ядете топло</h3>
+          <p data-bg="На място пред камиона или вкъщи — стига да е скоро." data-en="Right here by the truck, or at home — as long as it is soon.">На място пред камиона или вкъщи — стига да е скоро.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ МЕНЮ ═════════════════════════════════════════════ -->
+<section class="band band--light" id="menu" data-band="light">
+  <div class="wrap">
+    <div class="eyebrow"><span data-bg="Меню" data-en="Menu">Меню</span></div>
+    <h2 data-bg="Пиле, и още малко пиле" data-en="Chicken, and a little more chicken">Пиле, и още малко пиле</h2>
+
+    <div class="menu">
+
+      <div class="mrow">
+        <div class="mrow__top">
+          <span class="mrow__name" data-bg="Цяло пиле" data-en="Whole chicken">Цяло пиле</span>
+          <span class="mrow__dots"></span>
+          <span class="mrow__price"><span class="mrow__eur">12,50 €</span><span class="mrow__bgn">24,45 лв.</span></span>
+        </div>
+        <p class="mrow__desc" data-bg="Въртяно бавно, със сол, чесън и червен пипер. Излиза цяло, в хартия." data-en="Slowly turned, with salt, garlic and paprika. Comes out whole, in paper.">Въртяно бавно, със сол, чесън и червен пипер. Излиза цяло, в хартия.</p>
+      </div>
+
+      <div class="mrow">
+        <div class="mrow__top">
+          <span class="mrow__name" data-bg="Половин пиле" data-en="Half chicken">Половин пиле</span>
+          <span class="mrow__dots"></span>
+          <span class="mrow__price"><span class="mrow__eur">6,90 €</span><span class="mrow__bgn">13,50 лв.</span></span>
+        </div>
+      </div>
+
+      <div class="mrow">
+        <div class="mrow__top">
+          <span class="mrow__name" data-bg="Четвъртинка (бут)" data-en="Quarter (leg)">Четвъртинка (бут)</span>
+          <span class="mrow__dots"></span>
+          <span class="mrow__price"><span class="mrow__eur">3,90 €</span><span class="mrow__bgn">7,63 лв.</span></span>
+        </div>
+      </div>
+
+      <div class="mrow">
+        <div class="mrow__top">
+          <span class="mrow__name" data-bg="Пилешки крилца (6 бр.)" data-en="Chicken wings (6)">Пилешки крилца (6 бр.)</span>
+          <span class="mrow__dots"></span>
+          <span class="mrow__price"><span class="mrow__eur">4,50 €</span><span class="mrow__bgn">8,80 лв.</span></span>
+        </div>
+        <p class="mrow__desc">
+          <span data-bg="Хрупкави, без панировка." data-en="Crisp, no batter.">Хрупкави, без панировка.</span>
+          <span class="tag" data-bg="Люто по желание" data-en="Spicy on request">Люто по желание</span>
+        </p>
+      </div>
+
+      <div class="mrow">
+        <div class="mrow__top">
+          <span class="mrow__name" data-bg="Крилца с чесън и лимон (6 бр.)" data-en="Garlic &amp; lemon wings (6)">Крилца с чесън и лимон (6 бр.)</span>
+          <span class="mrow__dots"></span>
+          <span class="mrow__price"><span class="mrow__eur">4,90 €</span><span class="mrow__bgn">9,58 лв.</span></span>
+        </div>
+      </div>
+
+      <div class="mrow">
+        <div class="mrow__top">
+          <span class="mrow__name" data-bg="Пилешки шишчета (2 бр.)" data-en="Chicken skewers (2)">Пилешки шишчета (2 бр.)</span>
+          <span class="mrow__dots"></span>
+          <span class="mrow__price"><span class="mrow__eur">5,50 €</span><span class="mrow__bgn">10,76 лв.</span></span>
+        </div>
+      </div>
+
+      <div class="mrow">
+        <div class="mrow__top">
+          <span class="mrow__name" data-bg="Пилешки бутчета (3 бр.)" data-en="Chicken drumsticks (3)">Пилешки бутчета (3 бр.)</span>
+          <span class="mrow__dots"></span>
+          <span class="mrow__price"><span class="mrow__eur">5,90 €</span><span class="mrow__bgn">11,54 лв.</span></span>
+        </div>
+      </div>
+
+      <div class="mrow">
+        <div class="mrow__top">
+          <span class="mrow__name" data-bg="Комплект за двама" data-en="Set for two">Комплект за двама</span>
+          <span class="mrow__dots"></span>
+          <span class="mrow__price"><span class="mrow__eur">8,90 €</span><span class="mrow__bgn">17,41 лв.</span></span>
+        </div>
+        <p class="mrow__desc" data-bg="Половин пиле, пържени картофи и шопска салата." data-en="Half a chicken, chips and shopska salad.">Половин пиле, пържени картофи и шопска салата.</p>
+      </div>
+
+    </div>
+
+    <div class="pgrid">
+      <figure style="margin:0">
+        <div class="ph" data-bg="Снимка — ролка с пиле" data-en="Photo — chicken wrap">Снимка — ролка с пиле</div>
+        <figcaption class="pcap" data-bg="Ролка с пиле" data-en="Chicken wrap">Ролка с пиле</figcaption>
+      </figure>
+      <figure style="margin:0">
+        <div class="ph" data-bg="Снимка — фалафел" data-en="Photo — falafel">Снимка — фалафел</div>
+        <figcaption class="pcap" data-bg="Фалафел · веган" data-en="Falafel · vegan">Фалафел · веган</figcaption>
+      </figure>
+    </div>
+
+    <p class="note" style="margin-top:30px" data-bg="Информация за алергени — на място или по телефона." data-en="Allergen information — on site or by phone.">Информация за алергени — на място или по телефона.</p>
+  </div>
+</section>
+
+<!-- ═══ ГАЛЕРИЯ ══════════════════════════════════════════ -->
+<section class="band band--dark" id="gallery">
+  <div class="wrap">
+    <div class="eyebrow"><span data-bg="Галерия" data-en="Gallery">Галерия</span></div>
+    <h2 data-bg="Единственият цвят тук е храната" data-en="The only colour here is the food">Единственият цвят тук е храната</h2>
+
+    <div class="pgrid pgrid--wide">
+      <div class="ph ph--wide" data-bg="Снимка — цяло пиле на шиш" data-en="Photo — whole rotisserie chicken">Снимка — цяло пиле на шиш</div>
+    </div>
+    <div class="pgrid">
+      <div class="ph" data-bg="Снимка — крилца" data-en="Photo — wings">Снимка — крилца</div>
+      <div class="ph" data-bg="Снимка — шишчета" data-en="Photo — skewers">Снимка — шишчета</div>
+      <div class="ph" data-bg="Снимка — бургер / ролка" data-en="Photo — burger / wrap">Снимка — бургер / ролка</div>
+      <div class="ph" data-bg="Снимка — хумус" data-en="Photo — hummus">Снимка — хумус</div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ ОТЗИВИ ═══════════════════════════════════════════ -->
+<section class="band band--light" id="reviews" data-band="light">
+  <div class="wrap">
+    <div class="eyebrow"><span data-bg="Отзиви" data-en="Reviews">Отзиви</span></div>
+
+    <div class="score">
+      <div class="score__n">5,0</div>
+      <div class="score__stars" aria-label="5 от 5">
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17.2 5.9 20.6l1.4-6.8L2.2 9.1l6.9-.8z"/></svg>
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17.2 5.9 20.6l1.4-6.8L2.2 9.1l6.9-.8z"/></svg>
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17.2 5.9 20.6l1.4-6.8L2.2 9.1l6.9-.8z"/></svg>
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17.2 5.9 20.6l1.4-6.8L2.2 9.1l6.9-.8z"/></svg>
+        <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2l2.9 6.3 6.9.8-5.1 4.7 1.4 6.8L12 17.2 5.9 20.6l1.4-6.8L2.2 9.1l6.9-.8z"/></svg>
+      </div>
+      <div class="score__cap" data-bg="От 2 отзива в Google · заведението е ново" data-en="From 2 Google reviews · we are new">От 2 отзива в Google · заведението е ново</div>
+      <a class="score__link" href="https://www.google.com/maps/search/Black+Chef+%D0%9B%D0%BE%D0%B2%D0%B5%D1%87" target="_blank" rel="noopener"
+         data-bg="Вижте отзивите в Google →" data-en="Read the Google reviews →">Вижте отзивите в Google →</a>
+    </div>
+
+    <p class="lede" style="margin-top:32px"
+       data-bg="Black Chef тъкмо тръгва — засега отзивите в Google са два и двата са петици. Ако сте минали през прозорчето, ще се радваме да напишете и вашия."
+       data-en="Black Chef is just getting started — for now there are two Google reviews and both are five stars. If you have been to the window, we would love you to add yours.">
+      Black Chef тъкмо тръгва — засега отзивите в Google са два и двата са петици. Ако сте минали през прозорчето, ще се радваме да напишете и вашия.
+    </p>
+  </div>
+</section>
+
+<!-- ═══ КОНТАКТИ ═════════════════════════════════════════ -->
+<section class="band band--dark" id="contact">
+  <div class="wrap">
+    <div class="eyebrow"><span data-bg="Контакти" data-en="Contact">Контакти</span></div>
+    <h2 data-bg="Намерете черния камион" data-en="Find the black truck">Намерете черния камион</h2>
+
+    <div class="cgrid">
+      <div>
+        <div class="cblock">
+          <div class="label" data-bg="Адрес" data-en="Address">Адрес</div>
+          <p data-bg="Ловеч Център, ул. „Княз Имеретински“, 5500 Ловеч" data-en="Lovech Centre, Knyaz Imeretinski St., 5500 Lovech">Ловеч Център, ул. „Княз Имеретински“, 5500 Ловеч</p>
+        </div>
+        <div class="cblock">
+          <div class="label" data-bg="Телефон" data-en="Phone">Телефон</div>
+          <p><a href="tel:+359879279745">087 927 9745</a></p>
+        </div>
+        <div class="cblock">
+          <div class="label" data-bg="Работно време" data-en="Opening hours">Работно време</div>
+          <p data-bg="09:30 – 19:00 ч." data-en="09:30 – 19:00">09:30 – 19:00 ч.</p>
+          <p class="cfine" data-bg="Потвърдете по телефона, преди да тръгнете." data-en="Please confirm by phone before setting off.">Потвърдете по телефона, преди да тръгнете.</p>
+        </div>
+        <div class="cblock">
+          <div class="label" data-bg="Удобства" data-en="Amenities">Удобства</div>
+          <p data-bg="Веган опции · безплатен Wi-Fi · кучета вътре и навън · подходящо за деца и семейства" data-en="Vegan options · free Wi-Fi · dogs inside and out · good for children and families">Веган опции · безплатен Wi-Fi · кучета вътре и навън · подходящо за деца и семейства</p>
+        </div>
+
+        <div class="truckcard" style="margin-top:30px">
+          <svg viewBox="0 0 420 200" aria-hidden="true">
+            <rect x="14" y="42" width="250" height="106" fill="#0D0D0D"/>
+            <rect x="38" y="62" width="150" height="42" fill="none" stroke="#F0EEE9" stroke-width="5"/>
+            <line x1="52" y1="83" x2="174" y2="83" stroke="#F0EEE9" stroke-width="2.5"/>
+            <circle cx="63" cy="83" r="9" fill="#F0EEE9"/><circle cx="93" cy="83" r="9" fill="#F0EEE9"/>
+            <circle cx="123" cy="83" r="9" fill="#F0EEE9"/><circle cx="153" cy="83" r="9" fill="#F0EEE9"/>
+            <rect x="204" y="62" width="44" height="34" fill="none" stroke="#F0EEE9" stroke-width="5"/>
+            <path d="M264 70 h44 l38 44 v34 h-82 z" fill="#0D0D0D"/>
+            <path d="M32 148 q22 -34 44 0 q22 -34 44 0 q22 -34 44 0 q22 -34 44 0 v10 H32 z" fill="#E0762B"/>
+            <rect x="32" y="140" width="176" height="18" fill="#E0762B"/>
+            <rect x="14" y="158" width="332" height="7" fill="#0D0D0D"/>
+            <circle cx="86" cy="170" r="20" fill="#0D0D0D"/><circle cx="86" cy="170" r="7" fill="#F0EEE9"/>
+            <circle cx="292" cy="170" r="20" fill="#0D0D0D"/><circle cx="292" cy="170" r="7" fill="#F0EEE9"/>
+          </svg>
+        </div>
+
+        <div class="mapwrap">
+          <iframe title="Карта — Black Chef, Ловеч" loading="lazy" referrerpolicy="no-referrer-when-downgrade"
+            src="https://maps.google.com/maps?q=%D1%83%D0%BB.%20%D0%9A%D0%BD%D1%8F%D0%B7%20%D0%98%D0%BC%D0%B5%D1%80%D0%B5%D1%82%D0%B8%D0%BD%D1%81%D0%BA%D0%B8%2C%20%D0%9B%D0%BE%D0%B2%D0%B5%D1%87&amp;z=16&amp;output=embed"></iframe>
+        </div>
+      </div>
+
+      <div>
+        <h3 style="margin-bottom:12px" data-bg="Предварителна поръчка" data-en="Pre-order">Предварителна поръчка</h3>
+        <p class="lede" style="margin-top:0"
+           data-bg="Ако искате цяло пиле за определен час — оставете телефон и час, и ще ви върнем обаждане за потвърждение."
+           data-en="If you want a whole chicken for a particular time, leave your phone number and the time and we will call you back to confirm.">
+          Ако искате цяло пиле за определен час — оставете телефон и час, и ще ви върнем обаждане за потвърждение.
+        </p>
+
+        <form class="form" id="orderForm" novalidate>
+          <div class="field">
+            <label class="label" for="f-name" data-bg="Име" data-en="Name">Име</label>
+            <input id="f-name" name="name" type="text" required autocomplete="name"
+                   data-ph-bg="Вашето име" data-ph-en="Your name" placeholder="Вашето име">
+          </div>
+          <div class="field">
+            <label class="label" for="f-phone" data-bg="Телефон" data-en="Phone">Телефон</label>
+            <input id="f-phone" name="phone" type="tel" required autocomplete="tel"
+                   data-ph-bg="08XX XXX XXX" data-ph-en="08XX XXX XXX" placeholder="08XX XXX XXX">
+          </div>
+          <div class="field">
+            <label class="label" for="f-order" data-bg="Поръчка" data-en="Order">Поръчка</label>
+            <textarea id="f-order" name="order" required
+                      data-ph-bg="Напр.: цяло пиле и картофи за 13:00 ч." data-ph-en="e.g. whole chicken and chips for 13:00"
+                      placeholder="Напр.: цяло пиле и картофи за 13:00 ч."></textarea>
+          </div>
+
+          <div class="consent">
+            <input id="f-consent" name="consent" type="checkbox" required>
+            <label for="f-consent" data-html
+              data-bg="Съгласен/съгласна съм Black Chef да обработи името и телефона ми, за да отговори на това запитване. Подробности — в <a href=&quot;#privacy&quot;>Политиката за поверителност</a>."
+              data-en="I agree that Black Chef may process my name and phone number in order to respond to this enquiry. Details are in the <a href=&quot;#privacy&quot;>Privacy Policy</a>.">
+              Съгласен/съгласна съм Black Chef да обработи името и телефона ми, за да отговори на това запитване. Подробности — в <a href="#privacy">Политиката за поверителност</a>.
+            </label>
+          </div>
+
+          <button class="btn btn--solid" type="submit" id="submitBtn" data-bg="Изпратете запитването" data-en="Send the enquiry">Изпратете запитването</button>
+          <p class="formmsg" id="formMsg" role="status" aria-live="polite"></p>
+        </form>
+
+        <p class="note" style="margin-top:26px"
+           data-bg="Бърз е и телефонът: 087 927 9745 — за днешен час винаги е по-сигурно да звъннете."
+           data-en="The phone is quicker: 087 927 9745 — for a slot today, calling is always safer.">
+          Бърз е и телефонът: 087 927 9745 — за днешен час винаги е по-сигурно да звъннете.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ═══ LEGAL ════════════════════════════════════════════ -->
+<section class="band band--dark" style="padding-block:clamp(48px,9vw,80px)">
+  <div class="wrap">
+
+    <div class="legal" id="legal">
+      <div class="eyebrow"><span data-bg="Правна информация" data-en="Legal information">Правна информация</span></div>
+      <h3 data-bg="За фирмата" data-en="Company details">За фирмата</h3>
+      <p data-html
+         data-bg="Търговец: <span class=&quot;todo&quot;>ФИРМА ООД / ЕТ — попълнете</span> · ЕИК: <span class=&quot;todo&quot;>ЕИК</span> · Седалище: <span class=&quot;todo&quot;>адрес по регистрация</span> · Регистрация по ДДС: <span class=&quot;todo&quot;>да / не</span>"
+         data-en="Trader: <span class=&quot;todo&quot;>COMPANY LTD — to complete</span> · Company no.: <span class=&quot;todo&quot;>EIK</span> · Registered address: <span class=&quot;todo&quot;>registered address</span> · VAT registered: <span class=&quot;todo&quot;>yes / no</span>">
+        Търговец: <span class="todo">ФИРМА ООД / ЕТ — попълнете</span> · ЕИК: <span class="todo">ЕИК</span> · Седалище: <span class="todo">адрес по регистрация</span> · Регистрация по ДДС: <span class="todo">да / не</span>
+      </p>
+      <p data-bg="Обект: Ловеч Център, ул. „Княз Имеретински“, 5500 Ловеч. Телефон за контакт: 087 927 9745."
+         data-en="Premises: Lovech Centre, Knyaz Imeretinski St., 5500 Lovech. Contact phone: 087 927 9745.">
+        Обект: Ловеч Център, ул. „Княз Имеретински“, 5500 Ловеч. Телефон за контакт: 087 927 9745.
+      </p>
+      <p data-bg="Надзорни органи: Комисия за защита на потребителите (kzp.bg) и Българска агенция по безопасност на храните (babh.government.bg)."
+         data-en="Supervisory bodies: the Consumer Protection Commission (kzp.bg) and the Bulgarian Food Safety Agency (babh.government.bg).">
+        Надзорни органи: Комисия за защита на потребителите (kzp.bg) и Българска агенция по безопасност на храните (babh.government.bg).
+      </p>
+    </div>
+
+    <div class="legal" id="privacy">
+      <div class="eyebrow"><span data-bg="Поверителност" data-en="Privacy">Поверителност</span></div>
+      <h3 data-bg="Политика за поверителност" data-en="Privacy Policy">Политика за поверителност</h3>
+      <p data-bg="Когато изпратите формата за предварителна поръчка, събираме само името, телефона и текста на поръчката ви. Използваме ги единствено за да се свържем с вас и да потвърдим поръчката."
+         data-en="When you send the pre-order form we collect only your name, phone number and the text of your order. We use them solely to contact you and confirm the order.">
+        Когато изпратите формата за предварителна поръчка, събираме само името, телефона и текста на поръчката ви. Използваме ги единствено за да се свържем с вас и да потвърдим поръчката.
+      </p>
+      <p data-bg="Не ги предоставяме на трети лица за маркетинг и не ги използваме за реклама. Съхраняваме ги, докато поръчката бъде изпълнена, и не по-дълго от 6 месеца."
+         data-en="We do not pass them to third parties for marketing and do not use them for advertising. We keep them until the order is fulfilled, and no longer than 6 months.">
+        Не ги предоставяме на трети лица за маркетинг и не ги използваме за реклама. Съхраняваме ги, докато поръчката бъде изпълнена, и не по-дълго от 6 месеца.
+      </p>
+      <p data-bg="Формата се обработва от външен доставчик на форми, който препраща съобщението към нашата поща. Сайтът не поставя бисквитки за проследяване; вграждането на картата на Google може да постави свои."
+         data-en="The form is handled by an external form provider that forwards the message to our inbox. The site sets no tracking cookies; the embedded Google map may set its own.">
+        Формата се обработва от външен доставчик на форми, който препраща съобщението към нашата поща. Сайтът не поставя бисквитки за проследяване; вграждането на картата на Google може да постави свои.
+      </p>
+      <p data-html
+         data-bg="Имате право на достъп, поправка и изтриване на данните си. Пишете ни на <span class=&quot;todo&quot;>имейл за контакт</span> или се обадете на 087 927 9745. Може да подадете жалба и до Комисията за защита на личните данни (cpdp.bg)."
+         data-en="You have the right to access, correct and delete your data. Write to us at <span class=&quot;todo&quot;>contact e-mail</span> or call 087 927 9745. You may also complain to the Commission for Personal Data Protection (cpdp.bg).">
+        Имате право на достъп, поправка и изтриване на данните си. Пишете ни на <span class="todo">имейл за контакт</span> или се обадете на 087 927 9745. Може да подадете жалба и до Комисията за защита на личните данни (cpdp.bg).
+      </p>
+    </div>
+
+  </div>
+</section>
+
+</main>
+
+<!-- ═══ FOOTER ═══════════════════════════════════════════ -->
+<footer class="ftr">
+  <div class="wrap">
+    <div class="ftr__grid">
+      <div>
+        <div class="ftr__brand">
+          <svg viewBox="0 0 48 38" aria-hidden="true">
+            <rect x="2" y="2" width="44" height="34" fill="none" stroke="#F0EEE9" stroke-width="3.4"/>
+            <line x1="9" y1="19" x2="39" y2="19" stroke="#E0762B" stroke-width="2"/>
+            <circle cx="13" cy="19" r="3" fill="#E0762B"/><circle cx="20.3" cy="19" r="3" fill="#E0762B"/>
+            <circle cx="27.6" cy="19" r="3" fill="#E0762B"/><circle cx="34.9" cy="19" r="3" fill="#E0762B"/>
+          </svg>
+          <span>BLACK CHEF</span>
+        </div>
+        <p data-bg="Мобилна кухня за пиле на шиш в центъра на Ловеч. Бавно се върти, бързо се яде."
+           data-en="A mobile rotisserie kitchen in the centre of Lovech. Slowly turned, quickly eaten.">
+          Мобилна кухня за пиле на шиш в центъра на Ловеч. Бавно се върти, бързо се яде.
+        </p>
+      </div>
+
+      <div>
+        <div class="label" data-bg="Къде и кога" data-en="Where and when">Къде и кога</div>
+        <div class="ftr__links">
+          <span data-bg="Ловеч Център, ул. „Княз Имеретински“, 5500 Ловеч" data-en="Lovech Centre, Knyaz Imeretinski St., 5500 Lovech">Ловеч Център, ул. „Княз Имеретински“, 5500 Ловеч</span>
+          <a href="tel:+359879279745">087 927 9745</a>
+          <span data-bg="09:30 – 19:00 ч." data-en="09:30 – 19:00">09:30 – 19:00 ч.</span>
+        </div>
+      </div>
+
+      <div>
+        <div class="label" data-bg="Правно" data-en="Legal">Правно</div>
+        <div class="ftr__links">
+          <a href="#legal"   data-bg="Правна информация" data-en="Legal information">Правна информация</a>
+          <a href="#privacy" data-bg="Политика за поверителност" data-en="Privacy Policy">Политика за поверителност</a>
+          <a href="#menu"    data-bg="Меню" data-en="Menu">Меню</a>
+        </div>
+      </div>
+    </div>
+
+    <div class="ftr__bot">
+      <span>© <span id="yr">2026</span> Black Chef</span>
+      <span data-bg="Цените са в евро с левова равностойност по курс 1,95583 лв." data-en="Prices are in euro with the lev equivalent at the fixed rate of 1.95583.">Цените са в евро с левова равностойност по курс 1,95583 лв.</span>
+    </div>
+  </div>
+</footer>
+
+<button class="totop" id="toTop" aria-label="Нагоре">
+  <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" aria-hidden="true">
+    <path d="M12 19V5M5 12l7-7 7 7"/>
+  </svg>
+</button>
+
+<script>
+(function(){
+  "use strict";
+
+  /* ─────────────────────────────────────────────────────────
+     FORM DESTINATION — set this before going live.
+     Get a free key at https://web3forms.com (no account needed
+     beyond confirming your e-mail). Paste it here and the form
+     starts delivering to that inbox. Until then the form tells
+     the visitor to phone instead, rather than pretending to send.
+     ───────────────────────────────────────────────────────── */
+  var WEB3FORMS_KEY = "PASTE-YOUR-ACCESS-KEY-HERE";
+
+  var $  = function(s,c){ return (c||document).querySelector(s); };
+  var $$ = function(s,c){ return Array.prototype.slice.call((c||document).querySelectorAll(s)); };
+
+  /* ── language ─────────────────────────────────────────── */
+  var langBtn = $("#langBtn");
+
+  function setLang(lang){
+    document.documentElement.lang = lang;
+    $$("[data-bg]").forEach(function(el){
+      var v = el.getAttribute("data-" + lang);
+      if(v === null) return;
+      if(el.hasAttribute("data-html")) el.innerHTML = v;
+      else el.textContent = v;
+    });
+    $$("[data-ph-bg]").forEach(function(el){
+      var v = el.getAttribute("data-ph-" + lang);
+      if(v !== null) el.placeholder = v;
+    });
+    langBtn.firstElementChild.textContent = (lang === "bg") ? "EN" : "BG";
+    try{ localStorage.setItem("bc-lang", lang); }catch(e){}
+  }
+
+  var saved = "bg";
+  try{ saved = localStorage.getItem("bc-lang") || "bg"; }catch(e){}
+  setLang(saved === "en" ? "en" : "bg");
+
+  langBtn.addEventListener("click", function(){
+    setLang(document.documentElement.lang === "bg" ? "en" : "bg");
+  });
+
+  /* ── overlay nav ──────────────────────────────────────── */
+  var navBtn  = $("#navBtn"),
+      navov   = $("#navov"),
+      burger  = $("#burger"),
+      hdr     = $("#hdr");
+
+  function setNav(open){
+    navov.classList.toggle("open", open);
+    document.body.classList.toggle("nav-open", open);
+    navBtn.setAttribute("aria-expanded", open ? "true" : "false");
+    burger.innerHTML = open
+      ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M5 5l14 14M19 5L5 19"/></svg>'
+      : "<i></i><i></i><i></i>";
+    if(open) hdr.classList.remove("on-light");
+    else syncHeader();
+  }
+
+  navBtn.addEventListener("click", function(){ setNav(!navov.classList.contains("open")); });
+  $$("#navov a").forEach(function(a){ a.addEventListener("click", function(){ setNav(false); }); });
+  document.addEventListener("keydown", function(e){
+    if(e.key === "Escape" && navov.classList.contains("open")) setNav(false);
+  });
+
+  /* ── header inverts over light bands ──────────────────── */
+  var lightBands = $$('[data-band="light"]');
+
+  function syncHeader(){
+    if(navov.classList.contains("open")) return;
+    var probe = 36, onLight = false;
+    for(var i = 0; i < lightBands.length; i++){
+      var r = lightBands[i].getBoundingClientRect();
+      if(r.top <= probe && r.bottom >= probe){ onLight = true; break; }
+    }
+    hdr.classList.toggle("on-light", onLight);
+  }
+
+  /* ── back to top ──────────────────────────────────────── */
+  var toTop = $("#toTop");
+  toTop.addEventListener("click", function(){ window.scrollTo({top:0, behavior:"smooth"}); });
+
+  var ticking = false;
+  function onScroll(){
+    if(ticking) return;
+    ticking = true;
+    requestAnimationFrame(function(){
+      syncHeader();
+      toTop.classList.toggle("show", window.scrollY > 600);
+      ticking = false;
+    });
+  }
+  window.addEventListener("scroll", onScroll, {passive:true});
+  window.addEventListener("resize", onScroll);
+  onScroll();
+
+  /* ── year ─────────────────────────────────────────────── */
+  $("#yr").textContent = new Date().getFullYear();
+
+  /* ── form ─────────────────────────────────────────────── */
+  var form = $("#orderForm"), msg = $("#formMsg"), btn = $("#submitBtn");
+
+  var COPY = {
+    bg:{
+      invalid:"Моля, попълнете име, телефон, поръчка и отметнете съгласието.",
+      sending:"Изпращане…",
+      ok:"Благодарим! Получихме запитването и ще ви върнем обаждане за потвърждение.",
+      err:"Нещо се обърка. Моля, обадете се на 087 927 9745.",
+      unset:"Формата още не е свързана с пощата. Моля, обадете се на 087 927 9745."
+    },
+    en:{
+      invalid:"Please fill in your name, phone and order, and tick the consent box.",
+      sending:"Sending…",
+      ok:"Thank you! We have your enquiry and will call you back to confirm.",
+      err:"Something went wrong. Please call 087 927 9745.",
+      unset:"The form is not connected to an inbox yet. Please call 087 927 9745."
+    }
+  };
+  function t(k){ return COPY[document.documentElement.lang === "en" ? "en" : "bg"][k]; }
+  function say(kind, key){
+    msg.className = "formmsg show " + kind;
+    msg.textContent = t(key);
+  }
+
+  form.addEventListener("submit", function(e){
+    e.preventDefault();
+
+    if(!form.checkValidity()){ say("err","invalid"); return; }
+
+    if(WEB3FORMS_KEY.indexOf("PASTE-") === 0){ say("err","unset"); return; }
+
+    var data = new FormData(form);
+    data.append("access_key", WEB3FORMS_KEY);
+    data.append("subject", "Предварителна поръчка — Black Chef");
+    data.append("from_name", "Black Chef — сайт");
+
+    btn.disabled = true;
+    say("ok","sending");
+
+    fetch("https://api.web3forms.com/submit", {
+      method:"POST",
+      body:data
+    }).then(function(r){ return r.json(); })
+      .then(function(j){
+        if(j && j.success){ say("ok","ok"); form.reset(); }
+        else say("err","err");
+      })
+      .catch(function(){ say("err","err"); })
+      .finally(function(){ btn.disabled = false; });
+  });
+
+})();
+</script>
+</body>
+</html>

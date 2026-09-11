@@ -14,6 +14,7 @@
 <meta property="og:type" content="restaurant">
 <meta property="og:locale" content="bg_BG">
 
+<script>document.documentElement.className += " js";</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
@@ -263,6 +264,125 @@ p{margin:0}
   background-size:18px 15px; background-repeat:repeat-x;
 }
 
+/* ═══ CATERING BOOKING FLOW ════════════════════════════════ */
+.cat{margin-top:40px; max-width:760px}
+
+/* The band is DARK and the step panels are cream, so the section reads as a
+   single sheet of paper on ink — which is what keeps it from merging into the
+   dark gallery above it. Only the chrome outside the panels is on ink. */
+.cat__bar{
+  display:flex; align-items:center; gap:14px; margin-bottom:24px;
+  font-family:var(--mono); font-size:.72rem; font-weight:500;
+  letter-spacing:.18em; text-transform:uppercase; color:var(--on-dark-mute);
+}
+.cat__bar::after{content:""; flex:1; height:2px; background:var(--rule-dark)}
+.cat__bar b{color:var(--accent); font-weight:500}
+
+.cat__step{
+  background:var(--paper); color:var(--on-light);
+  border:2px solid var(--accent); padding:28px 24px;
+}
+.cat__step + .cat__step{margin-top:20px}
+.cat__step h3{margin-bottom:6px}
+.cat__step > .label:first-child{margin-bottom:14px}
+.cat__hint{color:var(--on-light-soft); font-size:.95rem; margin-bottom:22px}
+
+/* JS mode: one step at a time. Without JS every step stays visible and the
+   form still submits — a stepped form that hard-depends on JS loses enquiries
+   silently when it fails. */
+.js .cat__step{display:none}
+.js .cat__step.is-on{display:block}
+
+.cat__grid{display:grid; gap:18px}
+@media(min-width:560px){ .cat__grid--2{grid-template-columns:1fr 1fr} }
+
+.cat__step .field{margin-bottom:0}
+/* Specificity matters here: `.field input` for the dark contact form is
+   declared LATER in this stylesheet at equal weight, so a `.cat__step input`
+   rule would lose to it and these inputs would render dark-on-dark inside a
+   cream panel. The extra class is what wins it. */
+.cat__step .field input, .cat__step .field textarea, .cat__step .field select{
+  width:100%; font-family:var(--sans); font-size:1rem;
+  background:#fff; color:var(--on-light);
+  border:1px solid var(--rule-light); padding:15px 16px;
+}
+.cat__step .field textarea{min-height:104px; resize:vertical}
+.cat__step .field input:focus, .cat__step .field textarea:focus{
+  outline:none; border-color:var(--accent);
+}
+.cat__step .field input::placeholder, .cat__step .field textarea::placeholder{color:var(--on-light-mute)}
+.cat__step .label{color:var(--on-light-mute)}
+
+/* quantity rows */
+.qrow{
+  display:flex; align-items:center; gap:14px;
+  padding-block:14px; border-top:1px solid var(--rule-light);
+}
+.qrow:last-of-type{border-bottom:1px solid var(--rule-light)}
+.qrow__label{flex:1; min-width:0}
+.qrow__name{display:block; font-weight:700; font-size:1rem; line-height:1.3}
+.qrow__unit{
+  display:block; font-family:var(--mono); font-size:.72rem; font-weight:400;
+  color:var(--on-light-mute); margin-top:4px;
+}
+.qty{display:flex; align-items:center; gap:0; flex:none}
+.qty button{
+  width:42px; height:42px; border:2px solid var(--on-light);
+  font-size:1.25rem; line-height:1; display:grid; place-items:center;
+}
+.qty button:hover{background:var(--on-light); color:var(--paper)}
+.qty input{
+  width:56px; height:42px; text-align:center; padding:0!important;
+  border:2px solid var(--on-light)!important; border-inline:0!important;
+  font-family:var(--mono); font-weight:500;
+  -moz-appearance:textfield;
+}
+.qty input::-webkit-outer-spin-button, .qty input::-webkit-inner-spin-button{
+  -webkit-appearance:none; margin:0;
+}
+
+/* running estimate */
+.est{
+  margin-top:24px; border:2px dashed var(--accent); padding:20px;
+  background:rgba(224,118,43,.06);
+}
+.est__row{display:flex; align-items:baseline; gap:12px}
+.est__lbl{
+  font-family:var(--mono); font-size:.72rem; letter-spacing:.18em;
+  text-transform:uppercase; color:var(--on-light-mute); flex:1;
+}
+.est__eur{font-weight:800; font-size:1.5rem; letter-spacing:-.02em; white-space:nowrap}
+.est__bgn{font-family:var(--mono); font-size:.85rem; color:var(--on-light-mute); white-space:nowrap}
+.est__note{font-family:var(--mono); font-size:.72rem; line-height:1.7; color:var(--on-light-mute); margin-top:12px}
+
+/* radio choice cards */
+.choice{display:grid; gap:12px}
+.choice label{
+  display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start;
+  border:2px solid var(--rule-light); padding:16px 18px; cursor:pointer;
+}
+.choice label:has(input:checked){border-color:var(--accent); background:rgba(224,118,43,.06)}
+.choice input{width:24px; height:24px; accent-color:var(--accent); margin:0}
+.choice b{display:block; font-size:1rem}
+.choice span{display:block; font-size:.9rem; color:var(--on-light-soft); margin-top:3px}
+
+.cat__nav{display:flex; flex-wrap:wrap; gap:12px; margin-top:26px}
+.cat__nav .btn{flex:1 1 auto; min-width:150px; padding-block:17px}
+.js .cat__submit{display:none}
+.js .cat__step.is-last .cat__submit{display:inline-flex}
+
+.cat__consent{
+  display:grid; grid-template-columns:auto 1fr; gap:14px; align-items:start;
+  margin-top:22px;
+}
+.cat__consent input{width:26px; height:26px; accent-color:var(--accent); margin-top:2px}
+.cat__consent label{font-size:.94rem; color:var(--on-light-soft); line-height:1.6}
+
+.cat__msg{margin-top:18px; font-family:var(--mono); font-size:.78rem; line-height:1.7; display:none}
+.cat__msg.show{display:block}
+.cat__msg.ok{color:#8A5A1E}
+.cat__msg.err{color:#B3352B}
+
 /* ═══ MENU ═════════════════════════════════════════════════ */
 .menu{margin-top:40px}
 .mrow{padding-block:20px; border-top:1px solid var(--rule-light)}
@@ -435,6 +555,7 @@ section[id]{scroll-margin-top:var(--header-h)}
     <a href="#truck"   data-bg="Камионът"  data-en="The truck">Камионът</a>
     <a href="#how"     data-bg="Как става" data-en="How it works">Как става</a>
     <a href="#menu"    data-bg="Меню"      data-en="Menu">Меню</a>
+    <a href="#catering" data-bg="Кетъринг"  data-en="Catering">Кетъринг</a>
     <a href="#gallery" data-bg="Галерия"   data-en="Gallery">Галерия</a>
     <a href="#reviews" data-bg="Отзиви"    data-en="Reviews">Отзиви</a>
     <a href="#contact" data-bg="Контакти"  data-en="Contact">Контакти</a>
@@ -668,6 +789,199 @@ section[id]{scroll-margin-top:var(--header-h)}
       <div class="ph" data-bg="Снимка — бургер / ролка" data-en="Photo — burger / wrap">Снимка — бургер / ролка</div>
       <div class="ph" data-bg="Снимка — хумус" data-en="Photo — hummus">Снимка — хумус</div>
     </div>
+  </div>
+</section>
+
+<!-- ═══ КЕТЪРИНГ ═════════════════════════════════════════ -->
+<section class="band band--dark" id="catering">
+  <div class="wrap">
+    <div class="eyebrow"><span data-bg="Кетъринг" data-en="Catering">Кетъринг</span></div>
+    <h2 data-bg="Пиле за цяла компания" data-en="Chicken for the whole party">Пиле за цяла компания</h2>
+    <p class="lede"
+       data-bg="Рожден ден, сватба, фирмено парти или събор — въртим толкова пилета, колкото ви трябват. Оставете заявка и ще ви се обадим, за да уточним бройките, часа и цената."
+       data-en="A birthday, a wedding, an office party or a village fair — we will turn as many chickens as you need. Leave an enquiry and we will call you to agree quantities, timing and price.">
+      Рожден ден, сватба, фирмено парти или събор — въртим толкова пилета, колкото ви трябват. Оставете заявка и ще ви се обадим, за да уточним бройките, часа и цената.
+    </p>
+
+    <form class="cat" id="catForm" novalidate>
+      <div class="cat__bar" id="catBar" role="status" aria-live="polite">
+        <span data-bg="Стъпка" data-en="Step">Стъпка</span>&nbsp;<b id="catNum">1</b>&nbsp;<span data-bg="от 4" data-en="of 4">от 4</span>
+      </div>
+
+      <!-- ── 1 · КОГА ── -->
+      <section class="cat__step is-on" data-step="1" aria-label="Кога">
+        <div class="label">01 · <span data-bg="Кога" data-en="When">Кога</span></div>
+        <h3 data-bg="Кога ви трябва?" data-en="When do you need it?">Кога ви трябва?</h3>
+        <p class="cat__hint" id="leadHint"
+           data-bg="Приемаме заявки поне 2 дни предварително — пилетата се въртят бавно."
+           data-en="We take enquiries at least 2 days ahead — the chickens turn slowly.">
+          Приемаме заявки поне 2 дни предварително — пилетата се въртят бавно.
+        </p>
+
+        <div class="cat__grid cat__grid--2">
+          <div class="field">
+            <label class="label" for="c-date" data-bg="Дата" data-en="Date">Дата</label>
+            <input id="c-date" name="date" type="date" required>
+          </div>
+          <div class="field">
+            <label class="label" for="c-time" data-bg="Час" data-en="Time">Час</label>
+            <input id="c-time" name="time" type="time" required value="12:00">
+          </div>
+        </div>
+        <div class="cat__grid" style="margin-top:18px">
+          <div class="field">
+            <label class="label" for="c-guests" data-bg="За колко души" data-en="How many people">За колко души</label>
+            <input id="c-guests" name="guests" type="number" min="1" max="1000" step="1" required
+                   data-ph-bg="Напр. 40" data-ph-en="e.g. 40" placeholder="Напр. 40">
+          </div>
+        </div>
+
+        <div class="cat__nav">
+          <button type="button" class="btn btn--solid" data-go="next" data-bg="Напред" data-en="Next">Напред</button>
+        </div>
+      </section>
+
+      <!-- ── 2 · КАКВО ── -->
+      <section class="cat__step" data-step="2" aria-label="Какво">
+        <div class="label">02 · <span data-bg="Какво" data-en="What">Какво</span></div>
+        <h3 data-bg="Какво да сложим?" data-en="What shall we make?">Какво да сложим?</h3>
+        <p class="cat__hint"
+           data-bg="Сложете бройки там, където знаете. Останалото уточняваме по телефона."
+           data-en="Put numbers where you know them. We settle the rest by phone.">
+          Сложете бройки там, където знаете. Останалото уточняваме по телефона.
+        </p>
+
+        <div id="qrows"></div>
+
+        <div class="field" style="margin-top:22px">
+          <label class="label" for="c-sides" data-bg="Гарнитури и друго" data-en="Sides and extras">Гарнитури и друго</label>
+          <textarea id="c-sides" name="sides"
+                    data-ph-bg="Напр.: картофи, шопска салата, хумус, фалафел за 5 души"
+                    data-ph-en="e.g. chips, shopska salad, hummus, falafel for 5"
+                    placeholder="Напр.: картофи, шопска салата, хумус, фалафел за 5 души"></textarea>
+        </div>
+
+        <div class="est" id="est" hidden>
+          <div class="est__row">
+            <span class="est__lbl" data-bg="Ориентировъчна стойност" data-en="Estimated value">Ориентировъчна стойност</span>
+            <span>
+              <span class="est__eur" id="estEur">0,00 €</span><br>
+              <span class="est__bgn" id="estBgn">0,00 лв.</span>
+            </span>
+          </div>
+          <p class="est__note"
+             data-bg="Само за ориентир — по цените от менюто, без гарнитурите и без доставка. Крайната цена потвърждаваме по телефона."
+             data-en="A guide only — menu prices, excluding sides and delivery. We confirm the final price by phone.">
+            Само за ориентир — по цените от менюто, без гарнитурите и без доставка. Крайната цена потвърждаваме по телефона.
+          </p>
+        </div>
+
+        <div class="cat__nav">
+          <button type="button" class="btn btn--ghost" data-go="prev" data-bg="Назад" data-en="Back">Назад</button>
+          <button type="button" class="btn btn--solid" data-go="next" data-bg="Напред" data-en="Next">Напред</button>
+        </div>
+      </section>
+
+      <!-- ── 3 · КЪДЕ ── -->
+      <section class="cat__step" data-step="3" aria-label="Къде">
+        <div class="label">03 · <span data-bg="Къде" data-en="Where">Къде</span></div>
+        <h3 data-bg="Къде да е готово?" data-en="Where should it be ready?">Къде да е готово?</h3>
+        <p class="cat__hint"
+           data-bg="Взимате от камиона или го докарваме. За доставка се обаждаме да уточним цената."
+           data-en="Collect from the truck, or we bring it. For delivery we call to agree the price.">
+          Взимате от камиона или го докарваме. За доставка се обаждаме да уточним цената.
+        </p>
+
+        <div class="choice">
+          <label>
+            <input type="radio" name="fulfilment" value="Взимане от камиона" checked>
+            <span>
+              <b data-bg="Взимане от камиона" data-en="Collection from the truck">Взимане от камиона</b>
+              <span data-bg="Ловеч Център, ул. „Княз Имеретински“" data-en="Lovech Centre, Knyaz Imeretinski St.">Ловеч Център, ул. „Княз Имеретински“</span>
+            </span>
+          </label>
+          <label>
+            <input type="radio" name="fulfilment" value="Доставка">
+            <span>
+              <b data-bg="Доставка" data-en="Delivery">Доставка</b>
+              <span data-bg="В Ловеч и околността — цената зависи от разстоянието" data-en="In and around Lovech — the price depends on the distance">В Ловеч и околността — цената зависи от разстоянието</span>
+            </span>
+          </label>
+        </div>
+
+        <div class="field" id="addrField" style="margin-top:18px" hidden>
+          <label class="label" for="c-addr" data-bg="Адрес за доставка" data-en="Delivery address">Адрес за доставка</label>
+          <input id="c-addr" name="address" type="text"
+                 data-ph-bg="Улица, номер, населено място" data-ph-en="Street, number, town"
+                 placeholder="Улица, номер, населено място">
+        </div>
+
+        <div class="cat__nav">
+          <button type="button" class="btn btn--ghost" data-go="prev" data-bg="Назад" data-en="Back">Назад</button>
+          <button type="button" class="btn btn--solid" data-go="next" data-bg="Напред" data-en="Next">Напред</button>
+        </div>
+      </section>
+
+      <!-- ── 4 · КОЙ ── -->
+      <section class="cat__step is-last" data-step="4" aria-label="Кой">
+        <div class="label">04 · <span data-bg="Кой" data-en="Who">Кой</span></div>
+        <h3 data-bg="На кого да се обадим?" data-en="Who do we call?">На кого да се обадим?</h3>
+        <p class="cat__hint"
+           data-bg="Връщаме обаждане, за да потвърдим бройките, часа и цената."
+           data-en="We call back to confirm quantities, timing and price.">
+          Връщаме обаждане, за да потвърдим бройките, часа и цената.
+        </p>
+
+        <div class="cat__grid cat__grid--2">
+          <div class="field">
+            <label class="label" for="c-name" data-bg="Име" data-en="Name">Име</label>
+            <input id="c-name" name="name" type="text" required autocomplete="name"
+                   data-ph-bg="Вашето име" data-ph-en="Your name" placeholder="Вашето име">
+          </div>
+          <div class="field">
+            <label class="label" for="c-phone" data-bg="Телефон" data-en="Phone">Телефон</label>
+            <input id="c-phone" name="phone" type="tel" required autocomplete="tel"
+                   data-ph-bg="08XX XXX XXX" data-ph-en="08XX XXX XXX" placeholder="08XX XXX XXX">
+          </div>
+        </div>
+        <div class="cat__grid" style="margin-top:18px">
+          <div class="field">
+            <label class="label" for="c-email" data-bg="Имейл — по желание" data-en="E-mail — optional">Имейл — по желание</label>
+            <input id="c-email" name="email" type="email" autocomplete="email"
+                   data-ph-bg="ако искате писмено потвърждение" data-ph-en="if you want written confirmation"
+                   placeholder="ако искате писмено потвърждение">
+          </div>
+          <div class="field">
+            <label class="label" for="c-notes" data-bg="Бележки" data-en="Notes">Бележки</label>
+            <textarea id="c-notes" name="notes"
+                      data-ph-bg="Повод, алергии, люто, всичко друго"
+                      data-ph-en="Occasion, allergies, spice, anything else"
+                      placeholder="Повод, алергии, люто, всичко друго"></textarea>
+          </div>
+        </div>
+
+        <div class="cat__consent">
+          <input id="c-consent" name="consent" type="checkbox" required>
+          <label for="c-consent" data-html
+            data-bg="Съгласен/съгласна съм Black Chef да обработи данните ми, за да отговори на тази заявка. Подробности — в <a href=&quot;#privacy&quot;>Политиката за поверителност</a>."
+            data-en="I agree that Black Chef may process my details in order to respond to this enquiry. Details are in the <a href=&quot;#privacy&quot;>Privacy Policy</a>.">
+            Съгласен/съгласна съм Black Chef да обработи данните ми, за да отговори на тази заявка. Подробности — в <a href="#privacy">Политиката за поверителност</a>.
+          </label>
+        </div>
+
+        <div class="cat__nav">
+          <button type="button" class="btn btn--ghost" data-go="prev" data-bg="Назад" data-en="Back">Назад</button>
+          <button type="submit" class="btn btn--solid cat__submit" id="catSubmit" data-bg="Изпратете заявката" data-en="Send the enquiry">Изпратете заявката</button>
+        </div>
+        <p class="cat__msg" id="catMsg" role="status" aria-live="polite"></p>
+      </section>
+    </form>
+
+    <p class="note" style="margin-top:30px"
+       data-bg="Бърза сметка по телефона: 087 927 9745 — за голяма поръчка винаги е по-лесно да се чуем."
+       data-en="A quick answer by phone: 087 927 9745 — for a large order it is always easier to talk.">
+      Бърза сметка по телефона: 087 927 9745 — за голяма поръчка винаги е по-лесно да се чуем.
+    </p>
   </div>
 </section>
 
@@ -1049,6 +1363,244 @@ section[id]{scroll-margin-top:var(--header-h)}
       .catch(function(){ say("err","err"); })
       .finally(function(){ btn.disabled = false; });
   });
+
+
+  /* ═══ CATERING BOOKING FLOW ══════════════════════════════════
+     Minimum notice before a catering date. A whole bird takes hours and the
+     truck still has its own window to serve. */
+  var CATERING_MIN_DAYS = 2;
+  var BGN_RATE = 1.95583;   /* fixed changeover rate — same as the menu */
+
+  var catForm = $("#catForm");
+  if(catForm){
+    var money = function(n){ return n.toFixed(2).replace(".", ","); };
+
+    /* ── Prices come FROM the menu rows, not from a second list. A duplicated
+       price table is a second source of truth and drifts the first time one
+       of them is corrected. ── */
+    var ITEMS = $$("#menu .mrow").map(function(row, i){
+      var nameEl = $(".mrow__name", row);
+      var eurEl  = $(".mrow__eur", row);
+      if(!nameEl || !eurEl) return null;
+      return {
+        id: "item" + i,
+        bg: nameEl.getAttribute("data-bg") || nameEl.textContent.trim(),
+        en: nameEl.getAttribute("data-en") || nameEl.textContent.trim(),
+        eur: parseFloat(eurEl.textContent.replace(/[^\d,.]/g, "").replace(",", "."))
+      };
+    }).filter(Boolean);
+
+    /* build the quantity rows */
+    var qrows = $("#qrows");
+    ITEMS.forEach(function(it){
+      var row = document.createElement("div");
+      row.className = "qrow";
+      /* Built with DOM calls, not string interpolation: the names come from
+         the menu markup and must not be re-parsed as HTML. The price sits in
+         a SIBLING of .qrow__name — nesting it inside would put it in the path
+         of setLang's textContent write, which would silently delete it. */
+      var label = document.createElement("span");
+      label.className = "qrow__label";
+
+      var nm = document.createElement("span");
+      nm.className = "qrow__name";
+      nm.setAttribute("data-bg", it.bg);
+      nm.setAttribute("data-en", it.en);
+      nm.textContent = it.bg;
+
+      var unit = document.createElement("span");
+      unit.className = "qrow__unit";
+      unit.textContent = money(it.eur) + " €";
+
+      label.appendChild(nm); label.appendChild(unit);
+
+      var qty = document.createElement("span");
+      qty.className = "qty";
+      qty.innerHTML =
+        '<button type="button" data-step-qty="-1" aria-label="-1">−</button>' +
+        '<input type="number" inputmode="numeric" min="0" max="999" step="1" value="0">' +
+        '<button type="button" data-step-qty="1" aria-label="+1">+</button>';
+
+      row.appendChild(label); row.appendChild(qty);
+      qrows.appendChild(row);
+
+      it.input = $("input", qty);
+      it.input.name = it.id;
+      it.input.setAttribute("aria-label", it.bg);
+    });
+
+    /* ── running estimate ── */
+    var est = $("#est"), estEur = $("#estEur"), estBgn = $("#estBgn");
+    function updateEstimate(){
+      var total = 0;
+      ITEMS.forEach(function(it){
+        var q = parseInt(it.input.value, 10);
+        if(isFinite(q) && q > 0) total += q * it.eur;
+      });
+      total = Math.round(total * 100) / 100;
+      estEur.textContent = money(total) + " €";
+      estBgn.textContent = money(Math.round(total * BGN_RATE * 100) / 100) + " лв.";
+      est.hidden = total <= 0;
+    }
+    qrows.addEventListener("input", updateEstimate);
+    qrows.addEventListener("click", function(e){
+      var btn = e.target.closest("[data-step-qty]");
+      if(!btn) return;
+      var input = $("input", btn.parentNode);
+      var v = parseInt(input.value, 10);
+      if(!isFinite(v)) v = 0;
+      input.value = Math.max(0, Math.min(999, v + parseInt(btn.getAttribute("data-step-qty"), 10)));
+      updateEstimate();
+    });
+    updateEstimate();
+
+    /* ── earliest allowed date ── */
+    var dateInput = $("#c-date");
+    var min = new Date();
+    min.setDate(min.getDate() + CATERING_MIN_DAYS);
+    var minISO = min.toISOString().slice(0, 10);
+    dateInput.min = minISO;
+    var hint = $("#leadHint");
+    hint.setAttribute("data-bg", "Приемаме заявки поне " + CATERING_MIN_DAYS +
+      " дни предварително — пилетата се въртят бавно.");
+    hint.setAttribute("data-en", "We take enquiries at least " + CATERING_MIN_DAYS +
+      " days ahead — the chickens turn slowly.");
+
+    /* ── delivery address is required only when delivery is chosen ── */
+    var addrField = $("#addrField"), addrInput = $("#c-addr");
+    function syncFulfilment(){
+      var delivery = catForm.querySelector('input[name="fulfilment"]:checked').value === "Доставка";
+      addrField.hidden = !delivery;
+      addrInput.required = delivery;
+      if(!delivery) addrInput.setCustomValidity("");
+    }
+    $$('input[name="fulfilment"]', catForm).forEach(function(r){
+      r.addEventListener("change", syncFulfilment);
+    });
+    syncFulfilment();
+
+    /* ── steps ── */
+    var steps = $$(".cat__step", catForm), at = 0, catNum = $("#catNum");
+    steps.forEach(function(st){ st.setAttribute("tabindex", "-1"); });
+
+    function show(i){
+      at = Math.max(0, Math.min(steps.length - 1, i));
+      steps.forEach(function(st, n){ st.classList.toggle("is-on", n === at); });
+      catNum.textContent = String(at + 1);
+      steps[at].focus({preventScroll:true});
+      var top = $("#catering").getBoundingClientRect().top + window.scrollY - 90;
+      window.scrollTo({top:top, behavior:"smooth"});
+    }
+
+    function stepValid(i){
+      var ok = true;
+      $$("input, textarea, select", steps[i]).forEach(function(f){
+        if(f.disabled || f.closest("[hidden]")) return;
+        if(!f.checkValidity()){ ok = false; f.reportValidity && f.reportValidity(); }
+      });
+      /* Step 2 carries no required field, so without this an empty basket
+         walks straight through and the owner gets an enquiry for nothing. */
+      if(ok && steps[i].getAttribute("data-step") === "2"){
+        var any = ITEMS.some(function(it){ return parseInt(it.input.value,10) > 0; });
+        if(!any && !$("#c-sides").value.trim()){
+          ok = false;
+          var sides = $("#c-sides");
+          sides.setCustomValidity(document.documentElement.lang === "en"
+            ? "Choose at least one item, or describe what you need."
+            : "Изберете поне едно нещо или опишете какво ви трябва.");
+          sides.reportValidity();
+          setTimeout(function(){ sides.setCustomValidity(""); }, 50);
+        }
+      }
+      return ok;
+    }
+
+    catForm.addEventListener("click", function(e){
+      var b = e.target.closest("[data-go]");
+      if(!b) return;
+      if(b.getAttribute("data-go") === "next"){ if(stepValid(at)) show(at + 1); }
+      else show(at - 1);
+    });
+
+    /* ── submit ── */
+    var catMsg = $("#catMsg"), catBtn = $("#catSubmit");
+    var CAT_COPY = {
+      bg:{ invalid:"Моля, попълнете име, телефон и съгласието.",
+           sending:"Изпращане…",
+           ok:"Благодарим! Получихме заявката и ще ви се обадим.",
+           err:"Нещо се обърка. Моля, обадете се на 087 927 9745.",
+           unset:"Формата още не е свързана с пощата. Моля, обадете се на 087 927 9745." },
+      en:{ invalid:"Please fill in your name and phone, and tick the consent box.",
+           sending:"Sending…",
+           ok:"Thank you! We have your enquiry and will call you back.",
+           err:"Something went wrong. Please call 087 927 9745.",
+           unset:"The form is not connected to an inbox yet. Please call 087 927 9745." }
+    };
+    function catT(k){ return CAT_COPY[document.documentElement.lang === "en" ? "en" : "bg"][k]; }
+    function catSay(kind, key){ catMsg.className = "cat__msg show " + kind; catMsg.textContent = catT(key); }
+
+    function summary(){
+      var L = document.documentElement.lang === "en" ? "en" : "bg";
+      var lines = [], total = 0;
+      lines.push((L === "en" ? "Date: " : "Дата: ") + dateInput.value + "  " + $("#c-time").value);
+      lines.push((L === "en" ? "People: " : "За брой души: ") + $("#c-guests").value);
+      lines.push("");
+      ITEMS.forEach(function(it){
+        var q = parseInt(it.input.value, 10);
+        if(isFinite(q) && q > 0){
+          total += q * it.eur;
+          lines.push("  " + q + " × " + it[L] + "  —  " + money(q * it.eur) + " €");
+        }
+      });
+      var sides = $("#c-sides").value.trim();
+      if(sides) lines.push("  " + (L === "en" ? "Sides: " : "Гарнитури: ") + sides);
+      total = Math.round(total * 100) / 100;
+      lines.push("");
+      lines.push((L === "en" ? "Estimate: " : "Ориентировъчно: ") +
+                 money(total) + " € / " + money(Math.round(total * BGN_RATE * 100) / 100) + " лв.");
+      lines.push("");
+      var ful = catForm.querySelector('input[name="fulfilment"]:checked').value;
+      lines.push((L === "en" ? "Fulfilment: " : "Начин: ") + ful);
+      if(addrInput.required && addrInput.value.trim())
+        lines.push((L === "en" ? "Address: " : "Адрес: ") + addrInput.value.trim());
+      lines.push("");
+      lines.push((L === "en" ? "Name: " : "Име: ") + $("#c-name").value);
+      lines.push((L === "en" ? "Phone: " : "Телефон: ") + $("#c-phone").value);
+      if($("#c-email").value.trim()) lines.push("E-mail: " + $("#c-email").value.trim());
+      if($("#c-notes").value.trim())
+        lines.push((L === "en" ? "Notes: " : "Бележки: ") + $("#c-notes").value.trim());
+      return lines.join("\n");
+    }
+
+    /* The quantity rows are created after the initial setLang() pass, so
+       re-run it or they stay Bulgarian on an English first load. */
+    setLang(document.documentElement.lang === "en" ? "en" : "bg");
+
+    catForm.addEventListener("submit", function(e){
+      e.preventDefault();
+      for(var i = 0; i < steps.length; i++){
+        if(!stepValid(i)){ show(i); catSay("err", "invalid"); return; }
+      }
+      if(WEB3FORMS_KEY.indexOf("PASTE-") === 0){ catSay("err", "unset"); return; }
+
+      var data = new FormData();
+      data.append("access_key", WEB3FORMS_KEY);
+      data.append("subject", "Кетъринг заявка — Black Chef");
+      data.append("from_name", "Black Chef — сайт");
+      data.append("name", $("#c-name").value);
+      data.append("phone", $("#c-phone").value);
+      if($("#c-email").value.trim()) data.append("email", $("#c-email").value.trim());
+      data.append("message", summary());
+
+      catBtn.disabled = true;
+      catSay("ok", "sending");
+      fetch("https://api.web3forms.com/submit", {method:"POST", body:data})
+        .then(function(r){ return r.json(); })
+        .then(function(j){ if(j && j.success){ catSay("ok", "ok"); } else catSay("err", "err"); })
+        .catch(function(){ catSay("err", "err"); })
+        .finally(function(){ catBtn.disabled = false; });
+    });
+  }
 
 })();
 </script>

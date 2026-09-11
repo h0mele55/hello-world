@@ -32,6 +32,12 @@
   --paper-2:#E6E3DC;
   --accent:#E0762B;
   --accent-hot:#EC8433;
+  /* --accent is the brand orange and stays exactly as it is for fills, rules
+     and dots. But as TEXT on a light ground it measures 2.67 — under the 4.5
+     AA floor and under even the 3:1 for meaningful graphics. This darker
+     burnt tone is the same hue at 5.41 / 4.90 on paper / paper2, and is used
+     ONLY where orange is text or a meaning-carrying mark on light. */
+  --accent-ink:#9C480D;
 
   --on-dark:#F0EEE9;
   --on-dark-soft:#B4AFA7;
@@ -40,7 +46,10 @@
 
   --on-light:#0D0D0D;
   --on-light-soft:#5C5851;
-  --on-light-mute:#8A857D;
+  /* Was #8A857D — 3.16 on paper and 2.86 on the darker paper, both below the
+     4.5 AA needs for the small mono labels and the лв. prices it carries.
+     #655F59 gives 5.43 / 4.91 / 6.30 on paper / paper2 / white. */
+  --on-light-mute:#655F59;
   --rule-light:#CFCAC1;
 
   --sans:"Onest","Helvetica Neue",Arial,sans-serif;
@@ -89,6 +98,9 @@ p{margin:0}
   color:var(--accent); margin-bottom:26px;
 }
 .eyebrow::after{content:""; flex:1; height:1px; background:currentColor; opacity:.45}
+/* Orange eyebrows keep the bright brand tone on ink (6.29) and take the
+   darker one on paper, where the bright orange measures 2.67. */
+.band--light .eyebrow{color:var(--accent-ink)}
 
 .lede{
   font-size:clamp(1.02rem,3.9vw,1.2rem); max-width:44ch; margin-top:20px;
@@ -200,7 +212,11 @@ p{margin:0}
   letter-spacing:.18em; text-transform:uppercase;
   border:2px solid currentColor; transition:background .18s ease, color .18s ease, border-color .18s ease;
 }
-.btn--solid{background:var(--accent); border-color:var(--accent); color:#fff}
+/* Ink rather than white on the orange: white measured 3.09 against this
+   background, and the button label is small uppercase mono. Ink gives 6.29
+   and keeps the brand orange untouched. To go back to the original look,
+   change `color` here to #fff — and accept the contrast. */
+.btn--solid{background:var(--accent); border-color:var(--accent); color:var(--ink)}
 .btn--solid:hover{background:var(--accent-hot); border-color:var(--accent-hot)}
 .btn--ghost:hover{background:var(--on-dark); color:var(--ink)}
 .band--light .btn--ghost:hover{background:var(--ink); color:var(--paper)}
@@ -221,7 +237,7 @@ p{margin:0}
 
 .facts{display:grid; gap:22px; margin-top:34px}
 @media(min-width:620px){ .facts{grid-template-columns:repeat(3,1fr)} }
-.fact__n{font-family:var(--mono); font-size:.7rem; letter-spacing:.2em; color:var(--accent); margin-bottom:10px}
+.fact__n{font-family:var(--mono); font-size:.7rem; letter-spacing:.2em; color:var(--accent-ink); margin-bottom:10px}
 .fact h3{margin-bottom:8px}
 .fact p{font-size:.98rem; color:var(--on-dark-soft)}
 .band--light .fact p{color:var(--on-light-soft)}
@@ -235,7 +251,7 @@ p{margin:0}
 .step:last-child{border-bottom:1px solid var(--rule-light)}
 .step__n{
   font-family:var(--mono); font-size:.82rem; font-weight:500;
-  letter-spacing:.14em; color:var(--accent); padding-top:.35em;
+  letter-spacing:.14em; color:var(--accent-ink); padding-top:.35em;
 }
 .step p{color:var(--on-light-soft); margin-top:7px; font-size:.99rem}
 
@@ -249,7 +265,7 @@ p{margin:0}
 }
 .chek__n{
   font-family:var(--mono); font-size:.78rem; font-weight:500;
-  letter-spacing:.2em; text-transform:uppercase; color:var(--accent);
+  letter-spacing:.2em; text-transform:uppercase; color:var(--accent-ink);
   padding-bottom:18px; margin-bottom:20px;
   border-bottom:2px dashed var(--rule-light);   /* the tear line */
 }
@@ -287,6 +303,7 @@ p{margin:0}
   padding:20px var(--gutter) 16px; background:var(--paper);
 }
 .cmodal__title{font-weight:800; font-size:1.35rem; letter-spacing:-.02em; line-height:1.1}
+.cmodal__step b{color:var(--accent-ink)}
 .cmodal__step{
   display:block; font-family:var(--mono); font-size:.7rem; font-weight:500;
   letter-spacing:.2em; text-transform:uppercase; color:var(--on-light-mute); margin-top:7px;
@@ -443,7 +460,7 @@ html:not(.js) .cmodal__foot .btn[data-go]{display:none}
 .mrow__desc{color:var(--on-light-soft); font-size:.96rem; margin-top:9px; max-width:52ch}
 .tag{
   display:inline-block; margin-left:10px; vertical-align:1px;
-  border:1px solid var(--accent); color:var(--accent);
+  border:1px solid var(--accent-ink); color:var(--accent-ink);
   font-family:var(--mono); font-size:.62rem; font-weight:500;
   letter-spacing:.16em; text-transform:uppercase; padding:5px 9px;
 }
@@ -478,7 +495,7 @@ html:not(.js) .cmodal__foot .btn[data-go]{display:none}
 /* ═══ REVIEWS ══════════════════════════════════════════════ */
 .score{border:2px solid var(--on-light); padding:clamp(26px,6vw,40px); margin-top:36px; max-width:520px}
 .score__n{font-size:clamp(3.4rem,15vw,5rem); font-weight:800; line-height:.9; letter-spacing:-.04em}
-.score__stars{display:flex; gap:7px; margin-top:16px; color:var(--accent)}
+.score__stars{display:flex; gap:7px; margin-top:16px; color:var(--accent-ink)}
 .score__stars svg{width:28px; height:28px}
 .score__cap{
   font-family:var(--mono); font-size:.68rem; letter-spacing:.18em; line-height:1.9;
@@ -486,7 +503,8 @@ html:not(.js) .cmodal__foot .btn[data-go]{display:none}
 }
 .score__link{
   display:inline-block; margin-top:24px; font-family:var(--mono); font-size:.74rem;
-  letter-spacing:.14em; text-transform:uppercase; color:var(--accent);
+  letter-spacing:.14em; text-transform:uppercase; color:var(--accent-ink);
+  padding-block:8px;   /* was a 19px-tall standalone link — too small to tap */
 }
 
 /* ═══ CONTACT ══════════════════════════════════════════════ */

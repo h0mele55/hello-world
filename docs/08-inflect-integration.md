@@ -108,7 +108,163 @@ Inbound pseudonymous access would contradict Inflect's own `requireRegisteredAge
 5. **License** — PoCA is MIT → usable inside the BUSL-1.1 codebase with attribution; nothing here copies Inflect code into PoCA.
 6. **`@flue/runtime` seam** — the declared-but-unreachable external agent driver (`agent-driver.ts:135-138`) is exactly the class of third-party runtime Phase A is built to gate when it goes live.
 
-## 8. Verification plan (end-to-end)
+## 8. Ten-step implementation roadmap
+
+Each step is sized for one focused working session (human or coding agent) and ships independently. **Prompt** blocks are ready to hand to an implementation agent verbatim; they assume both repositories are checked out (`hello-world` = PoCA, `inflect-compliance` read-write) and that the [never-widen invariant (§2)](#2-fit-thesis) is restated in every session. Steps 2–8 add **zero new dependencies** to Inflect; `viem` enters only at step 9. Repo tags: `[poca]` = this repo, `[inflect]` = inflect-compliance.
+
+---
+
+### Step 1 — Deploy PoCA to OP Sepolia and prove the loop on-chain `[poca]`
+
+**Goal.** A live registry to integrate against: contracts deployed, schemas registered on the predeploy, one accredited test verifier, one live attestation.
+
+**Context.** `contracts/script/Deploy.s.sol`, [03-architecture.md §5](03-architecture.md); OP Sepolia chain id `11155420`, predeploys `0x4200…20`/`0x4200…21` (fixed); a faucet-funded throwaway EOA.
+
+**Prompt.**
+> In the PoCA repo, deploy the PoC to OP Sepolia: `forge script contracts/script/Deploy.s.sol --rpc-url $OP_SEPOLIA_RPC --private-key $PK --broadcast`. Then, via `cast`: grant an accreditation to a second test address on `AccreditationRegistry` (12-month expiry), issue one `AgentCompliance` attestation from it (30-day expiry, dummy commitment), and confirm `ComplianceSetManager.commitmentOf(uid)` matches. Create `docs/09-deployments.md` recording: chain, commit hash deployed, all contract addresses, both schema UIDs, and the exact `cast` commands used. Do not commit any keys.
+
+**Tests.** `cast call` shows the AgentCompliance schema registered with the resolver attached; attest → `MemberAdded` + `commitmentOf(uid)` correct; attest from an unaccredited address reverts; `revoke` flips `removalPending`.
+
+**Hardening.** Throwaway deployer funded minimally; verify contract source on the OP Sepolia explorer; record the deployed commit hash so bytecode is reproducible; note the ownership-transfer plan (multisig, phase 3) in the deployments doc.
+
+---
+
+### Step 2 — Inflect data model + config plumbing (no behaviour change) `[inflect]`
+
+**Goal.** Schema and env surface exist, everything defaults off.
+
+**Context.** `prisma/schema/agentic.prisma:555-744` (`RegisteredAgent`), `src/env.ts:206-334` (the stub-first `AI_*` pattern to copy), `prisma/rls-setup.sql`, `security/audit-allowlist.json` + its coverage guardrail tests.
+
+**Prompt.**
+> Add to `RegisteredAgent`: `pocaAttestationUid Bytes?`, `pocaAgentId BigInt?`, `pocaStatus` enum (`UNVERIFIED|VALID|EXPIRED|REVOKED|ATTESTER_UNACCREDITED|MISMATCH|UNREACHABLE`, default `UNVERIFIED`), `pocaTier Int?`, `pocaVerifiedAt DateTime?`, `pocaAgentVersionHash Bytes?`. Add to `TenantSecuritySettings`: `pocaRequiredForThirdParty Boolean @default(false)`, `pocaFailMode` enum (`WARN|ENFORCE`, default `WARN`), `pocaMinTierByAutonomy Json?`, `pocaVerdictTtlMinutes Int @default(60)`. Add `POCA_ENABLED` (default false), `POCA_RPC_URL`, `POCA_CHAIN_ID`, `POCA_EAS_ADDRESS`, `POCA_ACCREDITATION_REGISTRY`, `POCA_ROUTER` to `src/env.ts` following the `AI_*` stub-first pattern. Write the migration, extend the audit allowlist for the new fields, and change no runtime behaviour anywhere.
+
+**Tests.** Migration applies/rolls back cleanly; audit-allowlist coverage guardrail green; fresh settings row ⇒ disabled + `WARN`; existing RLS guardrail tests unchanged.
+
+**Hardening.** DB `CHECK (pocaTier IN (1,2,3))`; enums not strings; no default RPC URL baked in; new fields excluded from all public/portal serializers (add a denylist test now, before any UI exists).
+
+---
+
+### Step 3 — Zero-dependency chain client `[inflect]`
+
+**Goal.** Read the chain the way the house reads everything: hand-rolled `fetch`, strictly validated.
+
+**Context.** PoCA payload layout ([03-architecture.md §2](03-architecture.md)) and reference decoder `hello-world/sdk/src/attestation.ts` + `constants.ts`; style precedent `src/lib/mcp/receipt-verification.ts`.
+
+**Prompt.**
+> Implement `src/lib/poca/chain-client.ts` with no new dependencies: JSON-RPC `eth_call` over `fetch` to `POCA_RPC_URL`. Export `getAttestation(uid)` (EAS at `POCA_EAS_ADDRESS`, function `getAttestation(bytes32)`, decode the attestation tuple including dynamic `bytes data`) and `isAccredited(address)` (against `POCA_ACCREDITATION_REGISTRY`). On first use verify `eth_chainId == POCA_CHAIN_ID`. 5s timeout, one jittered retry, 128 KiB response cap, strict `0x`-hex validation, typed errors — never throw raw. Generate golden-vector fixtures for the decoder using `@poca/sdk` from the PoCA repo (script under `scripts/`, fixtures committed as JSON) and test parity against them.
+
+**Tests.** Decode parity on golden vectors (valid / revoked / expired / zero-uid / same-payload-reencoded); malformed hex → typed error; timeout and chain-id mismatch paths; no fixture drift (regeneration is deterministic).
+
+**Hardening.** RPC URL comes from env only — never from tenant input; redact the URL in logs and errors; oversized/streaming responses rejected; all failures map to an `UNREACHABLE`-class result, never an exception escaping to callers.
+
+---
+
+### Step 4 — Verification service and verdict state machine `[inflect]`
+
+**Goal.** One place that turns chain state + agent binding into a cached, audited verdict.
+
+**Context.** Step 3 client; `src/lib/db-context.ts` (`withTenantDb`), the Prisma audit middleware + allowlist, verdict semantics in §3 of this doc.
+
+**Prompt.**
+> Implement `src/lib/agentic/poca-verification.ts`: `computeVerdict(agent)` → `{status, tier, attestationAgentVersionHash}` where status is `VALID` only if the attestation exists, `revocationTime == 0`, `expirationTime > now` (±5 min skew tolerance), the attester passes `isAccredited`, and the payload's `agentId`/`identityCommitment` binding matches the `RegisteredAgent` (binding mismatch ⇒ `MISMATCH`). Chain unreachable ⇒ keep the previous verdict, mark staleness. `persistVerdict` writes transitions on the agent row inside `withTenantDb` and emits an `AuditLog` entry on every status **change** (refusals are evidence — house rule); identical re-verdicts update `pocaVerifiedAt` only.
+
+**Tests.** Table-driven verdict matrix over all six statuses; transition idempotence (no duplicate audit rows); expiry skew boundaries; RLS respected (cross-tenant agent invisible).
+
+**Hardening.** Persist only the fields needed (no raw payload retention); per-agent verify rate-limit; nothing tenant-controlled ever reaches the RPC layer; verdict writes are the only mutation this module performs.
+
+---
+
+### Step 5 — Gate 6: the narrowing term `[inflect]`
+
+**Goal.** The seam the architecture reserved, filled — enforcement without a single network call in the hot path.
+
+**Context.** `src/lib/mcp/auth.ts` (gate-chain header doc), `src/lib/agentic/agent-authority.ts` (the seam at :59-65), `autonomy-ceiling.ts`, refusal shape in `agent-registration-gate.ts`, `tests/guards/mcp-tools-use-shared-authz.test.ts`.
+
+**Prompt.**
+> Add the PoCA term at the documented seam in `agent-authority.ts`: applies only when `POCA_ENABLED`, `pocaRequiredForThirdParty`, and `agent.provenance == THIRD_PARTY`. Read the **cached** verdict only. `ENFORCE` + status ≠ `VALID` (or verdict older than `pocaVerdictTtlMinutes`) ⇒ typed refusal (`POCA_ATTESTATION_INVALID`, mirroring the registration gate's refusal shape, audited). `VALID` ⇒ effective ceiling = `min(existing, ceilingFor(pocaTier, tenant.pocaMinTierByAutonomy))`. `WARN` ⇒ annotate the auth context and audit, never deny. Kill switches and gates 1–5 keep precedence; no code path outside this term may consult PoCA state. State in a comment and enforce in tests: this term can only lower or equal the effective authority.
+
+**Tests.** Refusal matrix (6 statuses × WARN/ENFORCE × provenance); **property test: for all inputs, `effective_with_poca ≤ effective_without_poca`**; every pre-existing gate test unchanged; stale-verdict TTL behaviour per mode.
+
+**Hardening.** Hot path pure and synchronous over cached rows; the opt-in default (`false`) is a deliberate, documented divergence from the registration gate's enforce-by-default (that gate protects a closed tenant; this one adds an external dependency); stable typed error codes for API consumers; every `ENFORCE` denial audited with the verdict that caused it.
+
+---
+
+### Step 6 — Re-verify sweep + admin surface `[inflect]`
+
+**Goal.** Verdicts stay fresh without anyone watching; admins can bind, see, and force-check attestations.
+
+**Context.** Jobs house pattern (`src/app-layer/jobs/queue.ts`, `scheduler.ts`, `register-schedules.ts`; `agent-run-reaper.ts` as a template), admin registry surface (`/api/t/:slug/admin/agents/*`, `docs/implementation-notes/2026-09-04-agent-registry-surface.md`), OTel/pino conventions.
+
+**Prompt.**
+> Add `src/app-layer/jobs/poca-reverify.ts` on a 15-minute schedule: iterate tenants with PoCA-bound agents, set tenant context per batch, recompute verdicts via step 4, jitter start, concurrency 1 per tenant. Circuit-break the whole sweep after N consecutive RPC failures (skip cycle, warn log + OTel counter). Extend the admin agents API/UI: set/clear `pocaAttestationUid`/`pocaAgentId` (OWNER/ADMIN only, audited), display status/tier/verifiedAt/staleness, and a rate-limited "Re-verify now" action.
+
+**Tests.** Schedule registered; batches respect RLS; circuit-breaker trips and recovers; endpoint authz matrix; transition during sweep produces exactly one audit row; UI state rendering for all six statuses.
+
+**Hardening.** Global + per-tenant RPC budget per sweep; jitter so multi-instance deployments don't stampede; metrics for verdict distribution, sweep duration, RPC error rate; alert hook on any transition **into** `REVOKED` (that's an incident signal, not housekeeping).
+
+---
+
+### Step 7 — Evidence bundle, derived `agentVersionHash`, drift detection `[inflect]`
+
+**Goal.** One export makes a tenant agent attestation-ready; configuration drift after attestation is caught automatically.
+
+**Context.** Tool-manifest pinning note (`docs/implementation-notes/2026-09-05-mcp-tool-manifest-pinning.md`), `AgentPolicyCard` versions, `src/app-layer/ai/decision-log/`, IMDA MGF catalog under `src/data/libraries/`, reports house patterns, PoCA mapping table ([02-imda-alignment.md §3](02-imda-alignment.md)).
+
+**Prompt.**
+> Implement `src/app-layer/reports/poca-evidence-bundle.ts` + `GET /api/t/:slug/admin/agents/:id/poca-bundle`: a canonical-JSON manifest (sorted keys, stable number formatting — RFC 8785 style) covering the registration snapshot (autonomy, data-access, reversibility, provenance, risk-tier inputs), pinned policy-card version hash, tool allowlist with manifest pin hashes, guard configuration, decision-log coverage stats, kill-switch drill records, and IMDA MGF catalog control statuses with linked Evidence digests. `manifestRoot` = SHA-256 of the canonical bytes. Implement `deriveAgentVersionHash(agent)` = SHA-256 over (modelRef, policy-card version hash, sorted tool pins, guard config). Nightly job: derived hash ≠ `pocaAgentVersionHash` ⇒ verdict `MISMATCH` + "Re-attestation required" flag on the admin surface.
+
+**Tests.** Determinism (two exports byte-identical); golden manifest snapshot; drift flag flips on a policy-card bump and clears after re-attestation; route requires admin + entitlement; denylist test proves no PII/secrets/evidence-contents in the bundle (digests only).
+
+**Hardening.** Size cap with streaming assembly; export itself audit-logged; bundle distribution only via the existing `AuditPack` share machinery — no standalone public URL; embed the generator version in the manifest for reproducibility.
+
+---
+
+### Step 8 — Trust Center publication `[inflect]`
+
+**Goal.** Attested agents become publicly verifiable posture — checkable by anyone against the chain, not against Inflect's word.
+
+**Context.** Trust Center routes (`/trust/[slug]`), its caching pattern, step 4's verdict cache, PoCA wording rules ([02-imda-alignment.md §7](02-imda-alignment.md)).
+
+**Prompt.**
+> Add an "Attested AI agents" section to the public Trust Center: per-agent opt-in boolean (new field, default off, admin-set, audited); render only agents whose cached status is `VALID`; show name, PoCA tier, attestation UID with chain + explorer link, validity window, and a "verify it yourself" snippet (explorer link + one `cast call`). Revalidate from cache on a ≤15-minute ISR/SSR cycle; never enumerate non-opted or non-attested agents; reuse the standard PoCA non-endorsement disclaimer line; never use the word "certified".
+
+**Tests.** Opt-in-only rendering; revoked agent disappears within one sweep + revalidation; zero cross-tenant leakage (guardrail); cache headers correct; snapshot of the public HTML contains no internal identifiers.
+
+**Hardening.** Public path reads cache only — an RPC outage cannot slow or break the page; page rate-limited like other public portals; copy reviewed against the §7 wording rules.
+
+---
+
+### Step 9 — Verifier portal + EIP-712 delegated attestation `[inflect + poca]`
+
+**Goal.** An accredited verifier runs the whole assessment inside Inflect and signs the attestation with their own key; Inflect never custodies verifier keys.
+
+**Context.** `AuditPack`/`AuditorAccount`/`AuditPackShare` models, PoCA delegated-attestation mechanics ([03-architecture.md](03-architecture.md)), eas-contracts EIP-712 typed data (parity source: `@ethereum-attestation-service/eas-sdk`), `src/lib/entitlements.ts`.
+
+**Prompt.**
+> Build the verifier flow on audit rails: a `POCA_ASSESSMENT` audit-pack share type granting an `AuditorAccount` read access to a **pinned** evidence bundle (by manifestRoot); an assessment form recording per-dimension outcomes (→ `dimensionsBitmap`) and tier; on approval, build the EAS delegated-attestation EIP-712 typed data for the `AgentCompliance` schema (recipient, expiry, refUID to the prior attestation, deadline ≤ 1 h, attester = the verifier's address) and return it for wallet signing client-side. A submit endpoint accepts the signature, pre-checks the verifier against `AccreditationRegistry.isAccredited`, and relays via `attestByDelegation` from a minimal relayer key (gas only). This step introduces `viem` (typed-data hashing + relaying) — keep it confined to `src/lib/poca/`. Gate the feature ENTERPRISE.
+
+**Tests.** Typed-data hash golden-vector parity vs eas-sdk; expired deadline rejected; signature from a non-accredited or mismatched address rejected before relay; portal ACL matrix (auditor sees only the pinned bundle); full Sepolia round-trip integration test (assessment → signature → on-chain UID → step 4 verdict flips `VALID`).
+
+**Hardening.** The hash shown to the signer is provably the hash submitted (immutable payload preview, stored + compared); short deadlines; relayer key isolated, minimally funded, spend-alerted; the assessment → attestation-UID link is written to the audit ledger; verifier onboarding checks accreditation on-chain, not by assertion.
+
+---
+
+### Step 10 — Continuous assurance + outbound ZK pilot `[inflect + poca]`
+
+**Goal.** Close the loop: re-attestation fed by runtime evidence, one agent proving its tier pseudonymously to the outside world, and an incident drill that proves revocation actually bites.
+
+**Context.** `src/lib/security/tenant-keys.ts` (per-tenant DEK envelope encryption), `receipt-verification.ts`, PoCA `sdk/src/proof.ts` + [04-identity-and-privacy.md](04-identity-and-privacy.md), the step-1 deployment (router address); note: exercising ZK-side removal needs someone to run PoCA's `finalizeRemoval` (manual `cast` or a 50-line watcher script — PoCA roadmap's keeper).
+
+**Prompt.**
+> Three parts. (a) Re-attestation flow: next bundle embeds pipelock receipt-chain digests and decision-log coverage deltas; the new attestation's `refUID` chains to the prior UID. (b) Optional notarization job: attest the current `AuditLog` head `entryHash` under a separate EAS schema on a daily schedule (tenant opt-in). (c) ZK pilot for ONE internal agent: generate a Semaphore identity in the worker, envelope-encrypt the secret with the tenant DEK via `tenant-keys.ts` (never env, never logs), include its commitment in the next re-attestation, and prove "tier-T member" against the deployed `ComplianceRouter` on Sepolia from a worker script using `@poca/sdk`. Write `docs/poca-runbook.md` covering: key rotation (revoke → re-attest with fresh commitment), and the incident drill: revoke on-chain → sweep flips `REVOKED` → `ENFORCE` tenant denies at gate 6, with measured detection latency and a quarterly drill schedule (mirror the kill-switch drill pattern).
+
+**Tests.** End-to-end drill on Sepolia with latency measured (target: denial within one sweep period + margin); refUID chain integrity across two re-attestations; DEK round-trip for the identity secret; ZK proof verifies on the router and fails after removal is finalized; notarization attestations reference monotonically-advancing ledger heads.
+
+**Hardening.** Identity secret handled like an integration credential (encrypted at rest, redacted everywhere); rotation runbook tested, not just written; monitor the PoCA-side `RemovalRequired` backlog during the pilot; restate in the runbook that inbound pseudonymous access remains out of scope (accountability-first, per §6).
+
+---
+
+## 9. Verification plan (end-to-end)
 
 1. **Unit/guardrail**: decoder parity vs `@poca/sdk`; gate-6 refusal matrix (`VALID/EXPIRED/REVOKED/MISMATCH/UNREACHABLE` × `WARN/ENFORCE`); never-widen assertions; audit-log coverage of verdict transitions — all runnable offline against a stubbed RPC (house style).
 2. **Testnet loop (OP Sepolia)**: deploy the PoCA PoC (`contracts/script/Deploy.s.sol` in this repo — predeploys are already live there); accredit a test verifier; register an agent in a dev Inflect tenant → export its bundle → attest with the bundle's `evidenceHash` + derived `agentVersionHash` → sweep verifies `VALID` and the gate admits at the mapped ceiling → `revoke()` on EAS → next sweep flips `REVOKED` → `ENFORCE` tenant denies at gate 6.

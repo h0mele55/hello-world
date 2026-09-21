@@ -1,0 +1,8 @@
+forge-std/=lib/forge-std/src/
+@ethereum-attestation-service/eas-contracts/=node_modules/@ethereum-attestation-service/eas-contracts/contracts/
+@semaphore-protocol/contracts/=node_modules/@semaphore-protocol/contracts/
+@zk-kit/lean-imt.sol/InternalLeanIMT.sol=node_modules/@zk-kit/lean-imt.sol/InternalLeanIMT.sol
+@zk-kit/lean-imt.sol/LeanIMT.sol=node_modules/@zk-kit/lean-imt.sol/LeanIMT.sol
+@zk-kit/lean-imt.sol/Constants.sol=node_modules/@zk-kit/lean-imt.sol/Constants.sol
+poseidon-solidity/=node_modules/poseidon-solidity/
+@openzeppelin/contracts/=node_modules/@openzeppelin/contracts/

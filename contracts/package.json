@@ -1,0 +1,12 @@
+{
+  "name": "@poca/contracts",
+  "private": true,
+  "version": "0.1.0",
+  "description": "PoCA (Proof of Compliant Agenthood) proof-of-concept contracts: EAS compliance schemas + resolver, accreditation registry, Semaphore membership sets, and a relying-party verification router for the OP Stack.",
+  "license": "MIT",
+  "dependencies": {
+    "@ethereum-attestation-service/eas-contracts": "1.9.0",
+    "@openzeppelin/contracts": "^5.0.0",
+    "@semaphore-protocol/contracts": "^4.14.3"
+  }
+}

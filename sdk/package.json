@@ -1,0 +1,25 @@
+{
+  "name": "@poca/sdk",
+  "private": true,
+  "version": "0.1.0",
+  "description": "PoCA (Proof of Compliant Agenthood) SDK skeleton: agent identity, compliance attestation helpers, and ZK membership proofs.",
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "demo": "tsx examples/demo.ts"
+  },
+  "dependencies": {
+    "@ethereum-attestation-service/eas-sdk": "^2.10.0",
+    "@semaphore-protocol/group": "^4.0.0",
+    "@semaphore-protocol/identity": "^4.0.0",
+    "@semaphore-protocol/proof": "^4.0.0",
+    "viem": "^2.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@zk-kit/semaphore-artifacts": "4.13.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  }
+}

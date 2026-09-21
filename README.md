@@ -36,6 +36,7 @@ Relying party ◀──true/false── ComplianceRouter ◀──ZK membership 
 | [`docs/05-threat-model.md`](docs/05-threat-model.md) | Trust assumptions, attacks & mitigations, honest limits |
 | [`docs/06-open-source-landscape.md`](docs/06-open-source-landscape.md) | The vetted open-source menu this project builds on (licenses, maturity, integration notes) |
 | [`docs/07-roadmap.md`](docs/07-roadmap.md) | Phases, services (indexer, keeper, verifier portal, MCP/A2A bindings), open questions |
+| [`docs/08-inflect-integration.md`](docs/08-inflect-integration.md) | Worked integration plan: PoCA as a narrowing term in Inflect Compliance's agent-governance gate chain, evidence-bundle export, verifier portal, ZK track |
 | [`contracts/`](contracts/) | Foundry PoC: `AccreditationRegistry`, `ComplianceResolver` (EAS), `ComplianceSetManager` (Semaphore), `ComplianceRouter` + tests against the real EAS & Semaphore contracts |
 | [`sdk/`](sdk/) | TypeScript SDK skeleton: identity, attestation encode/read/check, ZK proof generation with offline artifacts + runnable demo |
 

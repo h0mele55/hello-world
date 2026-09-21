@@ -18,6 +18,7 @@ Architecture + research docs; skeletal PoC: four contracts compiling and unit-te
 
 - **Expiry sweep**: permissionless "prove uid expired → mark pending → finalize" path reusing the two-phase removal machinery, closing the ZK-track expiry gap in [05-threat-model.md](05-threat-model.md).
 - **Verifier portal**: evidence bundle assembly (hashing, IPFS pinning), EIP-712 delegated attestation signing, revocation console.
+- **Automated verification (AVA)**: machine-checkable pre-assessment as CI for human attestations (AVA-0), then accredited class-M attestations for tier 1 with reproducible, receipted, third-party-auditable execution — full design in [09-automated-verifier.md](09-automated-verifier.md).
 - **Accountable anonymity**: threshold-encrypted attestation-UID escrow + incident-council process ([design sketch](04-identity-and-privacy.md#6-accountable-anonymity-phase-2-sketch)).
 - **Schema v2**: per-dimension maturity levels (packed `uint8[4]`) replacing the binary bitmap; new schema UID, parallel operation, indexer merges.
 - **ERC-8004 integration**: optional resolver existence-check of `agentId`; act as a Validation-Registry validator publishing the EAS UID as the validation artifact.

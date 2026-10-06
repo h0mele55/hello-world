@@ -148,6 +148,22 @@ def port_fig(key, caption, title):
     return [PageBreak(), P(title, 'h3'), img(key, PW, caption, maxh=22.5 * cm), PageBreak()]
 
 
+def figs(title, items):
+    """Screenshots at full portrait width, flowing onto as many pages as needed."""
+    out = [CondPageBreak(8 * cm), P(title, 'h3')]
+    for k, c in items:
+        out.append(img(k, PW, c, maxh=10.5 * cm))
+    return out
+
+
+FIGS_projects = figs('4.2 Projects: screenshots', [('projects1', 'Figure 2a: Projects, input columns A–G, with the settings at the top and the totals row.'), ('projects2', 'Figure 2b: Projects, calculated columns H–N. Analytics Pilot is flagged because its WIP (10,500) is above its contract (9,000).')])
+FIGS_phasing1 = figs('4.3 Phasing: screenshots', [('phasing0', 'Figure 3a: Phasing helper columns A–H.'), ('phasing1', 'Figure 3b: Raw weights M1–M12 (input).'), ('phasing2', 'Figure 3c: Raw weights M13–M24 (input).'), ('phasing3', 'Figure 3d: Normalised weights M1–M12 (columns AH–AS).'), ('phasing4', 'Figure 3e: Normalised weights M13–M24 and the Σ check (columns AT–BF).')])
+FIGS_wiplog1 = figs('4.4 WIP Log: screenshots', [('wiplog1', 'Figure 4a: WIP Log, 2026, with the totals row. Light-yellow cells are the active window up to the Current Month (Oct 2026).'), ('wiplog2', 'Figure 4b: WIP Log, 2027 (all "future" at this Current Month).'), ('wiplog3', 'Figure 4c: WIP Log, 2028.')])
+FIGS_timeline1 = figs('4.6 Timeline: screenshots', [('timeline1', 'Figure 7a: Timeline, 2026. CRM Rollout is complete (all actual). The red-bordered column is the Current Month.'), ('timeline2', 'Figure 7b: Timeline, 2027. Security Audit is phased 1:2:2:1 over Mar–Jun 2027.'), ('timeline3', 'Figure 7c: Timeline, 2028 (empty for these sample projects, which all end by Jun 2027).')])
+FIGS_aggannual = figs('4.7 Aggregator: annual totals and chart', [('aggannual', 'Figure 9: Annual totals, reconciliation (fully phased) and portfolio chart.')])
+FIGS_phased1 = figs('4.8 Phased Budget: screenshots', [('phased0', 'Figure 10a: Phased Budget helper columns A–G.'), ('phased1', 'Figure 10b: Phased Budget, 2026, with the totals row. Values appear only after Oct 2026, the Current Month.'), ('phased2', 'Figure 10c: Phased Budget, 2027.'), ('phased3', 'Figure 10d: Phased Budget, 2028.')])
+
+
 story = []
 # ------------------------------------------------------------------ cover
 story += [Spacer(1, 5 * cm), P('Project Budget Calculator', 'title'), Spacer(1, 6),
@@ -290,7 +306,7 @@ story += [H1('3. Key concepts'),
 # ------------------------------------------------------------------ 4 sheet by sheet
 story += [H1('4. Sheet-by-sheet reference'),
           P('Each section below covers what the sheet is for, what it looks like, every column, what you type, and how its '
-            'numbers are worked out. Wide screenshots are on their own landscape pages. Wide grids are shown in two halves, and the unused project rows (7–50) are hidden so the totals rows fit.'),
+            'numbers are worked out. Wide sheets are shown in several screenshots (12 months at a time, names repeated), and the unused project rows (7–50) are hidden so the totals rows fit.'),
           H2('4.1 README'),
           P('A one-page summary inside the workbook covering the formulas, the sheet list, the colour key, the monthly routine and the '
             'limits. It has no formulas and no inputs. Keep it as a quick reminder for colleagues who get the file without this guide.'),
@@ -332,9 +348,7 @@ story += [H2('4.2 Projects (Project ∑ Table)'),
             'The <b>header filters</b> (row 5) cover all 50 rows, and panes are frozen so the names stay visible as you scroll.'),
           P('<b>Do not</b> insert or delete rows or columns on any project sheet. Every sheet relies on project <i>n</i> sitting '
             'on row <i>n</i> + 5. To remove a project, clear its input cells on Projects, Phasing and WIP Log instead.', 'note')]
-story += land_fig('projects', 'Figure 2: Projects with six sample projects and the totals row (Current Month = Oct 2026). '
-                              'Analytics Pilot is flagged because its WIP (10,500) is above its contract (9,000).',
-                  '4.2 Projects: screenshot')
+story += FIGS_projects
 
 # Phasing
 story += [H2('4.3 Phasing'),
@@ -367,9 +381,7 @@ story += [H2('4.3 Phasing'),
               ['Back-loaded', '0, 0, 1, 1, 3, 3', 'Delivery-heavy or acceptance-driven projects'],
               ['Bell', '1, 2, 3, 3, 2, 1', 'Typical build project'],
           ], [3.2 * cm, 5.4 * cm, 8.8 * cm])]
-story += land_fig2('phasing1', 'Figure 3a: Phasing with helper columns and raw weights M1–M24 (input).',
-                   'phasing2', 'Figure 3b: The same rows, normalised weights M1–M24 (columns AH–BE) and the Σ check (BF). Columns C–AG are hidden here.',
-                   '4.3 Phasing: screenshots')
+story += FIGS_phasing1
 
 # WIP Log
 story += [H2('4.4 WIP Log'),
@@ -391,9 +403,7 @@ story += [H2('4.4 WIP Log'),
             'WIP, every value moves to a different month. If you ever need to move the timeline, cut and paste the WIP grid '
             'sideways by the same number of months first.', 'note'),
           P('WIP can be negative (for example, a reversal). It lowers WIP to date and raises Budgeted.')]
-story += land_fig2('wiplog1', 'Figure 4a: WIP Log, Jan 2026 – Jun 2027, with the totals row. Light-yellow cells are the active window up to the Current Month (Oct 2026).',
-                   'wiplog2', 'Figure 4b: WIP Log, Jul 2027 – Dec 2028 (all "future" at this Current Month).',
-                   '4.4 WIP Log: screenshots')
+story += FIGS_wiplog1
 
 # Project Page
 story += [H2('4.5 Project Page'),
@@ -436,10 +446,7 @@ story += [H2('4.6 Timeline'),
           P('Columns A–E show the slot number, name, Engagement Manager, start and end. Use it to spot overlaps, gaps in WIP '
             'logging (a white cell inside a project\'s past months), and months where a lot of forecast bunches up.'),
           P('Read across a row and the numbers add up to the project\'s Contracted Budget, as long as its Status is OK.')]
-story += land_fig2('timeline1', 'Figure 7a: Timeline, Jan 2026 – Jun 2027. CRM Rollout is complete (all actual). Security Audit is entirely '
-                                'in the future, phased 1:2:2:1 over Mar–Jun 2027.',
-                   'timeline2', 'Figure 7b: Timeline, Jul 2027 – Dec 2028 (empty for these sample projects, which all end by Jun 2027).',
-                   '4.6 Timeline: screenshots')
+story += FIGS_timeline1
 
 # Aggregator
 story += [H2('4.7 Aggregator'),
@@ -470,8 +477,7 @@ story += [H2('4.7 Aggregator'),
             'definition once a month becomes actual.')]
 story += port_fig('aggregator', 'Figure 8: Aggregator monthly table, all 36 months (Jan 2026 – Dec 2028) and the totals row, '
                                  'with a sample TRM of 25,000 a month entered for 2026–2027.', '4.7 Aggregator: monthly table')
-story += land_fig('aggannual', 'Figure 9: Annual totals, reconciliation (fully phased) and portfolio chart.',
-                  '4.7 Aggregator: annual totals and chart')
+story += FIGS_aggannual
 
 # Phased Budget
 story += [H2('4.8 Phased Budget (calculation grid)'),
@@ -491,9 +497,7 @@ story += [H2('4.8 Phased Budget (calculation grid)'),
             '   m ≤ Current Month, or k is outside 1 … Duration<br/>'
             'otherwise  Budgeted × weight(k) ÷ Σ remaining weights', 'formula'),
           P('Row 57 totals each month and feeds the Aggregator.')]
-story += land_fig2('phased1', 'Figure 10a: Phased Budget, Jan 2026 – Jun 2027, with the totals row. Values appear only after Oct 2026, the Current Month.',
-                   'phased2', 'Figure 10b: Phased Budget, Jul 2027 – Dec 2028.',
-                   '4.8 Phased Budget: screenshots')
+story += FIGS_phased1
 
 # ------------------------------------------------------------------ 5 status
 story += [H1('5. Status messages and troubleshooting'),

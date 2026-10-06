@@ -42,20 +42,37 @@ def cols(a, b):
 # key: (sheet, print area, rows to hide, columns to hide)
 SHOTS = {
     'readme': ('README', 'B1:C38', [], []),
-    'projects': ('Projects', 'A1:N57', EMPTY, []),
-    'phasing1': ('Phasing', 'A1:AF57', EMPTY, []),
-    'phasing2': ('Phasing', 'A1:BF57', EMPTY, cols('C', 'AG')),
-    'wiplog1': ('WIP Log', 'A1:U57', EMPTY, []),
-    'wiplog2': ('WIP Log', 'A1:AM57', EMPTY, cols('D', 'U')),
     'projectpage': ('Project Page', 'A1:I42', [], []),
     'projectchart': ('Project Page', 'K3:X22', [], []),
-    'timeline1': ('Timeline', 'A1:W13', [], []),
-    'timeline2': ('Timeline', 'A1:AO13', [], cols('F', 'W')),
     'aggregator': ('Aggregator', 'A1:G42', [], []),
     'aggannual': ('Aggregator', 'I5:X37', [], []),
-    'phased1': ('Phased Budget', 'A1:Y57', EMPTY, []),
-    'phased2': ('Phased Budget', 'A1:AQ57', EMPTY, cols('H', 'Y')),
 }
+
+
+def chunk(key, sheet, last_row, keep, hrows):
+    """Screenshot only the column ranges in `keep` (others hidden); print area spans them all."""
+    idx = set()
+    for a_, b_ in keep:
+        idx.update(range(CI(a_), CI(b_) + 1))
+    hi = max(idx)
+    SHOTS[key] = (sheet, f'A1:{L(hi)}{last_row}', hrows, [L(i) for i in range(1, hi + 1) if i not in idx])
+
+
+# Wide sheets in portrait-width pieces (12 months / 12 weights each), names repeated on every piece
+chunk('projects1', 'Projects', 57, [('A', 'G')], EMPTY)
+chunk('projects2', 'Projects', 57, [('A', 'B'), ('H', 'N')], EMPTY)
+chunk('phasing0', 'Phasing', 57, [('A', 'H')], EMPTY)
+chunk('phasing1', 'Phasing', 57, [('A', 'B'), ('I', 'T')], EMPTY)
+chunk('phasing2', 'Phasing', 57, [('A', 'B'), ('U', 'AF')], EMPTY)
+chunk('phasing3', 'Phasing', 57, [('A', 'B'), ('AH', 'AS')], EMPTY)
+chunk('phasing4', 'Phasing', 57, [('A', 'B'), ('AT', 'BF')], EMPTY)
+for n, (a_, b_) in enumerate([('D', 'O'), ('P', 'AA'), ('AB', 'AM')], 1):
+    chunk(f'wiplog{n}', 'WIP Log', 57, [('A', 'C'), (a_, b_)], EMPTY)
+for n, (a_, b_) in enumerate([('F', 'Q'), ('R', 'AC'), ('AD', 'AO')], 1):
+    chunk(f'timeline{n}', 'Timeline', 13, [('A', 'E'), (a_, b_)], [])
+chunk('phased0', 'Phased Budget', 57, [('A', 'G')], EMPTY)
+for n, (a_, b_) in enumerate([('H', 'S'), ('T', 'AE'), ('AF', 'AQ')], 1):
+    chunk(f'phased{n}', 'Phased Budget', 57, [('A', 'B'), (a_, b_)], EMPTY)
 for key, (sheet, area, hrows, hcols) in SHOTS.items():
     wb = load_workbook(demo)
     for ws in wb.worksheets:
@@ -77,6 +94,26 @@ for key, (sheet, area, hrows, hcols) in SHOTS.items():
     for c in hcols:
         ws.column_dimensions[c].hidden = True
     ws.freeze_panes = None
+    # Wrap long notes in the top rows inside the visible columns so they are not clipped at the screenshot edge
+    import math
+    from openpyxl.styles import Alignment
+    from openpyxl.utils.cell import range_boundaries
+    c0, r0, c1, r1 = range_boundaries(area)
+    hidden = set(CI(c) for c in hcols)
+    for row in range(r0, min(r0 + 4, r1 + 1)):
+        for col in range(c0, c1 + 1):
+            cell = ws.cell(row, col)
+            if col in hidden or not isinstance(cell.value, str) or cell.value.startswith('=') or len(cell.value) < 30:
+                continue
+            end = col
+            while end + 1 <= c1 and ws.cell(row, end + 1).value in (None, ''):
+                end += 1
+            width = sum((ws.column_dimensions[L(i)].width or 8.43) for i in range(col, end + 1) if i not in hidden)
+            if end > col:
+                ws.merge_cells(start_row=row, start_column=col, end_row=row, end_column=end)
+            cell.alignment = Alignment(wrap_text=True, vertical='top')
+            lines = max(1, math.ceil(len(cell.value) * 1.05 / max(width, 1)))
+            ws.row_dimensions[row].height = max(ws.row_dimensions[row].height or 13, 13 * lines + 2)
     ws.print_title_rows = None
     ws.page_setup.orientation = 'landscape'
     ws.page_setup.fitToWidth = 1

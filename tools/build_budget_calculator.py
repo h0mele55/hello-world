@@ -42,7 +42,7 @@ def header(ws, row, col, labels, widths=None):
     for i, t in enumerate(labels):
         c = ws.cell(row, col + i, t)
         c.font, c.fill, c.alignment, c.border = HDR, HDRFILL, WRAP, BOX
-    ws.row_dimensions[row].height = 32
+    ws.row_dimensions[row].height = 44
     if widths:
         for i, w in enumerate(widths):
             ws.column_dimensions[L(col + i)].width = w

@@ -213,6 +213,7 @@ header(ph, 5, NW0, [f'M{k}' for k in range(1, MAXDUR + 1)], [7] * MAXDUR)
 ph.cell(4, W0, 'RAW WEIGHTS (input) →').font = BOLD
 ph.cell(4, NW0, 'NORMALISED WEIGHTS, FULL DURATION (Σ = 1.0) →').font = BOLD
 ph.column_dimensions[L(W1 + 1)].width = 3
+ph.row_dimensions[5].height = 46
 # row 2 = numeric month index helper
 ph.cell(2, W0 - 1, 'month index').font = GREY
 for k in range(1, MAXDUR + 1):

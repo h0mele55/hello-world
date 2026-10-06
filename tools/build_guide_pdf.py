@@ -136,6 +136,18 @@ def land_fig(key, caption, title=None):
     return out
 
 
+def land_fig2(k1, c1, k2, c2, title):
+    """Two halves of a wide sheet on one landscape page."""
+    return [NextPageTemplate('land'), PageBreak(), P(title, 'h3'),
+            img(k1, LW, c1, maxh=7 * cm), img(k2, LW, c2, maxh=7 * cm),
+            NextPageTemplate('port'), PageBreak()]
+
+
+def port_fig(key, caption, title):
+    """A tall sheet on its own portrait page."""
+    return [PageBreak(), P(title, 'h3'), img(key, PW, caption, maxh=22.5 * cm), PageBreak()]
+
+
 story = []
 # ------------------------------------------------------------------ cover
 story += [Spacer(1, 5 * cm), P('Project Budget Calculator', 'title'), Spacer(1, 6),
@@ -147,7 +159,7 @@ story += [Spacer(1, 0.8 * cm),
           P('Capacity: 50 projects · up to 24 months per project · 36-month calendar timeline (Jan 2026 – Dec 2028 by default)'),
           Spacer(1, 3 * cm),
           P('<b>About the screenshots.</b> The screenshots in this guide use six sample projects so that every '
-            'view has something to show. The delivered workbook has only the one example row from the slide. Overwrite it or delete it '
+            'view has something to show. Empty project rows are hidden in the screenshots so the totals rows fit. The delivered workbook has only the one example row from the slide. Overwrite it or delete it '
             'when you add your own projects.', 'note'),
           NextPageTemplate('port'), PageBreak()]
 
@@ -278,7 +290,7 @@ story += [H1('3. Key concepts'),
 # ------------------------------------------------------------------ 4 sheet by sheet
 story += [H1('4. Sheet-by-sheet reference'),
           P('Each section below covers what the sheet is for, what it looks like, every column, what you type, and how its '
-            'numbers are worked out. Wide screenshots are on their own landscape pages.'),
+            'numbers are worked out. Wide screenshots are on their own landscape pages. Wide grids are shown in two halves, and the unused project rows (7–50) are hidden so the totals rows fit.'),
           H2('4.1 README'),
           P('A one-page summary inside the workbook covering the formulas, the sheet list, the colour key, the monthly routine and the '
             'limits. It has no formulas and no inputs. Keep it as a quick reminder for colleagues who get the file without this guide.'),
@@ -320,7 +332,7 @@ story += [H2('4.2 Projects (Project ∑ Table)'),
             'The <b>header filters</b> (row 5) cover all 50 rows, and panes are frozen so the names stay visible as you scroll.'),
           P('<b>Do not</b> insert or delete rows or columns on any project sheet. Every sheet relies on project <i>n</i> sitting '
             'on row <i>n</i> + 5. To remove a project, clear its input cells on Projects, Phasing and WIP Log instead.', 'note')]
-story += land_fig('projects', 'Figure 2: Projects with six sample projects (Current Month = Oct 2026). '
+story += land_fig('projects', 'Figure 2: Projects with six sample projects and the totals row (Current Month = Oct 2026). '
                               'Analytics Pilot is flagged because its WIP (10,500) is above its contract (9,000).',
                   '4.2 Projects: screenshot')
 
@@ -355,8 +367,9 @@ story += [H2('4.3 Phasing'),
               ['Back-loaded', '0, 0, 1, 1, 3, 3', 'Delivery-heavy or acceptance-driven projects'],
               ['Bell', '1, 2, 3, 3, 2, 1', 'Typical build project'],
           ], [3.2 * cm, 5.4 * cm, 8.8 * cm])]
-story += land_fig('phasing', 'Figure 3: Phasing showing raw weights M1–M10. The normalised block (AH onwards) sits further to the right.',
-                  '4.3 Phasing: screenshot')
+story += land_fig2('phasing1', 'Figure 3a: Phasing with helper columns and raw weights M1–M24 (input).',
+                   'phasing2', 'Figure 3b: The same rows, normalised weights M1–M24 (columns AH–BE) and the Σ check (BF). Columns C–AG are hidden here.',
+                   '4.3 Phasing: screenshots')
 
 # WIP Log
 story += [H2('4.4 WIP Log'),
@@ -378,8 +391,9 @@ story += [H2('4.4 WIP Log'),
             'WIP, every value moves to a different month. If you ever need to move the timeline, cut and paste the WIP grid '
             'sideways by the same number of months first.', 'note'),
           P('WIP can be negative (for example, a reversal). It lowers WIP to date and raises Budgeted.')]
-story += land_fig('wiplog', 'Figure 4: WIP Log for Jan 2026 – May 2027. Light-yellow cells are the active window up to the Current Month (Oct 2026).',
-                  '4.4 WIP Log: screenshot')
+story += land_fig2('wiplog1', 'Figure 4a: WIP Log, Jan 2026 – Jun 2027, with the totals row. Light-yellow cells are the active window up to the Current Month (Oct 2026).',
+                   'wiplog2', 'Figure 4b: WIP Log, Jul 2027 – Dec 2028 (all "future" at this Current Month).',
+                   '4.4 WIP Log: screenshots')
 
 # Project Page
 story += [H2('4.5 Project Page'),
@@ -409,7 +423,8 @@ story += [H2('4.5 Project Page'),
           P('Stacked columns show <b>WIP Actual</b> (blue) and <b>Phased Budgeted</b> (red) per month. A green line shows the '
             '<b>Original Plan</b>, so you can see at a glance where the forecast now differs from the plan.'),
           img('projectchart', 13 * cm, 'Figure 6: Project Page chart for the slide example: 1,000 actual in Oct, then 2,250 a month against a plan of 2,222.')]
-story += land_fig('projectpage', 'Figure 5: Project Page for "Example Project (slide)".', '4.5 Project Page: screenshot')
+story += port_fig('projectpage', 'Figure 5: Project Page for "Example Project (slide)": header block, the 24-row monthly table, '
+                                  'the totals row and the "ties" check.', '4.5 Project Page: screenshot')
 
 # Timeline
 story += [H2('4.6 Timeline'),
@@ -421,8 +436,10 @@ story += [H2('4.6 Timeline'),
           P('Columns A–E show the slot number, name, Engagement Manager, start and end. Use it to spot overlaps, gaps in WIP '
             'logging (a white cell inside a project\'s past months), and months where a lot of forecast bunches up.'),
           P('Read across a row and the numbers add up to the project\'s Contracted Budget, as long as its Status is OK.')]
-story += land_fig('timeline', 'Figure 7: Timeline. CRM Rollout is complete (all actual). Security Audit is entirely in the future, '
-                              'phased 1:2:2:1 over Mar–Jun 2027.', '4.6 Timeline: screenshot')
+story += land_fig2('timeline1', 'Figure 7a: Timeline, Jan 2026 – Jun 2027. CRM Rollout is complete (all actual). Security Audit is entirely '
+                                'in the future, phased 1:2:2:1 over Mar–Jun 2027.',
+                   'timeline2', 'Figure 7b: Timeline, Jul 2027 – Dec 2028 (empty for these sample projects, which all end by Jun 2027).',
+                   '4.6 Timeline: screenshots')
 
 # Aggregator
 story += [H2('4.7 Aggregator'),
@@ -451,8 +468,8 @@ story += [H2('4.7 Aggregator'),
           P('Stacked columns show <b>Σ WIP</b> (blue, the past) and <b>Σ Phased Budgeted</b> (red, the future) per month. '
             'The <b>TRM</b> line (green) sits on top. Past months show WIP because the Phased Budgeted amount is zero by '
             'definition once a month becomes actual.')]
-story += land_fig('aggregator', 'Figure 8: Aggregator monthly table, with a sample TRM of 25,000 a month entered for 2026–2027.',
-                  '4.7 Aggregator: monthly table')
+story += port_fig('aggregator', 'Figure 8: Aggregator monthly table, all 36 months (Jan 2026 – Dec 2028) and the totals row, '
+                                 'with a sample TRM of 25,000 a month entered for 2026–2027.', '4.7 Aggregator: monthly table')
 story += land_fig('aggannual', 'Figure 9: Annual totals, reconciliation (fully phased) and portfolio chart.',
                   '4.7 Aggregator: annual totals and chart')
 
@@ -474,7 +491,9 @@ story += [H2('4.8 Phased Budget (calculation grid)'),
             '   m ≤ Current Month, or k is outside 1 … Duration<br/>'
             'otherwise  Budgeted × weight(k) ÷ Σ remaining weights', 'formula'),
           P('Row 57 totals each month and feeds the Aggregator.')]
-story += land_fig('phased', 'Figure 10: Phased Budget grid. Values appear only after Oct 2026, the Current Month.', '4.8 Phased Budget: screenshot')
+story += land_fig2('phased1', 'Figure 10a: Phased Budget, Jan 2026 – Jun 2027, with the totals row. Values appear only after Oct 2026, the Current Month.',
+                   'phased2', 'Figure 10b: Phased Budget, Jul 2027 – Dec 2028.',
+                   '4.8 Phased Budget: screenshots')
 
 # ------------------------------------------------------------------ 5 status
 story += [H1('5. Status messages and troubleshooting'),

@@ -31,25 +31,52 @@ for j in range(24):
 wb.save(demo)
 print(subprocess.run([sys.executable, RECALC, demo, '120'], capture_output=True, text=True).stdout[:120])
 
+from openpyxl.utils import get_column_letter as L, column_index_from_string as CI
+EMPTY = list(range(14, 56))   # unused project rows 14-55 (keeps 6 sample rows + 2 blank + totals row 57)
+
+
+def cols(a, b):
+    return [L(i) for i in range(CI(a), CI(b) + 1)]
+
+
+# key: (sheet, print area, rows to hide, columns to hide)
 SHOTS = {
-    'readme': ('README', 'B1:C38'),
-    'projects': ('Projects', 'A1:N13'),
-    'phasing': ('Phasing', 'A1:R13'),
-    'wiplog': ('WIP Log', 'A1:T13'),
-    'projectpage': ('Project Page', 'A1:I30'),
-    'projectchart': ('Project Page', 'K3:X22'),
-    'timeline': ('Timeline', 'A1:AD13'),
-    'aggregator': ('Aggregator', 'A1:G32'),
-    'aggannual': ('Aggregator', 'I5:X37'),
-    'phased': ('Phased Budget', 'A1:Z13'),
+    'readme': ('README', 'B1:C38', [], []),
+    'projects': ('Projects', 'A1:N57', EMPTY, []),
+    'phasing1': ('Phasing', 'A1:AF57', EMPTY, []),
+    'phasing2': ('Phasing', 'A1:BF57', EMPTY, cols('C', 'AG')),
+    'wiplog1': ('WIP Log', 'A1:U57', EMPTY, []),
+    'wiplog2': ('WIP Log', 'A1:AM57', EMPTY, cols('D', 'U')),
+    'projectpage': ('Project Page', 'A1:I42', [], []),
+    'projectchart': ('Project Page', 'K3:X22', [], []),
+    'timeline1': ('Timeline', 'A1:W13', [], []),
+    'timeline2': ('Timeline', 'A1:AO13', [], cols('F', 'W')),
+    'aggregator': ('Aggregator', 'A1:G42', [], []),
+    'aggannual': ('Aggregator', 'I5:X37', [], []),
+    'phased1': ('Phased Budget', 'A1:Y57', EMPTY, []),
+    'phased2': ('Phased Budget', 'A1:AQ57', EMPTY, cols('H', 'Y')),
 }
-for key, (sheet, area) in SHOTS.items():
+for key, (sheet, area, hrows, hcols) in SHOTS.items():
     wb = load_workbook(demo)
     for ws in wb.worksheets:
         ws.sheet_state = 'visible' if ws.title == sheet else 'hidden'
     ws = wb[sheet]
     wb.active = wb.worksheets.index(ws)
     ws.print_area = area
+    for r in hrows:
+        ws.row_dimensions[r].hidden = True
+    # openpyxl merges identical adjacent columns into one <col min max> group; split them so we can hide single columns
+    for k, d in list(ws.column_dimensions.items()):
+        if d.max and d.min and d.max > d.min:
+            lo, hi, w = d.min, d.max, d.width
+            d.max = lo
+            for i in range(lo + 1, hi + 1):
+                nd = ws.column_dimensions[L(i)]
+                nd.min = nd.max = i
+                nd.width = w
+    for c in hcols:
+        ws.column_dimensions[c].hidden = True
+    ws.freeze_panes = None
     ws.print_title_rows = None
     ws.page_setup.orientation = 'landscape'
     ws.page_setup.fitToWidth = 1

@@ -12,6 +12,17 @@ shutil.copy(SRC, demo)
 wb = load_workbook(demo)
 p, ph, wl, ag = wb['Projects'], wb['Phasing'], wb['WIP Log'], wb['Aggregator']
 
+# The demo is independent of the real data in the workbook: clear every project row, then add sample projects
+for r in range(6, 56):
+    for c in (2, 3, 4, 5, 7):
+        p.cell(r, c).value = None
+    for c in range(9, 33):
+        ph.cell(r, c).value = None
+    for c in range(4, 40):
+        wl.cell(r, c).value = None
+p['C2'] = date(2026, 10, 1)
+wb['Project Page']['B3'] = 'Example Project (slide)'
+
 
 def add(r, name, em, start, dur, contract, weights=None, wip=None):
     p.cell(r, 2, name); p.cell(r, 3, em); p.cell(r, 4, start); p.cell(r, 5, dur); p.cell(r, 7, contract)
@@ -21,6 +32,7 @@ def add(r, name, em, start, dur, contract, weights=None, wip=None):
         wl.cell(r, 4 + col, v)
 
 
+add(6, 'Example Project (slide)', 'J. Doe', date(2026, 10, 1), 5, 10000, [1, 2, 2, 2, 2], {9: 1000})
 add(7, 'Data Platform Migration', 'M. Laurent', date(2026, 6, 1), 12, 120000, None, {5: 9000, 6: 9000, 7: 9000, 8: 9000, 9: 9000})
 add(8, 'CRM Rollout', 'A. Okafor', date(2026, 1, 1), 9, 45000, [1, 1, 2, 2, 2, 1, 1, 1, 1], {i: 5000 for i in range(9)})
 add(9, 'Security Audit', 'S. Novak', date(2027, 3, 1), 4, 30000, [1, 2, 2, 1])

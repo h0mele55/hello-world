@@ -34,7 +34,7 @@ PCT = '0.0%;(0.0%);-'
 MON = 'mmm yyyy'
 WRAP = Alignment(wrap_text=True, vertical='center', horizontal='center')
 
-CM = 'Projects!$C$2'   # current month
+CM = 'Projects!$C$2'   # last complete month
 TS = 'Projects!$C$3'   # timeline start
 
 
@@ -73,33 +73,33 @@ rows = [
     ('PURPOSE', 'Calculates the Budgeted balance of each project and phases it over the remaining months of the project.'),
     ('', ''),
     ('FORMULAS', ''),
-    ('Budgeted', 'Budgeted = Contracted Budget − WIP to date (the sum of WIP logged in months up to and including the Current Month).'),
-    ('Phased Budgeted', 'Budgeted is spread only over the project months AFTER the Current Month, using that project\'s phasing weights for those months, renormalised to 1.0.'),
+    ('Budgeted', 'Budgeted = Contracted Budget − WIP to date (the sum of WIP logged in months up to and including the Last Complete Month).'),
+    ('Phased Budgeted', 'Budgeted is spread only over the project months AFTER the Last Complete Month, using that project\'s phasing weights for those months, renormalised to 1.0.'),
     ('', 'Phased Budgeted (month k) = Budgeted × weight(k) ÷ Σ weights of remaining months.'),
     ('Weights', 'Enter raw weights (e.g. 1,2,2,2,2). They don\'t need to sum to 1. If a project has no weights at all, every month gets an equal weight.'),
-    ('Example (from the slide)', 'Contract 10,000. 5 months, weights 1:2:2:2:2. 1,000 of WIP logged in month I (the current month).'),
+    ('Example (from the slide)', 'Contract 10,000. 5 months, weights 1:2:2:2:2. 1,000 of WIP logged in month I (the last complete month).'),
     ('', '→ Budgeted = 9,000, phased over months II–V (weights 2:2:2:2 → 25% each) = 2,250 per month.'),
     ('', ''),
     ('SHEETS', ''),
-    ('Projects', 'Project ∑ table (page 1). Holds the global Current Month field. Add a project by filling in the next empty row. Use the header filter buttons to filter.'),
+    ('Projects', 'Project ∑ table (page 1). Holds the global Last Complete Month field. Add a project by filling in the next empty row. Use the header filter buttons to filter.'),
     ('Phasing', 'Raw phasing weights per project, month 1–24 of the project. Also shows the weights normalised to 1.0 over the full duration.'),
-    ('WIP Log', 'Monthly WIP actuals per project on the calendar timeline. Only months ≤ Current Month count towards WIP to date.'),
+    ('WIP Log', 'Monthly WIP actuals per project on the calendar timeline. Only months ≤ Last Complete Month count towards WIP to date.'),
     ('Project Page', 'Page 2: pick a project from the dropdown to see its details, month-by-month phasing and chart (the "visualize" view).'),
-    ('Timeline', 'Page 3: Gantt-style view of every project. Each cell shows the WIP actual (≤ Current Month) or the Phased Budgeted (after it).'),
+    ('Timeline', 'Page 3: Gantt-style view of every project. Each cell shows the WIP actual (≤ Last Complete Month) or the Phased Budgeted (after it).'),
     ('Aggregator', 'Page 4: Σ WIP + Σ Phased Budgeted per month against the manual TRM input, with a chart and calendar-year totals.'),
     ('Phased Budget', 'Calculation grid (no inputs): Phased Budgeted per project per calendar month.'),
     ('', ''),
     ('HOW TO USE', ''),
-    ('Yellow cells', 'Key inputs: Current Month, Timeline Start, the TRM row and the project selector.'),
+    ('Yellow cells', 'Key inputs: Last Complete Month, Timeline Start, the TRM row and the project selector.'),
     ('Blue text', 'Hard-coded inputs: project fields, weights, WIP amounts. Black text = formulas. Green text = links to another sheet.'),
     ('Light yellow grids', 'Input grids on Phasing and WIP Log. Grey cells there are outside the project\'s duration or window.'),
-    ('Monthly routine', '1) Log the month\'s WIP on WIP Log.  2) Move Current Month forward one month on Projects.  Everything recalculates.'),
+    ('Monthly routine', '1) Log the month\'s WIP on WIP Log.  2) Move Last Complete Month forward one month on Projects.  Everything recalculates.'),
     ('Status column', 'Projects!N flags problems: WIP above contract, no remaining months left to phase the budget into, missing fields, etc.'),
     ('', ''),
     ('LIMITS & ASSUMPTIONS', ''),
     ('Capacity', f'{N} projects, durations up to {MAXDUR} months, calendar timeline of {TL} months from Timeline Start (default Jan 2026 – Dec 2028).'),
     ('Timeline Start', 'Change it only before logging WIP: the WIP Log columns are tied to calendar months, so moving the start shifts those columns.'),
-    ('Months', 'Starting Month and Current Month are compared by year and month only (the day is ignored).'),
+    ('Months', 'Starting Month and Last Complete Month are compared by year and month only (the day is ignored).'),
     ('Units', 'All amounts are in one currency unit (enter 10000 for 10k). No currency symbol is applied.'),
     ('TRM', 'Monthly comparison target, entered manually on the Aggregator sheet (per user).'),
     ('Annual totals', 'Calendar years (Jan–Dec), WIP actuals + Phased Budgeted.'),
@@ -118,11 +118,11 @@ rd['B25'].fill = INFILL
 pj = wb.create_sheet('Projects')
 pj['A1'] = 'Project ∑ Table'
 pj['A1'].font = TITLE
-pj['A2'] = 'Current Month'
+pj['A2'] = 'Last Complete Month'
 pj['A3'] = 'Timeline Start'
 for c in ('A2', 'A3'):
     pj[c].font = BOLD
-pj['C2'] = date(2026, 10, 1)
+pj['C2'] = date(2026, 9, 1)
 pj['C3'] = date(2026, 1, 1)
 for c in ('C2', 'C3'):
     pj[c].font, pj[c].fill, pj[c].number_format, pj[c].border = BLUE, YELLOW, MON, BOX
@@ -130,7 +130,7 @@ pj['D2'] = 'Months up to and including this month are actuals (WIP). Later month
 pj['D3'] = f'First month of the {TL}-month calendar timeline. Change it only before logging WIP.'
 for c in ('D2', 'D3'):
     pj[c].font = Font(name='Arial', size=9, italic=True, color='595959')
-pj['C2'].comment = Comment('Default: October 2026 (the build date). Move it forward each month.', 'Claude')
+pj['C2'].comment = Comment('Set to September 2026, the last month-end closed. Log each month\'s WIP at month-end, then move this forward one month.', 'Claude')
 pj['C3'].comment = Comment('Default: Jan 2026. The timeline is 36 months long.', 'Claude')
 
 cols = ['#', 'Project Name', 'Engagement Manager', 'Starting Month', 'Duration (months)', 'End Month',
@@ -169,14 +169,19 @@ for r in range(R0, R1 + 1):
         pj.cell(r, c).border = BOX
         if c in (6, 8, 9, 10, 11, 12, 13, 14):
             pj.cell(r, c).fill = CALCFILL
-# Example row (from the slide, adapted per user clarification)
-ex = R0
-pj.cell(ex, 2, 'Example Project (slide)')
-pj.cell(ex, 3, 'J. Doe')
-pj.cell(ex, 4, date(2026, 10, 1))
-pj.cell(ex, 5, 5)
-pj.cell(ex, 7, 10000)
-pj.cell(ex, 2).comment = Comment('Example row from the slide: contract 10k, weights 1:2:2:2:2, 1k of WIP in month I. Overwrite or delete it.', 'Claude')
+# Real projects (supplied by the user, 2026-10-06). Equal weights; WIP is logged at each month-end.
+PROJECTS = [
+    # name, engagement manager, starting month, duration (months), contracted budget
+    ('Oediv', 'Ivaylo Ivanov', date(2026, 10, 1), 2, 10800),    # Oct 2026 – Nov 2026
+    ('Howmet', 'Ivaylo Ivanov', date(2026, 11, 1), 3, 19000),   # Nov 2026 – Jan 2027
+]
+for i, (name, em, start, dur, budget) in enumerate(PROJECTS):
+    r = R0 + i
+    pj.cell(r, 2, name)
+    pj.cell(r, 3, em)
+    pj.cell(r, 4, start)
+    pj.cell(r, 5, dur)
+    pj.cell(r, 7, budget)
 # totals row
 tr = R1 + 2
 pj.cell(tr, 2, 'TOTAL').font = BOLD
@@ -243,8 +248,6 @@ for r in range(R0, R1 + 1):
         n.number_format, n.border, n.fill = PCT, BOX, CALCFILL
     ph.cell(r, NW1 + 1, f'=IF(C{r}="","",SUM({L(NW0)}{r}:{L(NW1)}{r}))').number_format = PCT
 ph.cell(5, NW1 + 1, 'Check Σ').font = BOLD
-for k, w in enumerate([1, 2, 2, 2, 2]):
-    ph.cell(R0, W0 + k, w)
 # input fill only within duration
 ph.conditional_formatting.add(f'{L(W0)}{R0}:{L(W1)}{R1}',
                               FormulaRule(formula=[f'AND($C{R0}<>"",{L(W0)}$2<=$C{R0})'], fill=INFILL))
@@ -258,9 +261,9 @@ ph.freeze_panes = ph.cell(R0, W0)
 
 # ---------------------------------------------------------------- WIP Log
 wl = wb.create_sheet('WIP Log')
-title(wl, 'WIP Log (monthly actuals)', 'Enter the WIP actual for each project and month. Only months up to and including the Current Month count; later months are ignored.')
+title(wl, 'WIP Log (monthly actuals)', 'Enter the WIP actual for each project and month. Only months up to and including the Last Complete Month count; later months are ignored.')
 M0, M1 = 4, 4 + TL - 1
-header(wl, 5, 1, ['#', 'Project Name', 'WIP to Date (≤ Current Month)'], [5, 28, 15])
+header(wl, 5, 1, ['#', 'Project Name', 'WIP to Date (≤ Last Complete Month)'], [5, 28, 15])
 for j in range(TL):
     c = wl.cell(5, M0 + j, f'={TS}' if j == 0 else f'=EDATE({L(M0 + j - 1)}5,1)')
     c.font, c.fill, c.alignment, c.border, c.number_format = HDR, HDRFILL, WRAP, BOX, 'mmm yy'
@@ -276,7 +279,6 @@ for r in range(R0, R1 + 1):
     for j in range(TL):
         c = wl.cell(r, M0 + j)
         c.font, c.border, c.number_format = BLUE, BOX, MONEY
-wl.cell(R0, M0 + 9, 1000)   # Oct 2026 = month I of the example
 tot = R1 + 2
 wl.cell(tot, 2, 'TOTAL').font = BOLD
 for c in range(3, M1 + 1):
@@ -294,7 +296,7 @@ wl.freeze_panes = wl.cell(R0, M0)
 # ---------------------------------------------------------------- Phased Budget (calc)
 pb = wb.create_sheet('Phased Budget')
 title(pb, 'Phased Budgeted – calculation grid (no inputs)',
-      'Budgeted × weight(k) ÷ Σ remaining weights, for project months after the Current Month only.')
+      'Budgeted × weight(k) ÷ Σ remaining weights, for project months after the Last Complete Month only.')
 G0, G1 = 8, 8 + TL - 1
 header(pb, 5, 1, ['#', 'Project Name', 'Starting Month', 'Duration', 'Budgeted', 'Σ remaining weights', 'Equal weights?'],
        [5, 28, 11, 9, 13, 12, 9])
@@ -331,7 +333,7 @@ pb.freeze_panes = pb.cell(R0, G0)
 
 # ---------------------------------------------------------------- Timeline
 tl = wb.create_sheet('Timeline')
-title(tl, 'Project Timeline', 'Dark orange = WIP actual (≤ Current Month). Light orange = Phased Budgeted. The bordered column is the Current Month.')
+title(tl, 'Project Timeline', 'Dark orange = WIP actual (≤ Last Complete Month). Light orange = Phased Budgeted. The bordered column is the Last Complete Month.')
 T0, T1 = 6, 6 + TL - 1
 header(tl, 5, 1, ['#', 'Project Name', 'Engagement Manager', 'Start', 'End'], [5, 28, 18, 10, 10])
 for j in range(TL):
@@ -370,7 +372,7 @@ pp['A1'] = 'Project Page'
 pp['A1'].font = TITLE
 pp['A3'] = 'Select project ▸'
 pp['A3'].font = BOLD
-pp['B3'] = 'Example Project (slide)'
+pp['B3'] = PROJECTS[0][0]
 pp['B3'].font, pp['B3'].fill, pp['B3'].border = Font(name='Arial', size=11, bold=True, color='0000FF'), YELLOW, BOX
 pp.merge_cells('B3:D3')
 dvp = DataValidation(type='list', formula1=f'=Projects!$B${R0}:$B${R1}', allow_blank=True)
@@ -447,7 +449,7 @@ pp.add_chart(ch, 'K4')
 
 # ---------------------------------------------------------------- Aggregator
 ag = wb.create_sheet('Aggregator')
-title(ag, 'Aggregator', 'Σ WIP actuals (≤ Current Month) + Σ Phased Budgeted (after it) per month, against TRM. Enter TRM in the yellow column.')
+title(ag, 'Aggregator', 'Σ WIP actuals (≤ Last Complete Month) + Σ Phased Budgeted (after it) per month, against TRM. Enter TRM in the yellow column.')
 header(ag, 5, 1, ['Month', 'Year', 'Σ WIP (actual)', 'Σ Phased Budgeted', 'Total (WIP + Phased)', 'TRM (input)', 'Variance (Total − TRM)'],
        [11, 7, 15, 15, 16, 14, 16])
 A0, A1 = 6, 6 + TL - 1

@@ -158,10 +158,10 @@ def figs(title, items):
 
 FIGS_projects = figs('4.2 Projects: screenshots', [('projects1', 'Figure 2a: Projects, input columns A–G, with the settings at the top and the totals row.'), ('projects2', 'Figure 2b: Projects, calculated columns H–N. Analytics Pilot is flagged because its WIP (10,500) is above its contract (9,000).')])
 FIGS_phasing1 = figs('4.3 Phasing: screenshots', [('phasing0', 'Figure 3a: Phasing helper columns A–H.'), ('phasing1', 'Figure 3b: Raw weights M1–M12 (input).'), ('phasing2', 'Figure 3c: Raw weights M13–M24 (input).'), ('phasing3', 'Figure 3d: Normalised weights M1–M12 (columns AH–AS).'), ('phasing4', 'Figure 3e: Normalised weights M13–M24 and the Σ check (columns AT–BF).')])
-FIGS_wiplog1 = figs('4.4 WIP Log: screenshots', [('wiplog1', 'Figure 4a: WIP Log, 2026, with the totals row. Light-yellow cells are the active window up to the Current Month (Oct 2026).'), ('wiplog2', 'Figure 4b: WIP Log, 2027 (all "future" at this Current Month).'), ('wiplog3', 'Figure 4c: WIP Log, 2028.')])
-FIGS_timeline1 = figs('4.6 Timeline: screenshots', [('timeline1', 'Figure 7a: Timeline, 2026. CRM Rollout is complete (all actual). The red-bordered column is the Current Month.'), ('timeline2', 'Figure 7b: Timeline, 2027. Security Audit is phased 1:2:2:1 over Mar–Jun 2027.'), ('timeline3', 'Figure 7c: Timeline, 2028 (empty for these sample projects, which all end by Jun 2027).')])
+FIGS_wiplog1 = figs('4.4 WIP Log: screenshots', [('wiplog1', 'Figure 4a: WIP Log, 2026, with the totals row. Light-yellow cells are the active window up to the Last Complete Month (Oct 2026).'), ('wiplog2', 'Figure 4b: WIP Log, 2027 (all "future" at this Last Complete Month).'), ('wiplog3', 'Figure 4c: WIP Log, 2028.')])
+FIGS_timeline1 = figs('4.6 Timeline: screenshots', [('timeline1', 'Figure 7a: Timeline, 2026. CRM Rollout is complete (all actual). The red-bordered column is the Last Complete Month.'), ('timeline2', 'Figure 7b: Timeline, 2027. Security Audit is phased 1:2:2:1 over Mar–Jun 2027.'), ('timeline3', 'Figure 7c: Timeline, 2028 (empty for these sample projects, which all end by Jun 2027).')])
 FIGS_aggannual = figs('4.7 Aggregator: annual totals and chart', [('aggannual', 'Figure 9: Annual totals, reconciliation (fully phased) and portfolio chart.')])
-FIGS_phased1 = figs('4.8 Phased Budget: screenshots', [('phased0', 'Figure 10a: Phased Budget helper columns A–G.'), ('phased1', 'Figure 10b: Phased Budget, 2026, with the totals row. Values appear only after Oct 2026, the Current Month.'), ('phased2', 'Figure 10c: Phased Budget, 2027.'), ('phased3', 'Figure 10d: Phased Budget, 2028.')])
+FIGS_phased1 = figs('4.8 Phased Budget: screenshots', [('phased0', 'Figure 10a: Phased Budget helper columns A–G.'), ('phased1', 'Figure 10b: Phased Budget, 2026, with the totals row. Values appear only after Oct 2026, the Last Complete Month.'), ('phased2', 'Figure 10c: Phased Budget, 2027.'), ('phased3', 'Figure 10d: Phased Budget, 2028.')])
 
 
 story = []
@@ -175,8 +175,8 @@ story += [Spacer(1, 0.8 * cm),
           P('Capacity: 50 projects · up to 24 months per project · 36-month calendar timeline (Jan 2026 – Dec 2028 by default)'),
           Spacer(1, 3 * cm),
           P('<b>About the screenshots.</b> The screenshots in this guide use six sample projects so that every '
-            'view has something to show. Empty project rows are hidden in the screenshots so the totals rows fit. The delivered workbook has only the one example row from the slide. Overwrite it or delete it '
-            'when you add your own projects.', 'note'),
+            'view has something to show. Empty project rows are hidden in the screenshots so the totals rows fit. The delivered workbook holds your real projects (Oediv and Howmet), '
+            'with the Last Complete Month set to Sep 2026.', 'note'),
           NextPageTemplate('port'), PageBreak()]
 
 # ------------------------------------------------------------------ TOC
@@ -195,14 +195,14 @@ story += [H1('1. Overview'),
           P('Budgeted = Contracted Budget − WIP to date<br/>'
             'Phased Budgeted(k) = Budgeted × weight(k) ÷ Σ weights of the remaining months', 'formula'),
           P('<b>WIP to date</b> is the sum of the WIP actuals you have logged for every month up to and including the '
-            '<b>Current Month</b>. The <b>remaining months</b> are the project months after the Current Month. '
+            '<b>Last Complete Month</b>. The <b>remaining months</b> are the project months after the Last Complete Month. '
             'The weights of those months are renormalised so they add up to 1.0. That way the whole Budgeted balance, no more and no less, '
             'lands in the months that are left.'),
           H2('1.2 How the sheets fit together'),
           table([
               ['Sheet', 'Role', 'You type here?', 'Slide page'],
               ['README', 'Built-in quick reference', 'No', '–'],
-              ['Projects', 'Project ∑ table: master list, Current Month, key results, status', 'Yes', '1 · Project ∑Table'],
+              ['Projects', 'Project ∑ table: master list, Last Complete Month, key results, status', 'Yes', '1 · Project ∑Table'],
               ['Phasing', 'Raw phasing weights per project month', 'Yes', '(Phasing inputs)'],
               ['WIP Log', 'Monthly WIP actuals on the calendar', 'Yes', '(WIP inputs)'],
               ['Project Page', 'Detail and chart for one selected project', 'Only the selector', '2 · Project Page'],
@@ -218,7 +218,7 @@ story += [H1('1. Overview'),
           table([
               ['Look', 'Meaning', 'Where'],
               ['<font color="#0000FF">Blue text</font>', 'A value you type (hard-coded input)', 'Project fields, weights, WIP amounts, TRM'],
-              ['Yellow fill', 'A key setting or selector', 'Current Month, Timeline Start, TRM column, project selector'],
+              ['Yellow fill', 'A key setting or selector', 'Last Complete Month, Timeline Start, TRM column, project selector'],
               ['Light-yellow fill', 'Input cell inside the project\'s active window', 'Phasing and WIP Log grids'],
               ['Grey fill', 'Calculated column, or a cell outside the project\'s window', 'Projects calc columns; Phasing / WIP Log grids'],
               ['Black text', 'Formula: don\'t overwrite', 'All calculated cells'],
@@ -233,10 +233,8 @@ story += [H1('2. Getting started'),
           *steps([
               '<b>Set the Timeline Start</b> (Projects!C3) to the first month you want on the calendar. The default is Jan 2026. '
               'Do this <i>before</i> logging any WIP (see the warning in section 4.4).',
-              '<b>Set the Current Month</b> (Projects!C2) to the latest month whose WIP you know. The default is Oct 2026.',
-              '<b>Delete or overwrite the example row</b> on Projects (row 6), together with its weights on Phasing row 6 '
-              'and its 1,000 WIP in Oct 2026 on WIP Log row 6.',
-              '<b>Add your projects</b> on Projects: Name, Engagement Manager, Starting Month, Duration, Contracted Budget. '
+              '<b>Set the Last Complete Month</b> (Projects!C2) to the latest month-end you have closed and logged WIP for (currently Sep 2026).',
+                            '<b>Add your projects</b> on Projects: Name, Engagement Manager, Starting Month, Duration, Contracted Budget. '
               'Use the next empty row each time.',
               '<b>Enter phasing weights</b> on Phasing for each project, or leave the row blank for equal weights.',
               '<b>Log any WIP to date</b> on WIP Log, in the calendar-month columns.',
@@ -246,13 +244,13 @@ story += [H1('2. Getting started'),
           P('Once set up, each month-end comes down to two edits:'),
           *steps([
               'On <b>WIP Log</b>, enter the WIP actual for the month just closed, for each project.',
-              'On <b>Projects</b>, move <b>Current Month</b> forward one month.',
+              'On <b>Projects</b>, move <b>Last Complete Month</b> forward one month.',
           ]),
           P('That is all. WIP to date, Budgeted, the remaining months, the re-phased forecast, the timeline, the project '
             'page and the aggregator all recalculate. Any shortfall or overrun in the month you just closed is spread '
             'automatically over the months that are left.'),
-          P('<b>Tip:</b> the order matters only for a moment. WIP logged in a month <i>after</i> the Current Month is '
-            'ignored (and shown struck through in red) until the Current Month reaches it. So you can log it first and move the month '
+          P('<b>Tip:</b> the order matters only for a moment. WIP logged in a month <i>after</i> the Last Complete Month is '
+            'ignored (and shown struck through in red) until the Last Complete Month reaches it. So you can log it first and move the month '
             'second, or the other way round.', 'note'),
           H2('2.3 Adding, filtering and visualising'),
           P('The slide asks for <i>create new</i>, <i>filter</i> and <i>visualize</i> buttons. Excel can\'t add real '
@@ -268,11 +266,11 @@ story += [H1('2. Getting started'),
 
 # ------------------------------------------------------------------ 3 concepts
 story += [H1('3. Key concepts'),
-          H2('3.1 Current Month: actuals vs forecast'),
-          P('The Current Month is the line between the past and the future. For every project:'),
-          *bullets(['Months <b>up to and including</b> the Current Month are <b>actuals</b>. Their value is the WIP you logged.',
-                    'Months <b>after</b> the Current Month are <b>forecast</b>. Their value is the Phased Budgeted amount.',
-                    'Moving the Current Month forward turns a forecast month into an actual month. The Budgeted balance '
+          H2('3.1 Last Complete Month: actuals vs forecast'),
+          P('The Last Complete Month is the line between the past and the future. For every project:'),
+          *bullets(['Months <b>up to and including</b> the Last Complete Month are <b>actuals</b>. Their value is the WIP you logged.',
+                    'Months <b>after</b> the Last Complete Month are <b>forecast</b>. Their value is the Phased Budgeted amount.',
+                    'Moving the Last Complete Month forward turns a forecast month into an actual month. The Budgeted balance '
                     'is then re-spread over the smaller set of months that are left.']),
           P('Only the year and month of the date count, so 1 Oct 2026 and 17 Oct 2026 are treated the same.'),
           H2('3.2 Phasing weights and renormalisation'),
@@ -287,7 +285,7 @@ story += [H1('3. Key concepts'),
           H2('3.3 Worked example: the slide'),
           P('The slide shows a five-month project phased I 1k · II 2k · III 2k · IV 2k · V 2k. As agreed: contract '
             '<b>10,000</b>, weights <b>1 : 2 : 2 : 2 : 2</b>, start Oct 2026, and <b>1,000</b> of WIP logged in month I '
-            '(Oct 2026, the Current Month).'),
+            '(Oct 2026, the Last Complete Month).'),
           table([
               ['Step', 'Calculation', 'Result'],
               ['WIP to date', 'WIP logged for months ≤ Oct 2026', '1,000'],
@@ -320,7 +318,7 @@ story += [H2('4.2 Projects (Project ∑ Table)'),
           H3('Settings'),
           table([
               ['Cell', 'Name', 'What it does'],
-              ['C2', 'Current Month', 'Divides actuals (≤) from forecast (>). Move it forward one month each month-end.'],
+              ['C2', 'Last Complete Month', 'Divides actuals (≤) from forecast (>). Move it forward one month each month-end.'],
               ['C3', 'Timeline Start', 'First month of the 36-month calendar used by WIP Log, Phased Budget, Timeline and '
                                        'Aggregator. Set it once, before you log WIP.'],
           ], [1.6 * cm, 3.2 * cm, 12.6 * cm]),
@@ -334,12 +332,12 @@ story += [H2('4.2 Projects (Project ∑ Table)'),
               ['E', 'Duration (months)', 'Input', 'Whole number 1–24 (enforced by data validation).'],
               ['F', 'End Month', 'Calc', 'Starting Month + Duration − 1 months.'],
               ['G', 'Contracted Budget', 'Input', 'Total contract value, in plain units (10,000, not 10k).'],
-              ['H', 'WIP to Date', 'Calc', 'From WIP Log column C: the sum of WIP for months ≤ Current Month.'],
+              ['H', 'WIP to Date', 'Calc', 'From WIP Log column C: the sum of WIP for months ≤ Last Complete Month.'],
               ['I', 'Budgeted (Contract − WIP)', 'Calc', 'G − H. The balance still to be phased.'],
-              ['J', 'Remaining Months', 'Calc', 'Project months after the Current Month: Duration − first remaining month # + 1 (never below 0).'],
-              ['K', 'Phased Budgeted – Next Month', 'Calc', 'The forecast for the month right after the Current Month.'],
-              ['L', 'Phased Budgeted – Rest of Current Year', 'Calc', 'Sum of the forecast for the months after the Current Month, up to December of that year.'],
-              ['M', 'Current-Year Forecast (WIP + Phased)', 'Calc', 'WIP logged in the current year up to the Current Month, plus column L. '
+              ['J', 'Remaining Months', 'Calc', 'Project months after the Last Complete Month: Duration − first remaining month # + 1 (never below 0).'],
+              ['K', 'Phased Budgeted – Next Month', 'Calc', 'The forecast for the month right after the Last Complete Month.'],
+              ['L', 'Phased Budgeted – Rest of Current Year', 'Calc', 'Sum of the forecast for the months after the Last Complete Month, up to December of that year.'],
+              ['M', 'Current-Year Forecast (WIP + Phased)', 'Calc', 'WIP logged in the current year up to the Last Complete Month, plus column L. '
                                                                      'Gives the project\'s full-year outturn.'],
               ['N', 'Status', 'Calc', 'Health check. Reads <i>OK</i>, or names the first problem it finds (see section 5).'],
           ], [1 * cm, 4.2 * cm, 1.3 * cm, 10.9 * cm]),
@@ -360,7 +358,7 @@ story += [H2('4.3 Phasing'),
               ['A–C', '#, Project Name, Duration', 'Pulled from Projects (green).'],
               ['D', 'Weights entered', 'How many weight cells have a number. 0 means equal phasing.'],
               ['E', 'Σ weights (full duration)', 'Sum of weights M1…M(Duration), or the Duration itself when no weights are entered.'],
-              ['F', 'First remaining month #', 'The project month right after the Current Month. Example: start Aug, Current Month Oct → 4. '
+              ['F', 'First remaining month #', 'The project month right after the Last Complete Month. Example: start Aug, Last Complete Month Oct → 4. '
                                                'It is 1 for projects that haven\'t started yet.'],
               ['G', 'Σ weights (remaining months)', 'Sum of weights from month F to month Duration. This is the divisor in the Phased '
                                                     'Budgeted formula. If it is 0 while money is left, Status warns you.'],
@@ -389,13 +387,13 @@ story += [H2('4.4 WIP Log'),
             'Start). Type the WIP earned in each month in that month\'s column.'),
           table([
               ['Area', 'Meaning'],
-              ['Row 4', '"actual" over months ≤ Current Month, "future" over later months.'],
+              ['Row 4', '"actual" over months ≤ Last Complete Month, "future" over later months.'],
               ['Row 5', 'Calendar month headers (Timeline Start, then +1 month each column).'],
-              ['Column C', 'WIP to Date: the sum of the row for months ≤ Current Month. Feeds Projects column H.'],
-              ['Light-yellow cells', 'Inside the project\'s window and ≤ Current Month. The normal place to type.'],
-              ['Grey cells', 'Outside the project\'s window. A value here still counts towards WIP to date if ≤ Current Month. '
+              ['Column C', 'WIP to Date: the sum of the row for months ≤ Last Complete Month. Feeds Projects column H.'],
+              ['Light-yellow cells', 'Inside the project\'s window and ≤ Last Complete Month. The normal place to type.'],
+              ['Grey cells', 'Outside the project\'s window. A value here still counts towards WIP to date if ≤ Last Complete Month. '
                              'It is allowed (for example, late WIP after the end date) but shown on a grey background.'],
-              ['Red, struck-through', 'A value in a month after the Current Month. It is ignored until the Current Month reaches it.'],
+              ['Red, struck-through', 'A value in a month after the Last Complete Month. It is ignored until the Last Complete Month reaches it.'],
               ['Row 57', 'Totals per month. Feeds the Σ WIP column on the Aggregator.'],
           ], [3.6 * cm, 13.8 * cm]),
           Spacer(1, 6),
@@ -420,8 +418,8 @@ story += [H2('4.5 Project Page'),
               ['Raw Weight', 'Weight from Phasing (1 when the project uses equal weights).'],
               ['Plan Weight (Σ=1)', 'Weight normalised over the full duration.'],
               ['Original Plan', 'Contracted Budget × Plan Weight: what the month was worth before any WIP.'],
-              ['WIP Actual', 'WIP Log value for that calendar month, if ≤ Current Month; otherwise 0.'],
-              ['Phased Budgeted', 'Value from the Phased Budget grid (non-zero only after the Current Month).'],
+              ['WIP Actual', 'WIP Log value for that calendar month, if ≤ Last Complete Month; otherwise 0.'],
+              ['Phased Budgeted', 'Value from the Phased Budget grid (non-zero only after the Last Complete Month).'],
               ['Total (WIP + Phased)', 'Actual for past months plus forecast for future months.'],
               ['Actual / Forecast', 'Label for the row.'],
           ], [4 * cm, 13.4 * cm]),
@@ -439,10 +437,10 @@ story += port_fig('projectpage', 'Figure 5: Project Page for "Example Project (s
 # Timeline
 story += [H2('4.6 Timeline'),
           P('A Gantt-style view of the whole portfolio across the 36-month calendar. It is all formulas, with nothing to type. Each cell shows:'),
-          *bullets(['<b>Dark orange</b>: the WIP actual for a month ≤ Current Month inside the project window.',
-                    '<b>Light orange</b>: the Phased Budgeted forecast for a month after the Current Month.',
+          *bullets(['<b>Dark orange</b>: the WIP actual for a month ≤ Last Complete Month inside the project window.',
+                    '<b>Light orange</b>: the Phased Budgeted forecast for a month after the Last Complete Month.',
                     'Blank: outside the project window. A WIP value logged outside the window still shows, so it isn\'t hidden.',
-                    'The <b>red-bordered column</b> is the Current Month.']),
+                    'The <b>red-bordered column</b> is the Last Complete Month.']),
           P('Columns A–E show the slot number, name, Engagement Manager, start and end. Use it to spot overlaps, gaps in WIP '
             'logging (a white cell inside a project\'s past months), and months where a lot of forecast bunches up.'),
           P('Read across a row and the numbers add up to the project\'s Contracted Budget, as long as its Status is OK.')]
@@ -456,14 +454,14 @@ story += [H2('4.7 Aggregator'),
           table([
               ['Col', 'Header', 'Meaning / formula'],
               ['A–B', 'Month, Year', 'The 36 calendar months and their year.'],
-              ['C', 'Σ WIP (actual)', 'WIP Log total for the month, for months ≤ Current Month; 0 after.'],
-              ['D', 'Σ Phased Budgeted', 'Phased Budget total for the month (non-zero only after the Current Month).'],
+              ['C', 'Σ WIP (actual)', 'WIP Log total for the month, for months ≤ Last Complete Month; 0 after.'],
+              ['D', 'Σ Phased Budgeted', 'Phased Budget total for the month (non-zero only after the Last Complete Month).'],
               ['E', 'Total (WIP + Phased)', 'C + D: actuals for the past, forecast for the future.'],
               ['F', 'TRM (input)', '<b>Type</b> your monthly TRM target here (yellow). Leave a month blank if you have no target for it.'],
               ['G', 'Variance (Total − TRM)', 'Positive = ahead of TRM, negative (in brackets) = behind. Blank where TRM is blank.'],
           ], [1.4 * cm, 4.2 * cm, 11.8 * cm]),
           Spacer(1, 6),
-          P('The Current Month row is shaded. Row 42 totals the columns.'),
+          P('The Last Complete Month row is shaded. Row 42 totals the columns.'),
           H3('Annual (calendar year) table, I6:N10'),
           P('For each of the three timeline years: Σ WIP, Σ Phased Budget, <b>WIP + Phased Budget</b> (the slide\'s annual '
             '{WIP + Phased Budget}), TRM, and the variance, followed by a total row. Years run January to December.'),
@@ -494,7 +492,7 @@ story += [H2('4.8 Phased Budget (calculation grid)'),
           Spacer(1, 6),
           P('For calendar month m, the project month is k = (m − Starting Month) + 1. The cell is:', 'body'),
           P('0  if the project is incomplete, Σ remaining weights = 0,<br/>'
-            '   m ≤ Current Month, or k is outside 1 … Duration<br/>'
+            '   m ≤ Last Complete Month, or k is outside 1 … Duration<br/>'
             'otherwise  Budgeted × weight(k) ÷ Σ remaining weights', 'formula'),
           P('Row 57 totals each month and feeds the Aggregator.')]
 story += FIGS_phased1
@@ -510,7 +508,7 @@ story += [H1('5. Status messages and troubleshooting'),
               ['Duration must be 1–24', 'Duration outside the supported range.', 'Correct it. For longer projects, see section 7.'],
               ['WIP exceeds contract', 'WIP to date > Contracted Budget, so Budgeted is negative and a negative amount is phased.',
                'Check the WIP Log for typos, or raise the contract if it was varied.'],
-              ['Budget not phased: no remaining months', 'The Current Month is at or past the End Month, but money is still left (or overspent).',
+              ['Budget not phased: no remaining months', 'The Last Complete Month is at or past the End Month, but money is still left (or overspent).',
                'Log the missing WIP, extend the Duration, or reduce the contract to what was actually earned.'],
               ['Budget not phased: remaining weights are 0', 'Months are left, but every one of their weights is 0.',
                'Put a weight on at least one remaining month on Phasing.'],
@@ -524,7 +522,7 @@ story += [H1('5. Status messages and troubleshooting'),
               ['Symptom', 'Likely cause'],
               ['Project Page is blank and shows "Pick a project…"', 'The name in B3 doesn\'t match any project name (it was renamed or deleted). Pick it again from the dropdown.'],
               ['Project Page check shows "✗ diff"', 'Budget couldn\'t be phased (see Status), or WIP was logged outside the project months.'],
-              ['A WIP figure isn\'t counted', 'It is in a month after the Current Month (red strike-through). Move the Current Month forward.'],
+              ['A WIP figure isn\'t counted', 'It is in a month after the Last Complete Month (red strike-through). Move the Last Complete Month forward.'],
               ['Numbers jumped after changing Timeline Start', 'WIP is stored by column. See the warning in section 4.4.'],
               ['Two projects get mixed up on Project Page', 'Duplicate names. The dropdown always finds the first match, so keep names unique.'],
               ['Aggregator reconciliation not 0', 'At least one project isn\'t OK. Filter Status on Projects.'],
@@ -533,7 +531,7 @@ story += [H1('5. Status messages and troubleshooting'),
 
 # ------------------------------------------------------------------ 6 examples
 story += [H1('6. More worked examples'),
-          P('These use the sample projects in the screenshots, all with the Current Month at Oct 2026.'),
+          P('These use the sample projects in the screenshots, all with the Last Complete Month at Oct 2026.'),
           H2('6.1 Equal weights: Data Platform Migration'),
           table([
               ['Item', 'Value'],
@@ -592,11 +590,11 @@ story += [H1('7. Limits and changing the size'),
               ['Term', 'Meaning'],
               ['Contracted Budget', 'Total agreed value of the project.'],
               ['WIP', 'Work in progress: value earned in a month (an actual).'],
-              ['WIP to date', 'Sum of WIP for months up to and including the Current Month.'],
+              ['WIP to date', 'Sum of WIP for months up to and including the Last Complete Month.'],
               ['Budgeted', 'Contracted Budget − WIP to date: what is left to earn.'],
               ['Phasing / weights', 'The relative share of the work in each project month.'],
               ['Phased Budgeted', 'The Budgeted balance spread over the remaining months by their weights.'],
-              ['Remaining months', 'Project months after the Current Month.'],
+              ['Remaining months', 'Project months after the Last Complete Month.'],
               ['Original Plan', 'Contract × full-duration weights: the forecast before any WIP.'],
               ['TRM', 'The monthly target figure you enter on the Aggregator for comparison.'],
           ], [4.2 * cm, 13.2 * cm]),

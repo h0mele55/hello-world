@@ -1,0 +1,103 @@
+@import 'tailwindcss';
+@config '../../tailwind.config.js';
+
+/* The vendored package declares its token names with neutral fallbacks;
+ * theme.css then overrides every one of them with hello-world's palette. */
+@import '../../vendor/inflect-ui/tokens.contract.css';
+@import '../styles/theme.css';
+
+/* Tailwind v4 does not scan paths outside the app by default. Without this the
+ * vendored components render with correct markup and no styles, on a green
+ * build. tests/e2e/kitchen-sink.spec.ts is the check that it worked. */
+@source '../../vendor/inflect-ui/src';
+
+/* Host recipes. The vendored components name these classes but the package does
+ * not ship them: inflect-compliance defines its own in its globals.css. These
+ * are hello-world's versions, built only from theme tokens.
+ * tests/unit/host-recipes.test.ts fails if the vendored code starts naming a
+ * recipe this file does not define. Kept in @layer components so a utility
+ * passed through className (p-6, shadow-none) still wins over the recipe. */
+@layer components {
+  /* Card elevation "raised" (the default) and the skeleton cards. */
+  .glass-card {
+    background-color: var(--bg-default);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-sm);
+    @apply p-4 md:p-5;
+  }
+
+  /* SkeletonDataTable's table. */
+  .data-table {
+    @apply w-full text-left text-sm;
+  }
+  .data-table th {
+    @apply px-4 py-2.5 text-xs font-semibold tracking-wider uppercase;
+    color: var(--content-muted);
+    background: var(--bg-muted);
+  }
+  .data-table td {
+    @apply border-b px-4 py-2.5 text-sm;
+    border-color: var(--border-subtle);
+  }
+
+  /* The surface of Modal and Sheet. */
+  .surface-popup-texture {
+    background:
+      radial-gradient(
+        ellipse 120% 80% at 50% 0%,
+        color-mix(in srgb, var(--bg-elevated), var(--brand-default) 6%) 0%,
+        var(--bg-elevated) 60%
+      );
+    border: 1px solid var(--border-default);
+    box-shadow: var(--shadow-lg);
+  }
+}
+
+@keyframes fade-in-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* A utility, not a component recipe: it must sit in the same layer as the
+ * other animate-* utilities so className ordering behaves the same way. */
+@layer utilities {
+  .animate-fadeIn {
+    animation: fade-in-rise 0.3s ease-out both;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-fadeIn {
+    animation: none;
+  }
+}
+
+@layer base {
+  html {
+    background-color: var(--bg-page);
+    color: var(--content-default);
+  }
+
+  body {
+    min-height: 100dvh;
+    background-color: var(--bg-page);
+    color: var(--content-default);
+    font-family:
+      ui-sans-serif,
+      system-ui,
+      -apple-system,
+      'Segoe UI',
+      Roboto,
+      'Helvetica Neue',
+      Arial,
+      sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+}

@@ -1,0 +1,415 @@
+{
+  "repository": "https://github.com/rodnapamet/inflect-compliance.git",
+  "inflectCommit": "3e9f3ef28e18dc2be8d393502e3e5ee413f72bbd",
+  "entries": [
+    "packages/ui/src/lib/cn.ts",
+    "packages/ui/src/components/ui/button.tsx",
+    "packages/ui/src/components/ui/card.tsx",
+    "packages/ui/src/components/ui/tooltip.tsx",
+    "packages/ui/src/components/ui/typography.tsx",
+    "packages/ui/src/components/ui/empty-state.tsx",
+    "packages/ui/src/components/ui/error-state.tsx",
+    "packages/ui/src/components/ui/skeleton.tsx",
+    "packages/ui/src/components/ui/hooks/use-copy-to-clipboard.tsx",
+    "packages/ui/src/components/ui/icons/nucleo/shield-check.tsx",
+    "packages/ui/src/components/ui/icons/nucleo/badge-check.tsx",
+    "packages/ui/src/components/ui/icons/nucleo/cloud-upload.tsx",
+    "src/components/ui/input.tsx",
+    "src/components/ui/textarea.tsx",
+    "src/components/ui/form-field.tsx",
+    "src/components/ui/modal.tsx",
+    "src/components/ui/sheet.tsx",
+    "src/components/ui/status-badge.tsx",
+    "src/components/ui/copy-button.tsx",
+    "src/components/ui/confirm-dialog.tsx"
+  ],
+  "externals": {
+    "@radix-ui/react-dialog": [
+      "src/components/ui/modal.tsx"
+    ],
+    "@radix-ui/react-label": [
+      "src/components/ui/label.tsx"
+    ],
+    "@radix-ui/react-tooltip": [
+      "src/components/ui/tooltip.tsx"
+    ],
+    "@radix-ui/react-visually-hidden": [
+      "src/components/ui/modal.tsx",
+      "src/components/ui/sheet.tsx"
+    ],
+    "class-variance-authority": [
+      "src/components/ui/button-variants.ts",
+      "src/components/ui/button.tsx",
+      "src/components/ui/card-variants.ts",
+      "src/components/ui/card.tsx",
+      "src/components/ui/copy-button.tsx",
+      "src/components/ui/input.tsx",
+      "src/components/ui/label.tsx",
+      "src/components/ui/modal.tsx",
+      "src/components/ui/sheet.tsx",
+      "src/components/ui/status-badge.tsx",
+      "src/components/ui/textarea.tsx",
+      "src/components/ui/typography.tsx"
+    ],
+    "clsx": [
+      "src/lib/cn.ts"
+    ],
+    "lucide-react": [
+      "src/components/ui/copy-button.tsx",
+      "src/components/ui/empty-state.tsx",
+      "src/components/ui/error-state.tsx",
+      "src/components/ui/icons/icon-type.ts",
+      "src/components/ui/input.tsx",
+      "src/components/ui/modal.tsx",
+      "src/components/ui/sheet.tsx",
+      "src/components/ui/tooltip.tsx"
+    ],
+    "next": [
+      "src/components/ui/modal.tsx"
+    ],
+    "next-intl": [
+      "src/components/ui/copy-button.tsx",
+      "src/components/ui/empty-state.tsx",
+      "src/components/ui/error-state.tsx",
+      "src/components/ui/form-field.tsx",
+      "src/components/ui/input.tsx",
+      "src/components/ui/modal.tsx",
+      "src/components/ui/sheet.tsx",
+      "src/components/ui/skeleton.tsx",
+      "src/components/ui/tooltip.tsx"
+    ],
+    "react": [
+      "src/components/ui/button.tsx",
+      "src/components/ui/card.tsx",
+      "src/components/ui/copy-button.tsx",
+      "src/components/ui/empty-state.tsx",
+      "src/components/ui/error-state.tsx",
+      "src/components/ui/form-description.tsx",
+      "src/components/ui/form-error.tsx",
+      "src/components/ui/form-field.tsx",
+      "src/components/ui/hooks/use-copy-to-clipboard.tsx",
+      "src/components/ui/hooks/use-media-query.ts",
+      "src/components/ui/hooks/use-toast.ts",
+      "src/components/ui/icons/icon-type.ts",
+      "src/components/ui/icons/nucleo/badge-check.tsx",
+      "src/components/ui/icons/nucleo/circle-check.tsx",
+      "src/components/ui/icons/nucleo/circle-half-dotted-check.tsx",
+      "src/components/ui/icons/nucleo/circle-info.tsx",
+      "src/components/ui/icons/nucleo/circle-warning.tsx",
+      "src/components/ui/icons/nucleo/cloud-upload.tsx",
+      "src/components/ui/icons/nucleo/eye-slash.tsx",
+      "src/components/ui/icons/nucleo/eye.tsx",
+      "src/components/ui/icons/nucleo/shield-check.tsx",
+      "src/components/ui/input.tsx",
+      "src/components/ui/label.tsx",
+      "src/components/ui/modal.tsx",
+      "src/components/ui/overlay-depth.tsx",
+      "src/components/ui/progressive-blur.tsx",
+      "src/components/ui/sheet.tsx",
+      "src/components/ui/textarea.tsx",
+      "src/components/ui/tooltip.tsx",
+      "src/components/ui/typography.tsx",
+      "src/lib/hooks/use-keyboard-inset.ts"
+    ],
+    "sonner": [
+      "src/components/ui/hooks/use-toast.ts"
+    ],
+    "tailwind-merge": [
+      "src/lib/cn.ts"
+    ],
+    "vaul": [
+      "src/components/ui/modal.tsx",
+      "src/components/ui/sheet.tsx"
+    ]
+  },
+  "hostClassesReferenced": {
+    "animate-fadeIn": [
+      "src/components/ui/skeleton.tsx"
+    ],
+    "data-table": [
+      "src/components/ui/skeleton.tsx"
+    ],
+    "glass-card": [
+      "src/components/ui/card-variants.ts"
+    ],
+    "surface-popup-texture": [
+      "src/components/ui/modal.tsx",
+      "src/components/ui/sheet.tsx"
+    ]
+  },
+  "files": [
+    {
+      "path": "LICENSE",
+      "source": "LICENSE",
+      "sha256": "65ff05c5cdf3b3fc8a144213a14bc09995a312f5faf98f39df6d33001198cff9",
+      "transformed": false
+    },
+    {
+      "path": "README.md",
+      "source": null,
+      "sha256": "84e4e772b0ff6eeb1e216abe16f60f067453067f90320c7b087e38c42274b1f5",
+      "transformed": true
+    },
+    {
+      "path": "messages/bg.json",
+      "source": "messages/*.json (keys in config)",
+      "sha256": "165b850b9c22f6e2d37ceacd9e51423d2bbb0579fdbc7f2f69cadc2cebbbd35b",
+      "transformed": true
+    },
+    {
+      "path": "messages/en.json",
+      "source": "messages/*.json (keys in config)",
+      "sha256": "44aa13accf316c9253ce62d915b9e4321e1f1c842f745d29061bfc5877226df5",
+      "transformed": true
+    },
+    {
+      "path": "src/components/ui/button-variants.ts",
+      "source": "packages/ui/src/components/ui/button-variants.ts",
+      "sha256": "c017d6bac6184329e72c124329013354b36622e941ded1421cbf6d9530a4b1a3",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/button.tsx",
+      "source": "packages/ui/src/components/ui/button.tsx",
+      "sha256": "26ae5131eb9769ca2d0ce4aa27389a11be7b8a39a7b6a278e3cb4c4235d258f4",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/card-variants.ts",
+      "source": "packages/ui/src/components/ui/card-variants.ts",
+      "sha256": "0645747ceaaddb885752ef74a97cab16aa497db85fb38ffaa06450c4023a0f8e",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/card.tsx",
+      "source": "packages/ui/src/components/ui/card.tsx",
+      "sha256": "6b81d806b064144899af1430655b9a91c2f39d4494c0cfd794efaa519d6a92d9",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/confirm-dialog.tsx",
+      "source": "src/components/ui/confirm-dialog.tsx",
+      "sha256": "073fbd1e067a60b63d8b44ae843a06448b74fd33c716db2b0c5f82dd61285973",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/copy-button.tsx",
+      "source": "src/components/ui/copy-button.tsx",
+      "sha256": "65ff91ee2445ebdbc15860996a651021760c5895f4a458c2a5ff67bc6e24d269",
+      "sourceSha256": "9e09dfd27632ea90d39b974f7e0946d5b63ff3e48236629a3d9718c5de6b51e8",
+      "transformed": true
+    },
+    {
+      "path": "src/components/ui/empty-state.tsx",
+      "source": "packages/ui/src/components/ui/empty-state.tsx",
+      "sha256": "91fd997ad50b1d3b575ffd9268eaa7d340cebb376ce7fb982ae7f4d3db09622d",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/error-state.tsx",
+      "source": "packages/ui/src/components/ui/error-state.tsx",
+      "sha256": "38448aadf1a6926f83db76bf58b9c882b370358da7964b8b8c6753906fedf77f",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/form-description.tsx",
+      "source": "src/components/ui/form-description.tsx",
+      "sha256": "6197e2034e85a246960760b1eb38ce73153612fd10e37d2bc7ddc3b00d3e4ebc",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/form-error.tsx",
+      "source": "src/components/ui/form-error.tsx",
+      "sha256": "0017ac09f69281b66cc19da8320784fad40223dd547573f34049276a356e3e1a",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/form-field.tsx",
+      "source": "src/components/ui/form-field.tsx",
+      "sha256": "216bd95fec998566aaaaa1a564a88a2817eda7415ac4bda98b95fc81620c552d",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/hit-area.ts",
+      "source": "packages/ui/src/components/ui/hit-area.ts",
+      "sha256": "e8e8e38efef1505ff3b47be4c97a457e084b6a1ad3849f212f9e2a0ab3c6d21b",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/hooks/use-copy-to-clipboard.tsx",
+      "source": "packages/ui/src/components/ui/hooks/use-copy-to-clipboard.tsx",
+      "sha256": "66ce516a4a8463a6b38ca4a05b0940d7d4aee3b9106676bc147856cc2f0fbe17",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/hooks/use-media-query.ts",
+      "source": "packages/ui/src/components/ui/hooks/use-media-query.ts",
+      "sha256": "c42ffc2a2712b3ee8d4dc0f85d74568f79ca5067a32321e233196a9b695c6be2",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/hooks/use-toast.ts",
+      "source": "packages/ui/src/components/ui/hooks/use-toast.ts",
+      "sha256": "fdc93af6b540dac8f1a280ca464a3070a7104f53500abb80245fcc655863429a",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/icons/icon-type.ts",
+      "source": "src/components/ui/icons/icon-type.ts",
+      "sha256": "716d98c2a6efd4d7cc65a3a6bae0aa7a2ec1dcf6eaec15322384c16c97381940",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/icons/loading-spinner.tsx",
+      "source": "packages/ui/src/components/ui/icons/loading-spinner.tsx",
+      "sha256": "1142c20929a826d777c0904c8e1479df6a8866760a35bc6ba1aa1a26e60a9e74",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/icons/nucleo/badge-check.tsx",
+      "source": "packages/ui/src/components/ui/icons/nucleo/badge-check.tsx",
+      "sha256": "c0424b3f8be89071da3ff3b62ab47b78cca45ce5e96ec9a54babd6f6cccd7c2d",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/icons/nucleo/circle-check.tsx",
+      "source": "packages/ui/src/components/ui/icons/nucleo/circle-check.tsx",
+      "sha256": "7d8214a745fd29a27c701965a735e4938fe33c742540f02a4df0284298228843",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/icons/nucleo/circle-half-dotted-check.tsx",
+      "source": "packages/ui/src/components/ui/icons/nucleo/circle-half-dotted-check.tsx",
+      "sha256": "d0f9d9a5b8718d7a65d088e20371114d4be3fe36ad7248ab22eb8e6f85e6b2d9",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/icons/nucleo/circle-info.tsx",
+      "source": "packages/ui/src/components/ui/icons/nucleo/circle-info.tsx",
+      "sha256": "80a3536ec08d7143797f282c8003a8cdea92a87a3342af439792ae23874feb41",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/icons/nucleo/circle-warning.tsx",
+      "source": "packages/ui/src/components/ui/icons/nucleo/circle-warning.tsx",
+      "sha256": "dd64d83e5fcc43fe33a1bf1027d182f2ed614b986ef302a3a333511b8c2df168",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/icons/nucleo/cloud-upload.tsx",
+      "source": "packages/ui/src/components/ui/icons/nucleo/cloud-upload.tsx",
+      "sha256": "94ae0b7f56591c2e22cbee73165b26c0381a02bb3fab8517728bd5be12bc0951",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/icons/nucleo/eye-slash.tsx",
+      "source": "packages/ui/src/components/ui/icons/nucleo/eye-slash.tsx",
+      "sha256": "7ce35261236fddd629acfa31d9509a9b6ee332bcbed46607107d3f3381e9eb86",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/icons/nucleo/eye.tsx",
+      "source": "packages/ui/src/components/ui/icons/nucleo/eye.tsx",
+      "sha256": "b951933f7981631333692ed25b99f9fdfdbe5715c9455d3109d6f8ac45a7d359",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/icons/nucleo/shield-check.tsx",
+      "source": "packages/ui/src/components/ui/icons/nucleo/shield-check.tsx",
+      "sha256": "c4b70621d37dd6a5f27999cc5eea245e509cc2b644fbef4e6b1d1bb1c0c02fc9",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/input.tsx",
+      "source": "src/components/ui/input.tsx",
+      "sha256": "ea7468090dff0b6c4bfc7d6acc660b058995b5edee44bd0b066569f670c9cd01",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/label.tsx",
+      "source": "src/components/ui/label.tsx",
+      "sha256": "cf20809c1be6564f4c28391b97f89a3fdbf026adbc6ea2b644bbaad5ebbabba9",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/modal.tsx",
+      "source": "src/components/ui/modal.tsx",
+      "sha256": "95bcbc361be5a518cbbd5fd87c2d3769d68a0f05073fdc432c91edc1af8de1a4",
+      "sourceSha256": "92d481dd5857b77f7e9e07742fce9863b125378b6e71e6e94a405858e3817ca0",
+      "transformed": true
+    },
+    {
+      "path": "src/components/ui/overlay-depth.tsx",
+      "source": "src/components/ui/overlay-depth.tsx",
+      "sha256": "324642c40b70aa776ee0053be4c13297d863fa2341176e39f1801819d98ed126",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/progressive-blur.tsx",
+      "source": "src/components/ui/progressive-blur.tsx",
+      "sha256": "6e8e7dee9327fe6515cabada1d71a7554aca67d874689ecd11c91533c4b65321",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/required-marker.tsx",
+      "source": "src/components/ui/required-marker.tsx",
+      "sha256": "746ee03ebdb0c5cfb5a034d67050de65b5fb7820e0f46315a03992af5bd0bc56",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/sheet.tsx",
+      "source": "src/components/ui/sheet.tsx",
+      "sha256": "00931591f3529dcd47dcf6be4da41043b8b28a03e791a452b77ffa3b778b09f4",
+      "sourceSha256": "57ef54d7afe689472192a3361314ae7d296d936578440ae6c16e062885b724e7",
+      "transformed": true
+    },
+    {
+      "path": "src/components/ui/skeleton.tsx",
+      "source": "packages/ui/src/components/ui/skeleton.tsx",
+      "sha256": "1e8f494774ad40e23f5ab710ea88b0d88c88aca7a7b8f7a2806aa0ce3c06aac2",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/status-badge.tsx",
+      "source": "src/components/ui/status-badge.tsx",
+      "sha256": "c312e9d3ecb61cac13e6d0f602126580c7d7acd2525b19660ffcc656dc71b5b7",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/textarea.tsx",
+      "source": "src/components/ui/textarea.tsx",
+      "sha256": "4798e1d45b113acbb7f81c2b46ddd8f97352424d74a7e49dafd56aee02cd1d70",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/tooltip.tsx",
+      "source": "packages/ui/src/components/ui/tooltip.tsx",
+      "sha256": "53601d9366566a5e9ebfbe9c5eb04c6dbae2bc55bd0d396ea9548d3e88ec2277",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/typography.tsx",
+      "source": "packages/ui/src/components/ui/typography.tsx",
+      "sha256": "86eef5931683a2b470cf126f0fdcb850e7d5a6105c765a58b54dc20b9aa21636",
+      "transformed": false
+    },
+    {
+      "path": "src/lib/cn.ts",
+      "source": "packages/ui/src/lib/cn.ts",
+      "sha256": "2abac29454bd927b55b9c2dd39da9c2e800b3e2f07a67eb1f95053a6ac869c14",
+      "transformed": false
+    },
+    {
+      "path": "src/lib/hooks/use-keyboard-inset.ts",
+      "source": "src/lib/hooks/use-keyboard-inset.ts",
+      "sha256": "32b00aa32d38d72d72e5233f189484362636d44eec03d3b02f750d3941d151ad",
+      "transformed": false
+    },
+    {
+      "path": "tokens.contract.css",
+      "source": "packages/ui/tokens.contract.css",
+      "sha256": "95cda07a8fb6155cd692524f8bc19b25665054860600d9e7dc39c34d9a462822",
+      "transformed": false
+    }
+  ]
+}

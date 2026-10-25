@@ -18,9 +18,15 @@ function requireApprover(user: SessionUser) {
   if (user.role !== 'APPROVER') throw new AnchoringError('FORBIDDEN', 'only an approver may do this');
 }
 
-/** Locks the organisation row, so the mode cannot change under an approval in flight. */
+/**
+ * Locks the organisation row, so the mode cannot change under an approval in
+ * flight. FOR NO KEY UPDATE, not FOR UPDATE: every audited write takes the
+ * firm's audit lock and then inserts rows whose foreign key reaches this row,
+ * which takes a key-share lock that FOR UPDATE would block. An approval holds
+ * this row and then asks for the audit lock, so the two would deadlock.
+ */
 async function lockOrg(tx: Prisma.TransactionClient, orgId: string): Promise<ChainWriteMode> {
-  const rows = await tx.$queryRaw<{ chainWriteMode: ChainWriteMode }[]>`SELECT "chainWriteMode" FROM "IssuerOrg" WHERE id = ${orgId} FOR UPDATE`;
+  const rows = await tx.$queryRaw<{ chainWriteMode: ChainWriteMode }[]>`SELECT "chainWriteMode" FROM "IssuerOrg" WHERE id = ${orgId} FOR NO KEY UPDATE`;
   if (rows.length !== 1) throw new AnchoringError('NOT_FOUND');
   return rows[0].chainWriteMode;
 }

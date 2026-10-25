@@ -27,7 +27,12 @@
     "test:anchoring": "vitest run --config vitest.anchoring.config.mts",
     "worker": "tsx scripts/worker.ts",
     "db:migrate": "prisma migrate dev",
-    "db:seed": "prisma db seed"
+    "db:seed": "prisma db seed",
+    "build:verifier": "tsx scripts/build-verifier.ts",
+    "test:tamper": "vitest run --config vitest.tamper.config.mts"
+  },
+  "bin": {
+    "verify-report": "bin/verify-report.mjs"
   },
   "dependencies": {
     "@cantoo/fontkit": "2.0.12",
@@ -60,6 +65,7 @@
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.13.0",
     "@playwright/test": "1.64.1",
     "@tailwindcss/postcss": "4.3.3",
     "@types/node": "26.6.5",

@@ -19,3 +19,4 @@ deployments/local.json
 src/generated/
 storage/
 public/pdf.worker.min.mjs
+dist/

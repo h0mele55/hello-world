@@ -101,3 +101,31 @@ test('the latest-version page refuses an id that is not one, and finds nothing f
   await expect(page.getByTestId('latest-page')).toHaveAttribute('data-status', 'NOT_FOUND');
   await expect(page.getByText('No anchored report has this id.')).toBeVisible();
 });
+
+test('the verifier is served with a strict CSP, and verifies under it', async ({ page }) => {
+  const violations: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error' && /Content Security Policy/i.test(message.text())) violations.push(message.text());
+  });
+  const response = await page.goto('/verify');
+  const csp = response?.headers()['content-security-policy'] ?? '';
+  expect(csp).toMatch(/script-src 'self' 'nonce-[A-Za-z0-9+/=]+' 'strict-dynamic'/);
+  expect(csp).not.toContain("'unsafe-inline' 'nonce");
+  expect(csp).toContain(`connect-src 'self' ${new URL(RPC_URL).origin}`);
+  expect(csp).toContain("frame-ancestors 'none'");
+  await verify(page, 'report.pdf', uniquePdf('en-adverse.pdf', runTag()));
+  await expect(page.getByTestId('verdict-body')).toContainText('carries no anchor reference');
+  expect(violations).toEqual([]);
+});
+
+test('the lookup page refuses a client its 61st request in a minute', async ({ request }) => {
+  test.setTimeout(120_000);
+  // A client address of its own (the test server trusts X-Forwarded-For), so other tests do not share its budget.
+  const headers = { 'x-forwarded-for': `203.0.113.${Math.floor(Math.random() * 250) + 1}, ${runTag()}` };
+  const url = `/r/0x${'cd'.repeat(32)}/latest`;
+  for (let i = 0; i < 60; i++) expect((await request.get(url, { headers })).status(), `request ${i + 1}`).toBe(200);
+  const refused = await request.get(url, { headers });
+  expect(refused.status()).toBe(429);
+  expect(Number(refused.headers()['retry-after'])).toBeGreaterThan(0);
+  expect((await request.get(url, { headers: { 'x-forwarded-for': '198.51.100.250' } })).status()).toBe(200);
+});

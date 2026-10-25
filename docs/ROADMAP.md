@@ -681,13 +681,13 @@ This phase completes the prototype.
 
 **Hardening**
 
-- [ ] Tamper suite: one-byte flip, metadata-only edit, opinion paragraph edit, opinion type flip, re-save in another tool, print to PDF, appended incremental update, hidden text overlay, stripped XMP, forged XMP naming another record
+- [x] Tamper suite: one-byte flip, metadata-only edit, opinion paragraph edit, opinion type flip, re-save in another tool, print to PDF, appended incremental update, hidden text overlay, stripped XMP, forged XMP naming another record
 - [x] A network-capture test proves no request carries PDF bytes
-- [ ] Strict CSP: no inline script, `connect-src` limited to the two RPC hosts and the app's origin, no third-party scripts
+- [x] Strict CSP: no inline script, `connect-src` limited to the two RPC hosts and the app's origin, no third-party scripts
 - [x] Disagreeing RPC endpoints or a wrong chain id return "cannot verify right now", never a verdict
 - [x] One opinion normaliser bundle serves server and browser, with golden tests run in both
-- [ ] Wording reviewed against overclaiming, in English and Bulgarian; axe accessibility checks pass (WCAG 2.2 AA) (the wording guard is in; axe arrives with #50)
-- [ ] The app's lookup API is rate-limited, and the verifier works without it (it works without it; the rate limit is #51)
+- [x] Wording reviewed against overclaiming, in English and Bulgarian; axe accessibility checks pass (WCAG 2.2 AA)
+- [x] The app's lookup API is rate-limited, and the verifier works without it
 
 **As built: Phase 4 ships in two pull requests.** 4a is the shared
 verification code, `/verify`, the wording and `/r/{familyId}/latest` (#44,
@@ -734,6 +734,66 @@ privacy, resilience and accessibility tests, the CSP and the rate limit (#48,
   now", never as a verdict.
 - **`/r/{familyId}/latest` reads the chain on the server**, through the same
   two agreeing endpoints, and shows the record only.
+
+4b, the standalone verifiers, the tamper suite and the hardening (#48, #49,
+#50, #51):
+
+- **Two more front ends on the same core.** `npm run build:verifier` bundles
+  verify-core into `dist/verifier.html`, one self-contained page (pdf.js and
+  its worker inlined, the registry settings and both languages baked in) that
+  works opened from disk, and `dist/verify-report.mjs`, which
+  `bin/verify-report.mjs` runs: the verdict as JSON, exit 3 for "cannot verify
+  right now". The page writes only text into the document and carries its own
+  CSP: its script by hash, the worker as `blob:`, connections to the two
+  endpoints only. Publishing it for Sepolia is #85, after #4.
+- **The tamper suite** (`npm run test:tamper`, on Anvil) starts from a
+  COMPLETE version and checks every case through verify-core and through the
+  CLI, which must agree. Its table is the exit gate:
+
+  | Case | Verdict |
+  | --- | --- |
+  | Untouched original, untouched stamped copy | AUTHENTIC_LATEST; AUTHENTIC_SUPERSEDED once v2 is anchored |
+  | One-byte flip (the binary marker comment) | ALTERED_OPINION_APPEARS_UNCHANGED |
+  | Metadata-only edit (an incremental save of the title) | ALTERED_OPINION_APPEARS_UNCHANGED |
+  | Opinion paragraph edited, reference kept | ALTERED_OPINION_CHANGED |
+  | Opinion type flipped to Qualified, reference kept | ALTERED_OPINION_CHANGED |
+  | Re-saved by qpdf | ALTERED_OPINION_APPEARS_UNCHANGED |
+  | Printed to PDF by Chromium | NOT_REGISTERED (no reference) |
+  | Appended incremental update (a "withdrawn" page) | ALTERED_OPINION_APPEARS_UNCHANGED |
+  | White text hidden at the end of the opinion | ALTERED_OPINION_CHANGED |
+  | XMP stripped (Info keeps the reference) | ALTERED_OPINION_APPEARS_UNCHANGED |
+  | XMP and Info stripped | NOT_REGISTERED (no reference) |
+  | Stamp forged to name another family's record | ALTERED_OPINION_CHANGED |
+  | Stamp naming a record that does not exist | NOT_REGISTERED (names an unknown record) |
+  | XMP alone forged, Info left | NOT_REGISTERED (reference unreadable) |
+
+  Every APPEARS_UNCHANGED row is a file that is not the registered one, and
+  the verdict says so: the appended "withdrawn" page is exactly why it must.
+- **Privacy, resilience, accessibility**: Playwright captures every request
+  during a verification (none carries the file; all go to the RPC endpoints),
+  answers `/api/*` with 503 throughout, and runs axe (WCAG 2.2 AA) on
+  `/verify` in both languages and themes, before and after a verdict, on the
+  lookup page and on the single-file verifier.
+- **CSP by nonce, in `src/proxy.ts`**, on `/verify` and `/r/*` only: Next.js's
+  own inline scripts carry the per-request nonce, so no script runs without
+  it; `connect-src` is the origin and the two endpoints. Inline styles stay
+  allowed for the UI kit's positioned popovers. The signed-in app has no CSP
+  yet (#84).
+- **Rate limit**: the lookup page, which reads the chain on the server, takes
+  60 requests a minute per client address and 600 in all; the per-address
+  limit needs `TRUST_PROXY_HEADERS=1`, the total holds regardless. `/verify`
+  needs no limit: its server does no work per verification.
+- **Correction to 4a**: pdf.js 6 has no eval path at all, so the
+  `isEvalSupported: false` added in 4a did nothing and is gone.
+- **Found on the way: an approval could deadlock with any other audited write
+  in the same firm.** The approval locked the firm's row `FOR UPDATE` and
+  then asked for the firm's audit lock; every audited write holds the audit
+  lock and then inserts an event whose foreign key takes a key-share lock on
+  that row, which `FOR UPDATE` blocks. Postgres aborted one of the two
+  (`40P01`), which surfaced once as a failed approval in the end-to-end run.
+  The row is now locked `FOR NO KEY UPDATE`, which still serialises approvals
+  against mode changes but not against foreign-key checks; a database test
+  reproduces the interleaving.
 
 **Prompt**
 

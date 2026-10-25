@@ -41,6 +41,14 @@ function issuersOf(network: NetworkName, root: string): Record<string, string> {
   }
 }
 
+/** The verifier's two endpoints, or why they are refused; no file is read, so the proxy may ask on every request. */
+export function verifierRpcUrls(env: Env = process.env): [string, string] | VerifierSetupRefusal {
+  const network = env.VERIFY_NETWORK || env.ANCHOR_NETWORK;
+  if (!network) return 'NOT_CONFIGURED';
+  if (!isNetworkName(network)) return 'NETWORK_INVALID';
+  return rpcUrlsOf(network, env);
+}
+
 function rpcUrlsOf(network: NetworkName, env: Env): [string, string] | VerifierSetupRefusal {
   const local = env.LOCAL_RPC_URL || 'http://127.0.0.1:8545';
   const raw = network === 'local' ? [env.VERIFY_RPC_URL_1 || local, env.VERIFY_RPC_URL_2 || local] : [env.VERIFY_RPC_URL_1, env.VERIFY_RPC_URL_2];

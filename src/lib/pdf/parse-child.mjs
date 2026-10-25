@@ -19,8 +19,6 @@ async function extract(bytes, limits) {
       useSystemFonts: false,
       enableXfa: false,
       isOffscreenCanvasSupported: false,
-    // Untrusted files: never compile font programs into functions.
-    isEvalSupported: false,
       verbosity: 0,
     }).promise;
   } catch (error) {

@@ -7,7 +7,7 @@ import { PrismaClient } from '@/generated/prisma/client';
 import { approveVersion, getChainWriteMode, setChainWriteMode } from '@/lib/anchoring/approve';
 import { AnchoringError } from '@/lib/anchoring/errors';
 import type { AnchorTarget } from '@/lib/anchoring/target';
-import { appendAuditEvent, auditHashOf, GENESIS_HASH, verifyAuditChain } from '@/lib/audit';
+import { ADVISORY_LOCK_CLASS, appendAuditEvent, auditHashOf, GENESIS_HASH, verifyAuditChain } from '@/lib/audit';
 import { confirmOpinion, createEngagement, discardDraft, uploadVersion, type NewEngagement } from '@/lib/reports/intake';
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) });
@@ -188,6 +188,38 @@ describe('approval (rule 6)', () => {
     expect(approved).toMatchObject({ actorId: approver.id, subjectId: versionId });
     expect(approved.data).toMatchObject({ chainWriteId, mode: 'LIVE', docHash: version.docHash });
     await expectCode(approveVersion(secondApprover, versionId, TARGET), 'NOT_CONFIRMED');
+  });
+
+  it('does not deadlock with another audited write in the same firm', async () => {
+    await setChainWriteMode(approver, 'DRY_RUN');
+    const engagement = await createEngagement(preparer, ENGAGEMENT);
+    const versionId = await confirmedVersion(engagement.id, 'en-unmodified.pdf');
+
+    // Another audited write is mid-transaction: it holds the firm's audit lock
+    // and has yet to insert its event, whose foreign key reaches the firm's row.
+    let letItFinish!: () => void;
+    const finish = new Promise<void>((resolve) => (letItFinish = resolve));
+    const other = prisma.$transaction(
+      async (tx) => {
+        await tx.$executeRaw`SELECT pg_advisory_xact_lock(${ADVISORY_LOCK_CLASS.AUDIT}::int, hashtext(${orgId}))`;
+        await finish;
+        await appendAuditEvent(tx, { orgId, actorId: preparer.id, action: 'engagement.created', subjectType: 'Engagement', subjectId: 'concurrent', data: {} });
+      },
+      { timeout: 20_000 },
+    );
+    // The approval locks the firm's row, then waits for the audit lock.
+    const approval = approveVersion(approver, versionId, TARGET);
+    const waitingForAuditLock = async () =>
+      (await prisma.$queryRaw<{ n: bigint }[]>`SELECT count(*) AS n FROM pg_locks WHERE locktype = 'advisory' AND NOT granted`)[0].n > 0n;
+    for (let i = 0; i < 100 && !(await waitingForAuditLock()); i++) await new Promise((r) => setTimeout(r, 20));
+    expect(await waitingForAuditLock()).toBe(true);
+
+    // The other write now inserts its event. Under FOR UPDATE on the firm's
+    // row, that insert's key-share lock waits on the approval, and the
+    // approval on the audit lock: Postgres aborts one of them as a deadlock.
+    letItFinish();
+    await expect(Promise.all([other, approval])).resolves.toEqual([undefined, expect.objectContaining({ mode: 'DRY_RUN' })]);
+    expect(await verifyAuditChain(prisma, orgId)).toMatchObject({ ok: true });
   });
 
   it('refuses a preparer, another firm, a draft, a disabled firm and a missing chain', async () => {

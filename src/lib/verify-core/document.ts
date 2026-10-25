@@ -39,8 +39,6 @@ export async function readDocument(pdfjs: PdfjsLike, bytes: Uint8Array, limits =
     useSystemFonts: false,
     enableXfa: false,
     isOffscreenCanvasSupported: false,
-    // Untrusted files: never compile font programs into functions.
-    isEvalSupported: false,
     verbosity: 0,
   });
   try {

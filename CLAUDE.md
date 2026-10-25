@@ -11,8 +11,10 @@ copy in their own browser. **Read `docs/ROADMAP.md` before starting work**: it
 holds the phases, each phase's exit gate and hardening list, and the prompt
 that starts each phase. The decisions behind the design are in `docs/adr/`.
 
-Phase 0 (this scaffold) is done: a Next.js app that renders Inflect's UI
-primitives in its own theme. Nothing touches a chain or a PDF yet.
+Phase 0 (the Next.js scaffold rendering Inflect's UI primitives in its own
+theme) and Phase 1 (the `AuditReportRegistry` contract and the viem chain
+adapter, tested on Anvil) are done. The Sepolia deployment waits on funded keys
+(#4). Nothing touches a PDF yet.
 
 ## Rules every phase keeps
 
@@ -52,7 +54,37 @@ npm run test:e2e       # Playwright against `next start` on port 3100; build fir
 npm run vendor:check   # vendored Inflect UI matches its manifest (offline, fast)
 npm run vendor:sync    # re-vendor at the pinned commit; add `-- --ref <sha>` to move the pin
 node scripts/sync-inflect-ui.mjs --check   # re-derive the vendored tree from upstream
+
+# Contracts (Foundry v1.8.6 on PATH; forge-std is a submodule: git submodule update --init)
+(cd contracts && forge build)                            # compile
+(cd contracts && FORGE_SNAPSHOT_CHECK=true forge test)   # unit, fuzz, invariant and gas tests
+(cd contracts && forge fmt --check && forge lint --deny notes)
+npm run contracts:artifact     # regenerate src/lib/chain/registry-artifact.ts after a contract change
+npm run test:integration       # chain adapter against a throwaway Anvil node
+npx tsx scripts/deploy-registry.ts <sepolia|local>       # deploy; reads keys from env only
 ```
+
+Locally, Playwright needs the browser of its own version:
+`npx playwright install chromium`.
+
+## The registry and the chain adapter
+
+- **`contracts/src/AuditReportRegistry.sol` is immutable once deployed.** A
+  change to it means a new deployment and a new `deployments/<network>.json`;
+  code refuses a deployment whose bytecode hash is not the current build's
+  (`DEPLOYMENT_STALE`). After editing the contract, run `npm run
+  contracts:artifact` and commit the regenerated artifact; CI fails if the two
+  disagree.
+- **Gas ceilings are tests.** `contracts/test/AuditReportRegistry.gas.t.sol`
+  caps each write, and `contracts/snapshots/` pins the exact figures. A change
+  that moves them updates the snapshot in the same pull request
+  (`forge test` rewrites it; CI runs with `FORGE_SNAPSHOT_CHECK=true`).
+- **All chain access goes through `src/lib/chain/`.** `createChainAdapter`
+  checks the chain id and the code at the registry address, then simulates,
+  before every write, so a refusal is a named `RegistryRevertError` and nothing
+  is broadcast. A returned `txHash` is not an anchor: call `waitFinal`.
+- **Integration tests start their own Anvil** with `--slots-in-an-epoch 1`, so
+  `finalized` trails `latest` by two blocks; mine blocks to reach finality.
 
 ## The vendored Inflect UI
 

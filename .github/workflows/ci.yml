@@ -44,6 +44,40 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
+  contracts:
+    name: Contracts and chain adapter
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          submodules: recursive
+      - uses: foundry-rs/foundry-toolchain@dba66c27052e63476d886f22216e119ba7e615bf # v1.9.2
+        with:
+          version: v1.8.6
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Format and lint (Solidity)
+        working-directory: contracts
+        run: forge fmt --check && forge lint --deny notes
+      - name: Unit, fuzz and invariant tests, gas snapshot checked
+        working-directory: contracts
+        env:
+          FORGE_SNAPSHOT_CHECK: 'true'
+        run: forge test
+      - name: The TypeScript ABI and bytecode match the contract
+        run: npm run contracts:artifact && git diff --exit-code src/lib/chain/registry-artifact.ts
+      - name: Chain adapter against Anvil
+        run: npm run test:integration
+      - name: Slither
+        working-directory: contracts
+        run: |
+          pipx install slither-analyzer==0.11.6
+          slither . --filter-paths "lib/|test/"
+
   vendor-reproducible:
     name: Vendored code reproduces from upstream
     runs-on: ubuntu-latest

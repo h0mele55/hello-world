@@ -5,7 +5,17 @@ const config = [
   {
     // vendor/inflect-ui is upstream code, linted upstream and drift-checked
     // here; editing it to satisfy a local rule is exactly what rule 8 forbids.
-    ignores: ['.next/**', 'node_modules/**', 'vendor/inflect-ui/**', 'playwright-report/**', 'test-results/**', 'next-env.d.ts'],
+    ignores: [
+      '.next/**',
+      'node_modules/**',
+      'vendor/inflect-ui/**',
+      'contracts/lib/**',
+      'contracts/out/**',
+      'contracts/cache/**',
+      'playwright-report/**',
+      'test-results/**',
+      'next-env.d.ts',
+    ],
   },
   ...nextCoreWebVitals,
   ...nextTypescript,

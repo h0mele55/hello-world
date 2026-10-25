@@ -5,51 +5,24 @@
  *   npm run worker            # a pass every WORKER_INTERVAL_MS (default 15 s)
  *   npm run worker -- --once  # one pass, then exit
  *
- * Reads, from the environment only:
- *   DATABASE_URL        the app's database
- *   ANCHOR_NETWORK      sepolia or local; deployments/<network>.json names the registry
- *   ISSUER_PRIVATE_KEY  the issuer key. Read here and nowhere else: the web app never holds it.
- *   ISSUER_ADDRESS      optional; when set, must be the key's address (it is what the web app journals)
- *   SEPOLIA_RPC_URL / LOCAL_RPC_URL
+ * Reads the issuer settings in scripts/issuer-env.ts, and also:
  *   FILE_ENCRYPTION_KEY, FILE_ENCRYPTION_KEY_VERSION, FILE_STORAGE_DIR
  *                       the same values as the app's: the worker reads originals and stores copies
  *   APP_PUBLIC_URL      the app's public origin; stamps and certificates point at <origin>/verify
- *   DEPLOYMENT_FILE     optional; a deployment record other than deployments/<network>.json
  *
  * Any number of workers may run: an advisory lock lets one work a given
  * issuer key at a time.
  */
 import path from 'node:path';
-import { PrismaPg } from '@prisma/adapter-pg';
-import pg from 'pg';
-import { createPublicClient, getAddress, http, isHex, type PublicClient } from 'viem';
-import { privateKeyToAccount } from 'viem/accounts';
-import { PrismaClient } from '../src/generated/prisma/client';
 import { runWorkerPass } from '../src/lib/anchoring/worker';
 import { createFileStore } from '../src/lib/file-store';
-import { isNetworkName, loadDeployment, loadDeploymentFile, NETWORKS, rpcUrlFor } from '../src/lib/chain/networks';
+import { issuerEnv, refuse, requireEnv } from './issuer-env';
 
-function fail(message: string): never {
-  console.error(JSON.stringify({ level: 'error', message: `worker refused to start: ${message}` }));
-  process.exit(1);
-}
-
-function env(name: string): string {
-  const value = process.env[name];
-  if (!value) fail(`${name} is not set`);
-  return value;
-}
+const fail = (message: string): never => refuse('worker', message);
+const env = (name: string) => requireEnv('worker', name);
 
 async function main() {
   const once = process.argv.includes('--once');
-  const network = env('ANCHOR_NETWORK');
-  if (!isNetworkName(network)) fail('ANCHOR_NETWORK must be sepolia or local');
-  const key = env('ISSUER_PRIVATE_KEY');
-  if (!isHex(key) || key.length !== 66) fail('ISSUER_PRIVATE_KEY is not a 32-byte hex key');
-  const account = privateKeyToAccount(key);
-  const declared = process.env.ISSUER_ADDRESS;
-  if (declared && getAddress(declared) !== account.address) fail('ISSUER_ADDRESS is not the address of ISSUER_PRIVATE_KEY');
-
   const keyBytes = Buffer.from(env('FILE_ENCRYPTION_KEY'), 'base64');
   if (keyBytes.length !== 32) fail('FILE_ENCRYPTION_KEY must be base64 of exactly 32 bytes');
   const keyVersion = Number(process.env.FILE_ENCRYPTION_KEY_VERSION || 1);
@@ -59,13 +32,7 @@ async function main() {
   const verifyBaseUrl = env('APP_PUBLIC_URL');
   if (!/^https?:\/\/[^\s]+$/.test(verifyBaseUrl)) fail('APP_PUBLIC_URL must be an http(s) URL');
 
-  // Run from the app's directory: the PDF parser and deployments/ are found from there.
-  const deployment = process.env.DEPLOYMENT_FILE ? loadDeploymentFile(network, path.resolve(process.env.DEPLOYMENT_FILE)) : loadDeployment(network);
-  const publicClient = createPublicClient({ chain: NETWORKS[network], transport: http(rpcUrlFor(network)) }) as PublicClient;
-  const databaseUrl = env('DATABASE_URL');
-  const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl, max: 4, connectionTimeoutMillis: 10_000 }) });
-  const lockClient = new pg.Client({ connectionString: databaseUrl });
-  await lockClient.connect();
+  const { network, account, deployment, publicClient, prisma, lockClient, close } = await issuerEnv('worker');
 
   let stopping = false;
   const stop = () => {
@@ -96,8 +63,7 @@ async function main() {
       for (let waited = 0; waited < intervalMs && !stopping; waited += 250) await new Promise((r) => setTimeout(r, 250));
     } while (!stopping);
   } finally {
-    await lockClient.end();
-    await prisma.$disconnect();
+    await close();
   }
 }
 

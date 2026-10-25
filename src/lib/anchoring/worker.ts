@@ -4,18 +4,15 @@ import {
   getAddress,
   keccak256,
   parseEther,
-  TransactionNotFoundError,
-  TransactionReceiptNotFoundError,
   type Address,
   type Hash,
   type Hex,
   type LocalAccount,
   type PublicClient,
-  type TransactionReceipt,
 } from 'viem';
 import { Prisma, type PrismaClient } from '@/generated/prisma/client';
 import type { ChainWriteStatus } from '@/generated/prisma/enums';
-import { ADVISORY_LOCK_CLASS, appendAuditEvent, type AuditAction } from '@/lib/audit';
+import { appendAuditEvent, type AuditAction } from '@/lib/audit';
 import { toRegistryError } from '@/lib/chain/adapter';
 import type { Deployment } from '@/lib/chain/deployment';
 import { ChainError, RegistryRevertError } from '@/lib/chain/errors';
@@ -29,6 +26,7 @@ import type { FileStore } from '@/lib/file-store';
 import { NORMALISER_VERSION } from '@/lib/opinion/normalise';
 import { checkStampedCopy, stampPdf, StampError } from '@/lib/stamp';
 import { STAMP_VERSION, type StampFields } from '@/lib/stamp-fields';
+import { anyKnown, firstReceipt, hashesOfWrite, issuerLockArgs, receiptOf } from './chain-reads';
 import { rungOf } from './ladder';
 import { classifySendError, type SendOutcome } from './send';
 
@@ -178,7 +176,6 @@ export function errorName(error: unknown): string {
   return error instanceof Error ? error.name : typeof error;
 }
 
-const issuerLockKey = (chainId: number, issuer: Address) => `${chainId}:${issuer.toLowerCase()}`;
 
 export async function runWorkerPass(deps: WorkerDeps): Promise<PassReport> {
   const ctx: Context = {
@@ -197,7 +194,7 @@ export async function runWorkerPass(deps: WorkerDeps): Promise<PassReport> {
     verifyUrl: `${deps.verifyBaseUrl.replace(/\/+$/, '')}/verify`,
   };
   const report: PassReport = { ran: false, steps: [], errors: [], certified: [] };
-  const lockArgs = [ADVISORY_LOCK_CLASS.ISSUER_KEY, issuerLockKey(ctx.chainId, ctx.issuer)];
+  const lockArgs = issuerLockArgs(ctx.chainId, ctx.issuer);
   const { rows } = await deps.lockClient.query<{ locked: boolean }>('SELECT pg_try_advisory_lock($1::int, hashtext($2)) AS locked', lockArgs);
   if (!rows[0]?.locked) return { ...report, reason: 'ISSUER_LOCKED' };
   try {
@@ -790,37 +787,7 @@ async function signAndSend(ctx: Context, write: Write): Promise<StepReport> {
 
 // ── BROADCAST: wait for finality, replace when stuck ──
 
-async function receiptOf(ctx: Context, hash: Hash): Promise<TransactionReceipt | null> {
-  try {
-    return await ctx.publicClient.getTransactionReceipt({ hash });
-  } catch (error) {
-    if (error instanceof TransactionReceiptNotFoundError) return null;
-    throw error;
-  }
-}
-
-async function firstReceipt(ctx: Context, hashes: Hash[]): Promise<TransactionReceipt | null> {
-  for (const hash of hashes) {
-    const receipt = await receiptOf(ctx, hash);
-    if (receipt) return receipt;
-  }
-  return null;
-}
-
-/** Whether the node knows any of the hashes, mined or still in its pool. */
-async function anyKnown(ctx: Context, hashes: Hash[]): Promise<boolean> {
-  for (const hash of hashes) {
-    try {
-      await ctx.publicClient.getTransaction({ hash });
-      return true;
-    } catch (error) {
-      if (!(error instanceof TransactionNotFoundError)) throw error;
-    }
-  }
-  return false;
-}
-
-const hashesOf = (write: Write) => [write.txHash, ...write.replacedTxHashes].filter((h): h is string => !!h) as Hash[];
+const hashesOf = (write: Write) => hashesOfWrite(write);
 
 function recordMatches(record: RegistryRecord | null, write: Write, issuer: Address, blockNumber: bigint): boolean {
   return (
@@ -835,9 +802,9 @@ function recordMatches(record: RegistryRecord | null, write: Write, issuer: Addr
 
 async function trackBroadcast(ctx: Context, write: Write): Promise<StepReport> {
   const hashes = hashesOf(write);
-  const receipt = await firstReceipt(ctx, hashes);
+  const receipt = await firstReceipt(ctx.publicClient, hashes);
   if (!receipt) {
-    if (!(await anyKnown(ctx, hashes))) return indeterminate(ctx, write, 'TX_NOT_FOUND');
+    if (!(await anyKnown(ctx.publicClient, hashes))) return indeterminate(ctx, write, 'TX_NOT_FOUND');
     const pendingFor = ctx.now().getTime() - (write.broadcastAt ?? ctx.now()).getTime();
     if (pendingFor >= ctx.options.replaceAfterMs) return replace(ctx, write);
     return release(ctx, write, {}, 'pending');
@@ -851,7 +818,7 @@ async function trackBroadcast(ctx: Context, write: Write): Promise<StepReport> {
   const finalized = await ctx.publicClient.getBlock({ blockTag: 'finalized' });
   if (finalized.number < receipt.blockNumber) return release(ctx, write, settled, `in block ${receipt.blockNumber}; waiting for finality`);
   // Read again after finality: a receipt seen before a reorg may name another block.
-  const again = await receiptOf(ctx, landed);
+  const again = await receiptOf(ctx.publicClient, landed);
   if (!again || again.blockHash !== receipt.blockHash) return release(ctx, write, {}, 'block changed; checking again next pass');
 
   const record = write.recordId ? await ctx.reader.getRecord(write.recordId as Hex) : null;
@@ -923,7 +890,7 @@ async function reconcile(ctx: Context, write: Write): Promise<StepReport> {
   // between then shows up as a receipt rather than as someone else's nonce.
   const finalizedNonce = await ctx.publicClient.getTransactionCount({ address: ctx.issuer, blockTag: 'finalized' });
   const hashes = hashesOf(write);
-  if ((await firstReceipt(ctx, hashes)) || (await anyKnown(ctx, hashes))) {
+  if ((await firstReceipt(ctx.publicClient, hashes)) || (await anyKnown(ctx.publicClient, hashes))) {
     // It was sent: track it like any broadcast.
     return transition(ctx, write, 'BROADCAST', { broadcastAt: write.broadcastAt ?? ctx.now(), error: null }, {
       audit: { action: 'anchor.broadcast', data: { txHash: write.txHash, nonce: write.nonce, reconciled: true } },

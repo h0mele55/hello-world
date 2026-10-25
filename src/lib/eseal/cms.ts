@@ -1,4 +1,4 @@
-import { createHash, webcrypto } from 'node:crypto';
+import { createHash, createPublicKey, verify as verifySignature, webcrypto } from 'node:crypto';
 import * as asn1js from 'asn1js';
 import * as pkijs from 'pkijs';
 import { SealError, type SealSigner, type Timestamper } from './types';
@@ -29,7 +29,9 @@ export const OID = {
   signatureTimeStampToken: '1.2.840.113549.1.9.16.2.14',
   tstInfo: '1.2.840.113549.1.9.16.1.4',
   sha256: '2.16.840.1.101.3.4.2.1',
+  rsaEncryption: '1.2.840.113549.1.1.1',
   sha256WithRSA: '1.2.840.113549.1.1.11',
+  ecPublicKey: '1.2.840.10045.2.1',
   ecdsaWithSHA256: '1.2.840.10045.4.3.2',
   timeStamping: '1.3.6.1.5.5.7.3.8',
 } as const;
@@ -87,6 +89,9 @@ export async function signDetached(contentDigest: Uint8Array, signer: SealSigner
   if (chainDer.length === 0) throw new SealError('SIGNER_REFUSED', 'the provider gave no seal certificate');
   const chain = chainDer.map(parseCertificate);
   const [leaf] = chain;
+  // The seal certificate's key says which signature to expect; the provider's word is not asked.
+  const keyAlgorithm = leaf.subjectPublicKeyInfo.algorithm.algorithmId;
+  if (keyAlgorithm !== OID.rsaEncryption && keyAlgorithm !== OID.ecPublicKey) throw new SealError('SIGNER_REFUSED', 'the seal key is neither RSA nor ECDSA');
 
   const { sorted, der: toBeSigned } = encodeSignedAttributes([
     new pkijs.Attribute({ type: OID.contentType, values: [new asn1js.ObjectIdentifier({ value: OID.data })] }),
@@ -94,7 +99,7 @@ export async function signDetached(contentDigest: Uint8Array, signer: SealSigner
     signingCertificateV2(chainDer[0]),
   ]);
   const signature = await signer.signDigest(sha256(toBeSigned));
-  if (signature.length === 0) throw new SealError('SIGNER_REFUSED', 'the provider gave an empty signature');
+  if (!signsWith(leaf, toBeSigned, signature)) throw new SealError('SIGNER_REFUSED', 'the provider’s signature does not verify against the seal certificate');
 
   const token = await timestamper.timestamp(sha256(signature));
   const tst = await readTimestampToken(token);
@@ -106,7 +111,7 @@ export async function signDetached(contentDigest: Uint8Array, signer: SealSigner
     digestAlgorithm: new pkijs.AlgorithmIdentifier({ algorithmId: OID.sha256 }),
     signedAttrs: new pkijs.SignedAndUnsignedAttributes({ type: 0, attributes: sorted }),
     signatureAlgorithm: new pkijs.AlgorithmIdentifier(
-      signer.algorithm === 'RSA-PKCS1-SHA256' ? { algorithmId: OID.sha256WithRSA, algorithmParams: new asn1js.Null() } : { algorithmId: OID.ecdsaWithSHA256 },
+      keyAlgorithm === OID.rsaEncryption ? { algorithmId: OID.sha256WithRSA, algorithmParams: new asn1js.Null() } : { algorithmId: OID.ecdsaWithSHA256 },
     ),
     signature: new asn1js.OctetString({ valueHex: signature }),
     unsignedAttrs: new pkijs.SignedAndUnsignedAttributes({
@@ -123,6 +128,17 @@ export async function signDetached(contentDigest: Uint8Array, signer: SealSigner
   });
   const contentInfo = new pkijs.ContentInfo({ contentType: OID.signedData, content: signedData.toSchema(true) });
   return { der: new Uint8Array(contentInfo.toSchema().toBER(false)), signer: leaf };
+}
+
+/** Whether `signature` is the certificate's key's SHA-256 signature over `data` (PKCS #1 v1.5, or DER ECDSA). */
+function signsWith(cert: pkijs.Certificate, data: Uint8Array, signature: Uint8Array): boolean {
+  if (signature.length === 0) return false;
+  try {
+    const key = createPublicKey({ key: Buffer.from(cert.subjectPublicKeyInfo.toSchema().toBER(false)), format: 'der', type: 'spki' });
+    return verifySignature('sha256', data, { key, dsaEncoding: 'der' }, signature);
+  } catch {
+    return false;
+  }
 }
 
 export interface TimestampReading {

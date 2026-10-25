@@ -5,16 +5,13 @@
  * each is handed a SHA-256 digest and nothing else.
  */
 
-/** The signature schemes a seal key may use. */
-export type SealAlgorithm = 'RSA-PKCS1-SHA256' | 'ECDSA-SHA256';
-
 export interface SealSigner {
-  readonly algorithm: SealAlgorithm;
   /** The seal certificate first, then the certificates that issued it, as DER. */
   certificates(): Promise<Uint8Array[]>;
   /**
    * Signs a SHA-256 digest with the seal key: an RSA PKCS #1 v1.5 signature,
-   * or an ECDSA signature as a DER Ecdsa-Sig-Value.
+   * or an ECDSA signature as a DER Ecdsa-Sig-Value. Which one is the seal
+   * certificate's key's to say, and the answer is checked against it.
    */
   signDigest(digest: Uint8Array): Promise<Uint8Array>;
 }

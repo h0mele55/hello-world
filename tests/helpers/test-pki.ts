@@ -1,4 +1,5 @@
 import { constants, createPrivateKey, privateEncrypt, webcrypto } from 'node:crypto';
+import { p256 } from '@noble/curves/nist';
 import * as asn1js from 'asn1js';
 import * as pkijs from 'pkijs';
 import { OID, sha256 } from '@/lib/eseal/cms';
@@ -19,6 +20,7 @@ const SHA256_DIGEST_INFO = Uint8Array.from(Buffer.from('3031300d0609608648016503
 type KeyPair = CryptoKeyPair;
 const rsaKeys = () =>
   subtle.generateKey({ name: 'RSASSA-PKCS1-v1_5', modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-256' }, true, ['sign', 'verify']) as Promise<KeyPair>;
+const ecKeys = () => subtle.generateKey({ name: 'ECDSA', namedCurve: 'P-256' }, true, ['sign', 'verify']) as Promise<KeyPair>;
 
 const nameOf = (cn: string, org?: string) => {
   const name = new pkijs.RelativeDistinguishedNames();
@@ -68,22 +70,27 @@ export interface TestPki {
 
 /**
  * A root, a seal certificate and a timestamping authority; `clock` sets the time the TSA vouches for.
- * `forgedTimestamps` has the seal key sign the tokens while they still carry the TSA's certificate.
+ * `sealKey: 'ec'` gives the seal an ECDSA P-256 key instead of RSA. `forgedTimestamps` has the seal
+ * key sign the tokens while they still carry the TSA's certificate.
  */
-export async function createTestPki(options: { org?: string; clock?: () => Date; sealNotAfter?: Date; forgedTimestamps?: boolean } = {}): Promise<TestPki> {
+export async function createTestPki(
+  options: { org?: string; clock?: () => Date; sealNotAfter?: Date; sealKey?: 'rsa' | 'ec'; forgedTimestamps?: boolean } = {},
+): Promise<TestPki> {
   const clock = options.clock ?? (() => new Date());
-  const [rootKeys, sealKeys, tsaKeys] = await Promise.all([rsaKeys(), rsaKeys(), rsaKeys()]);
+  const [rootKeys, sealKeys, tsaKeys] = await Promise.all([rsaKeys(), options.sealKey === 'ec' ? ecKeys() : rsaKeys(), rsaKeys()]);
   const root = await issue({ cn: 'Audit Anchor Test Root', keys: rootKeys, ca: true });
   const seal = await issue({ cn: `${options.org ?? 'Example Audit OOD'} (test seal)`, org: options.org ?? 'Example Audit OOD', keys: sealKeys, issuer: { cert: root, keys: rootKeys }, notAfter: options.sealNotAfter });
   const tsa = await issue({ cn: 'Audit Anchor Test TSA', keys: tsaKeys, issuer: { cert: root, keys: rootKeys }, tsa: true });
-  const sealPrivate = createPrivateKey({ key: Buffer.from(await subtle.exportKey('pkcs8', sealKeys.privateKey)), format: 'der', type: 'pkcs8' });
-
-  const signer: SealSigner = {
-    algorithm: 'RSA-PKCS1-SHA256',
-    certificates: async () => [derOf(seal), derOf(root)],
-    // As a remote signing service does: PKCS #1 v1.5 over a digest it is handed, never the document.
-    signDigest: async (digest) => new Uint8Array(privateEncrypt({ key: sealPrivate, padding: constants.RSA_PKCS1_PADDING }, Buffer.concat([SHA256_DIGEST_INFO, digest]))),
-  };
+  // As a remote signing service does: it signs a digest it is handed, never the document.
+  let signDigest: SealSigner['signDigest'];
+  if (options.sealKey === 'ec') {
+    const scalar = Buffer.from((await subtle.exportKey('jwk', sealKeys.privateKey)).d!, 'base64url');
+    signDigest = async (digest) => p256.sign(digest, scalar).toDERRawBytes();
+  } else {
+    const sealPrivate = createPrivateKey({ key: Buffer.from(await subtle.exportKey('pkcs8', sealKeys.privateKey)), format: 'der', type: 'pkcs8' });
+    signDigest = async (digest) => new Uint8Array(privateEncrypt({ key: sealPrivate, padding: constants.RSA_PKCS1_PADDING }, Buffer.concat([SHA256_DIGEST_INFO, digest])));
+  }
+  const signer: SealSigner = { certificates: async () => [derOf(seal), derOf(root)], signDigest };
 
   let tstSerial = 1;
   const calls: Uint8Array[] = [];

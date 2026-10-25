@@ -107,10 +107,26 @@ describe('sealing a stamped copy', () => {
     expect(await codeOf(checkSeal(sealed, [other.rootDer]))).toBe('UNTRUSTED');
   });
 
-  it('refuses to seal twice, and refuses a provider whose timestamp is over something else', async () => {
+  it('refuses to seal twice, and refuses a provider whose signature or timestamp is not what was asked', async () => {
     expect(await codeOf(seal(sealed))).toBe('PDF_REFUSED');
+    // A signature by another key than the certificate's is refused before any timestamp is asked for.
+    const other = await createTestPki();
+    const calls = pki.timestamper.calls.length;
+    const wrongKey = { certificates: pki.signer.certificates, signDigest: other.signer.signDigest };
+    expect(await codeOf(seal(stamped, { signer: wrongKey }))).toBe('SIGNER_REFUSED');
+    expect(await codeOf(seal(stamped, { signer: { ...pki.signer, signDigest: async () => new Uint8Array(0) } }))).toBe('SIGNER_REFUSED');
+    expect(pki.timestamper.calls).toHaveLength(calls);
     const wrongTimestamp = { calls: [], timestamp: (digest: Uint8Array) => pki.timestamper.timestamp(sha256Bytes(new Uint8Array([...digest, 1]))) };
     expect(await codeOf(seal(stamped, { timestamper: wrongTimestamp }))).toBe('TIMESTAMP_REFUSED');
+  });
+
+  it('seals with an ECDSA P-256 key as well as with RSA', async () => {
+    const ec = await createTestPki({ sealKey: 'ec' });
+    const copy = await seal(stamped, ec);
+    expect((await checkSeal(copy, [ec.rootDer], stamped)).signer).toContain('Example Audit OOD (test seal)');
+    const { cms } = readSeal(copy);
+    // ecdsa-with-SHA256, as the signature algorithm in the signer info.
+    expect(Buffer.from(cms).includes(Buffer.from('06082a8648ce3d040302', 'hex'))).toBe(true);
   });
 
   it('refuses a seal certificate that had expired when the timestamp says it signed', async () => {

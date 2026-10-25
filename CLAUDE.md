@@ -525,6 +525,10 @@ to one inflect-compliance commit.
   firm's seal key and hands back its certificate chain; a `Timestamper` returns
   an RFC 3161 token over a digest. The trust service provider is the owner's
   choice; it plugs in behind these two interfaces, and nothing else changes.
+  Its answers are checked, not trusted: the signature scheme is the seal
+  certificate's key's (RSA or ECDSA P-256), the signature must verify against
+  that certificate before a timestamp is asked for, and the timestamp must be
+  over that signature.
 - **PAdES baseline B-T** (`sealPdf`, `src/lib/eseal/pades.ts`): a detached
   CAdES signature (`ETSI.CAdES.detached`) whose signed attributes are
   content-type, message-digest and signing-certificate-v2, never signing-time,

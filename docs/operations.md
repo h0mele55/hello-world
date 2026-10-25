@@ -14,6 +14,7 @@ on a public testnet; none of this makes its anchors legally binding (rule 9).
 | The registry watch | `npm run watch:registry` | every ten minutes, e.g. `*/10 * * * *` | exit code 1 while any write the journal did not make is unreviewed, an error line for each new one; the console's banner |
 | The backup | `scripts/backup.sh` | nightly, after the check, e.g. `37 2 * * *` | a non-zero exit code |
 | The monitor | `npm run monitor` | every ten minutes, e.g. `*/10 * * * *` | exit code 1 and an `ALERT` line for each thing that needs a person; route it to whoever is on call |
+| The chain reconciliation | `npm run reconcile:chain` | after every restore (`docs/runbooks/restore.md`), and weekly, e.g. `47 3 * * 0` | exit code 1 and a `DIFFERENCE` line for each version or record the database and the chain disagree on (#111) |
 
 Run the check, the watch and the backup from the app's directory with the
 app's environment. The check reads `DATABASE_URL` and the chain (see below).

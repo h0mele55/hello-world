@@ -26,17 +26,24 @@ still verifies, but the console no longer knows it.
      version waits for approval. If it was in fact sent after the backup, an
      approval under LIVE finds the document on chain and links it, sending
      nothing: its commitments are in the restored database.
-5. **Find what the backup does not know.** Compare the registry's events since
-   the backup's time with the journal: the issuer key's transactions on the
-   explorer, against the `ChainWrite` rows with a later `updatedAt`. Every
-   anchor without a row belongs to a version uploaded after the backup.
-   - Those reports still verify for anyone who holds them.
-   - Their salts and manifests are lost with the database, so they cannot be
-     re-linked in the console.
-   - List them for the firm's records. Re-deriving every verdict from the
-     chain automatically is Phase 6 work.
-   - The registry watch reports these writes too, since the restored journal
-     does not hold them: review each on `/audit-log` once it is explained.
+5. **Find what the backup does not know**: `npm run reconcile:chain` (#111).
+   It reads every version the database holds
+   against the registry at one finalized block both endpoints agree on, scans
+   every record the firm's issuer keys wrote, and prints a `DIFFERENCE` line
+   for each disagreement. It writes nothing. Expect these after a restore:
+
+   | Code | What happened since the backup | What to do |
+   | --- | --- | --- |
+   | `ANCHORED_AFTER_BACKUP`, `COPY_ANCHORED_AFTER_BACKUP` | the version, or its copy, was anchored | nothing to fix: once the write mode is LIVE again, an approval (for a copy, a retry) finds the record on chain and links it, sending nothing |
+   | `REVOCATION_PENDING_ON_CHAIN`, `REVOKED_ON_CHAIN` | a revocation was asked for, or took effect | if the firm asked for it, ask again in the console, which links it; if nobody did, [stolen-issuer-key.md](stolen-issuer-key.md) at once |
+   | `SCHEDULED_NOT_ON_CHAIN` | the owner cancelled a revocation | nothing: the worker settles it as CANCELLED |
+   | `UNKNOWN_RECORD` | a version uploaded after the backup, lost with its salts and manifest | it still verifies for anyone who holds it; list it for the firm's records, and review the registry watch's finding for it on `/audit-log` |
+
+   Anything else (`RECORD_MISSING`, `RECORD_DIFFERS`, `COPY_MISSING`,
+   `COPY_DIFFERS`, `REVOKED_NOT_ON_CHAIN`) means the database says something
+   the chain never did: a damaged backup, or one from another deployment.
+   Stop, and restore the one before it. Run the command again after step 7:
+   what was linked or settled since no longer shows.
 6. **Run the audit-chain check** (`npm run audit:check`). It must say intact,
    except for the audit-log heads written on chain after the backup was taken
    (#94): their events were lost with the database, and the check names them

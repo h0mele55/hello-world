@@ -102,6 +102,7 @@ npm run monitor                # every 10 min: one ALERT line per thing that nee
 npm run mailer                 # sends the recipients' notices; add `-- --once` for one pass (SMTP_URL, MAIL_FROM)
 npm run ots                    # every 5 min: submits final versions' manifest hashes to OpenTimestamps, upgrades and checks them against Bitcoin; `-- --once`
 scripts/backup.sh              # database dump + encrypted store copy (docs/operations.md)
+npm run reconcile:chain        # every version held to the chain at an agreed finalized block; exit 1 on a difference (after a restore)
 npm run test:backup            # back up, restore into <db>_restore_test, check the copy
 
 # The verifier
@@ -530,6 +531,13 @@ to one inflect-compliance commit.
   head only: the database owner can queue rows, so could have the worker write
   a rewritten log's head. A broken check puts a banner on every console page
   and stays reported; a check older than 36 hours shows as stopped.
+- **`npm run reconcile:chain` holds the database to the chain** (#111,
+  `src/lib/anchoring/reconcile.ts`): every version's record, copy and
+  revocation read on both endpoints at one agreed finalized block, and every
+  record the firm's keys wrote. It only reads, and names each difference
+  (`ANCHORED_AFTER_BACKUP`, `UNKNOWN_RECORD`, `RECORD_DIFFERS`, …); after a
+  restore it is step 5 of `docs/runbooks/restore.md`. A new state the chain
+  can hold for a version needs its own code here, or a restore will not see it.
 - **Backups** are `scripts/backup.sh` (`pg_dump` custom format, the store as
   it is on disk, `SHA256SUMS`); `FILE_ENCRYPTION_KEY` is never in a backup.
   `scripts/restore.sh` restores only into an empty database and an empty

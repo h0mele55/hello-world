@@ -2,12 +2,13 @@ import 'server-only';
 import type { SessionUser } from '@/auth';
 import { verifyAuditChain } from '@/lib/audit';
 import { db } from '@/lib/db';
+import { AUDIT_CHECK_STALE_MS } from '@/lib/staleness';
 
 /** The audit log as the console shows it: newest first, a page at a time, the firm's own events only. */
 
 export const AUDIT_PAGE_SIZE = 50;
 /** The check runs nightly; one older than this means it has stopped running. */
-export const AUDIT_CHECK_STALE_MS = 36 * 60 * 60 * 1000;
+export { AUDIT_CHECK_STALE_MS };
 
 export async function listAuditEvents(user: SessionUser, before?: number) {
   const events = await db().auditEvent.findMany({

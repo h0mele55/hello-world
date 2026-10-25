@@ -12,6 +12,7 @@ on a public testnet; none of this makes its anchors legally binding (rule 9).
 | The audit-chain check | `npm run audit:check` | nightly, e.g. `17 2 * * *` | exit code 1 and an `AUDIT CHAIN BROKEN` error line, naming any head on chain the log lacks; the console's banner |
 | The registry watch | `npm run watch:registry` | every ten minutes, e.g. `*/10 * * * *` | exit code 1 while any write the journal did not make is unreviewed, an error line for each new one; the console's banner |
 | The backup | `scripts/backup.sh` | nightly, after the check, e.g. `37 2 * * *` | a non-zero exit code |
+| The monitor | `npm run monitor` | every ten minutes, e.g. `*/10 * * * *` | exit code 1 and an `ALERT` line for each thing that needs a person; route it to whoever is on call |
 
 Run the check, the watch and the backup from the app's directory with the
 app's environment. The check reads `DATABASE_URL` and the chain (see below).
@@ -53,6 +54,28 @@ and holds no issuer key.
   It is never logged; keep it with the other secrets.
 - Each engagement's page shows, per recipient, the last notice and whether it
   was sent.
+
+## The monitor
+
+`npm run monitor` (#68) reads the database only and prints one `ALERT` line
+for each of these, with ids, codes and times, never a client or a file:
+
+| Code | What | Runbook |
+| --- | --- | --- |
+| `WRITE_FAILED` | a chain write failed in the last day | [stuck-writes.md](runbooks/stuck-writes.md) |
+| `WRITE_INDETERMINATE` | a write's outcome is unknown; its issuer key is held | [stuck-writes.md](runbooks/stuck-writes.md) |
+| `FINALITY_LAG` | a write was sent more than an hour ago and is not final | [stuck-writes.md](runbooks/stuck-writes.md) |
+| `WORKER_STOPPED` | work waits for a key whose worker has not passed in ten minutes | restart the worker |
+| `LOW_BALANCE` | the issuer key's balance is below 0.02 ETH | [stuck-writes.md](runbooks/stuck-writes.md) |
+| `RPC_DISAGREE` | the worker's two endpoints disagree | [rpc-outage.md](runbooks/rpc-outage.md) |
+| `AUDIT_CHECK_BROKEN` / `AUDIT_CHECK_STALE` | the nightly check found a break, or has not run for 36 hours | [audit-head-missing.md](runbooks/audit-head-missing.md) for a missing head |
+| `WATCH_STALE` / `UNJOURNALED_OPEN` | the registry watch has not run for two hours, or found a write nobody has reviewed | [stolen-issuer-key.md](runbooks/stolen-issuer-key.md) |
+| `NOTICE_FAILED` | the mailer gave up on a notice in the last day | [mail.md](runbooks/mail.md) |
+
+A failure stays reported for a day. A key with no work waiting is not
+watched, so a retired key's stopped worker raises nothing. The verifier runs
+in visitors' browsers and reports nothing home, so its errors are seen only by
+the visitor ("cannot verify right now").
 
 ## The audit-chain check
 

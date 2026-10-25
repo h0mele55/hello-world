@@ -35,8 +35,9 @@ owner's choice (6c, `docs/decision-production-chain.md`), and revocation is
 delayed so the owner can cancel a stolen key's (6d, #95), the registry
 watch reports any write by the firm's keys that the journal did not make (6e,
 #93), recipients are told of a withdrawal (6f, #96), the worker settles a
-row only on what two endpoints agree on (6g, #92), and the audit log's head is
-written on chain each night (6h, #94).
+row only on what two endpoints agree on (6g, #92), the audit log's head is
+written on chain each night (6h, #94), and `npm run monitor` says what needs a
+person (6i, #68).
 
 ## Rules every phase keeps
 
@@ -96,6 +97,7 @@ npm run test:anchoring         # the worker against TEST_DATABASE_URL and a thro
 npm run worker                 # the anchoring worker; add `-- --once` for one pass
 npm run audit:check            # the nightly audit-chain check, held to its heads on chain; queues the next head; exit 1 on a break
 npm run watch:registry         # every 10 min: report chain writes by the firm's keys the journal did not make; exit 1 while one is unreviewed
+npm run monitor                # every 10 min: one ALERT line per thing that needs a person; exit 1 while any (docs/operations.md)
 npm run mailer                 # sends the recipients' notices; add `-- --once` for one pass (SMTP_URL, MAIL_FROM)
 scripts/backup.sh              # database dump + encrypted store copy (docs/operations.md)
 npm run test:backup            # back up, restore into <db>_restore_test, check the copy

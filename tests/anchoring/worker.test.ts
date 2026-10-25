@@ -48,9 +48,14 @@ import { confirmOpinion, createEngagement, uploadVersion } from '@/lib/reports/i
 import { addRecipient, removeRecipient } from '@/lib/reports/recipients';
 import { openRegistryView, verifyFile, type VerifierConfig } from '@/lib/verify-core';
 import { createKmsAccount } from '@/lib/chain/kms-account';
+import type { CopySeal } from '@/lib/eseal/copy';
+import { checkSeal } from '@/lib/eseal/pades';
+import { SealError, type Timestamper } from '@/lib/eseal/types';
+import { collectAlerts } from '@/lib/monitor';
 import { startAnvil, type AnvilHandle } from '../integration/anvil';
 import { readPdf } from '../integration/registry-harness';
 import { fakeKms, KEY_NAME } from '../helpers/fake-kms';
+import { createTestPki, type TestPki } from '../helpers/test-pki';
 
 /**
  * The anchoring worker against a real Postgres and a throwaway Anvil chain.
@@ -1221,5 +1226,95 @@ describe('two RPC endpoints (#92)', () => {
     await mine();
     expect((await pass({ checkClient: endpoint() })).revocations).toEqual([{ revocationId, outcome: 'REVOKED' }]);
     expect(await keyStatus()).toMatchObject({ rpcDisagreedAt: null });
+  });
+});
+
+describe('the firm’s electronic seal on the distribution copy (#70)', () => {
+  let pki: TestPki;
+  beforeAll(async () => {
+    pki = await createTestPki();
+  }, 30_000);
+  const sealWith = (over: Partial<CopySeal> = {}): Partial<WorkerDeps> => ({ seal: { signer: pki.signer, timestamper: pki.timestamper, trustAnchors: [pki.rootDer], ...over } });
+  const storedCopy = async (versionId: string) => files.read(await prisma.storedFile.findUniqueOrThrow({ where: { id: (await versionOf(versionId)).copyStoredFileId! } }));
+
+  it('seals the stamped copy once, anchors the sealed file, and the sealed file verifies against its anchor', async () => {
+    await goLive();
+    const versionId = await confirmedVersion((await engagement()).id, 'en-unmodified.pdf');
+    await approveVersion(approver, versionId, target);
+    const before = pki.timestamper.calls.length;
+    await pass(sealWith());
+    await mine();
+    await pass(sealWith());
+    await mine();
+    await pass(sealWith());
+    const version = await versionOf(versionId);
+    expect(version.status).toBe('COMPLETE');
+    expect(pki.timestamper.calls.length - before).toBe(1);
+
+    // The file on chain is the sealed one, and it begins with the original, untouched.
+    const copy = await storedCopy(versionId);
+    expect(docHashOf(copy)).toBe(version.copyDocHash);
+    expect((await reader.getRecord(version.copyRecordId as Hex))?.docHash).toBe(version.copyDocHash);
+    expect(Buffer.from(copy.subarray(0, fixture('en-unmodified.pdf').length)).equals(fixture('en-unmodified.pdf'))).toBe(true);
+    const check = await checkSeal(copy, [pki.rootDer]);
+    expect(version.copySealedAt).toEqual(check.sealedAt);
+
+    // The anchor complements the seal: the sealed copy is authentic to the verifier, as any copy is.
+    const config: VerifierConfig = { chainId: 31337, registry: deployment.address, runtimeBytecodeHash: deployment.runtimeBytecodeHash, rpcUrls: [anvil.url, anvil.url] };
+    expect(await verifyFile({ bytes: copy, config, openView: () => openRegistryView(config), readPdf })).toMatchObject({ kind: 'AUTHENTIC_LATEST' });
+
+    const stamped = await prisma.auditEvent.findFirstOrThrow({ where: { action: 'version.stamped', subjectId: versionId } });
+    expect(stamped.data).toMatchObject({ sealed: true, timestampSerial: check.timestampSerial, copyDocHash: version.copyDocHash });
+    expect(await verifyAuditChain(prisma, admin.orgId)).toMatchObject({ ok: true });
+  });
+
+  it('waits while the seal provider does not answer, says so after an hour, and seals once it answers', async () => {
+    let down = true;
+    const flaky: Timestamper = {
+      timestamp: async (digest) => {
+        if (down) throw new SealError('TIMESTAMP_UNAVAILABLE', 'the authority did not answer');
+        return pki.timestamper.timestamp(digest);
+      },
+    };
+    await goLive();
+    const versionId = await confirmedVersion((await engagement()).id, 'en-unmodified.pdf');
+    await approveVersion(approver, versionId, target);
+    await pass(sealWith({ timestamper: flaky }));
+    await mine();
+    await pass(sealWith({ timestamper: flaky }));
+    const waiting = await copyWriteOf(versionId);
+    expect(waiting).toMatchObject({ status: 'INTENT', error: 'SEAL_TIMESTAMP_UNAVAILABLE', txHash: null, leaseUntil: null });
+    expect((await versionOf(versionId)).copyDocHash).toBeNull();
+    expect(await prisma.storedFile.count()).toBe(1);
+
+    const alerts = (await collectAlerts(prisma, new Date(Date.now() + 2 * 60 * 60 * 1000))).filter((a) => a.code === 'SEAL_WAITING');
+    expect(alerts).toEqual([expect.objectContaining({ detail: expect.objectContaining({ chainWriteId: waiting.id, reason: 'SEAL_TIMESTAMP_UNAVAILABLE', runbook: 'docs/runbooks/seal-provider.md' }) })]);
+
+    down = false;
+    await pass(sealWith({ timestamper: flaky }));
+    await mine();
+    await pass(sealWith({ timestamper: flaky }));
+    expect((await versionOf(versionId)).status).toBe('COMPLETE');
+    await checkSeal(await storedCopy(versionId), [pki.rootDer]);
+  });
+
+  it('fails the copy and stores nothing when the seal does not check against the firm’s roots, and seals it on an approver’s retry', async () => {
+    const other = await createTestPki();
+    await goLive();
+    const versionId = await confirmedVersion((await engagement()).id, 'en-unmodified.pdf');
+    await approveVersion(approver, versionId, target);
+    await pass(sealWith({ trustAnchors: [other.rootDer] }));
+    await mine();
+    await pass(sealWith({ trustAnchors: [other.rootDer] }));
+    expect(await copyWriteOf(versionId)).toMatchObject({ status: 'FAILED', error: 'STAMP_SEAL_UNTRUSTED', txHash: null });
+    expect(await versionOf(versionId)).toMatchObject({ status: 'ANCHORED', copyDocHash: null, copySealedAt: null });
+    expect(await prisma.storedFile.count()).toBe(1);
+
+    await requeueCopy(approver, versionId, target);
+    await pass(sealWith());
+    await mine();
+    await pass(sealWith());
+    expect((await versionOf(versionId)).status).toBe('COMPLETE');
+    await checkSeal(await storedCopy(versionId), [pki.rootDer]);
   });
 });

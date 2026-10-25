@@ -7,7 +7,7 @@ import { sha256 } from '@/lib/commitments';
 import { parsePdf } from '@/lib/pdf/parse';
 import { checkSeal, readSeal, sealPdf } from '@/lib/eseal/pades';
 import { readTimestampToken } from '@/lib/eseal/cms';
-import { SealError } from '@/lib/eseal/types';
+import { SealError, type SealSigner, type Timestamper } from '@/lib/eseal/types';
 import { stampPdf } from '@/lib/stamp';
 import type { StampFields } from '@/lib/stamp-fields';
 import { createTestPki, pemOf, type TestPki } from '../helpers/test-pki';
@@ -46,7 +46,7 @@ const codeOf = (promise: Promise<unknown>) =>
     () => 'NO_ERROR',
     (error: unknown) => (error instanceof SealError ? error.code : String(error)),
   );
-const seal = (bytes: Uint8Array, with_: Partial<TestPki> = {}) =>
+const seal = (bytes: Uint8Array, with_: { signer?: SealSigner; timestamper?: Timestamper } = {}) =>
   sealPdf(bytes, { signer: with_.signer ?? pki.signer, timestamper: with_.timestamper ?? pki.timestamper, signingTime: SIGNED_AT, reason: 'Distribution copy of an anchored audit report' });
 const tool = (name: string) => spawnSync('which', [name]).status === 0;
 
@@ -116,7 +116,7 @@ describe('sealing a stamped copy', () => {
     expect(await codeOf(seal(stamped, { signer: wrongKey }))).toBe('SIGNER_REFUSED');
     expect(await codeOf(seal(stamped, { signer: { ...pki.signer, signDigest: async () => new Uint8Array(0) } }))).toBe('SIGNER_REFUSED');
     expect(pki.timestamper.calls).toHaveLength(calls);
-    const wrongTimestamp = { calls: [], timestamp: (digest: Uint8Array) => pki.timestamper.timestamp(sha256Bytes(new Uint8Array([...digest, 1]))) };
+    const wrongTimestamp = { timestamp: (digest: Uint8Array) => pki.timestamper.timestamp(sha256Bytes(new Uint8Array([...digest, 1]))) };
     expect(await codeOf(seal(stamped, { timestamper: wrongTimestamp }))).toBe('TIMESTAMP_REFUSED');
   });
 

@@ -288,6 +288,8 @@ model ReportVersion {
   copyRecordId            String?        @unique
   copyTxHash              String?
   copyBlock               BigInt?
+  /// When the copy carries the firm's electronic seal (#70): the time its timestamp vouches for.
+  copySealedAt            DateTime?
   /// anchorOnly versions get a verification certificate instead of a copy.
   certificateStoredFileId String?        @unique
   certificateStoredFile   StoredFile?    @relation("certificateFile", fields: [certificateStoredFileId], references: [id], onDelete: Restrict)

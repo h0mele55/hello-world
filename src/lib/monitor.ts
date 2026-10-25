@@ -6,8 +6,9 @@ import { AUDIT_CHECK_STALE_MS, WATCH_STALE_MS, WORKER_STALE_MS } from '@/lib/sta
  * writes that failed or wait too long for finality, an issuer key held by an
  * unsettled write, a worker that stopped, a low balance, endpoints that
  * disagree, a broken or stopped audit check, a stopped registry watch or a
- * write it found, notices that could not be sent, and OpenTimestamps proofs
- * that were not made, wait too long for Bitcoin or turned out wrong (#66). `npm run monitor`
+ * write it found, notices that could not be sent, OpenTimestamps proofs
+ * that were not made, wait too long for Bitcoin or turned out wrong (#66), and
+ * distribution copies held up by a seal provider that does not answer (#70). `npm run monitor`
  * (scripts/monitor.ts) prints each and exits 1, for the scheduler to alert.
  *
  * Alerts carry ids, codes, counts and times only: never a client's name, a
@@ -28,7 +29,8 @@ export type AlertCode =
   | 'NOTICE_FAILED'
   | 'OTS_NOT_SUBMITTED'
   | 'OTS_PENDING_LONG'
-  | 'OTS_BROKEN';
+  | 'OTS_BROKEN'
+  | 'SEAL_WAITING';
 
 export interface Alert {
   code: AlertCode;
@@ -50,6 +52,8 @@ export const MONITOR_THRESHOLDS = {
   otsSubmitMs: 24 * 60 * 60 * 1000,
   /** Calendars put their batches on Bitcoin within hours; two days is a calendar or an explorer that stopped. */
   otsPendingMs: 48 * 60 * 60 * 1000,
+  /** A copy the worker has tried to seal for this long has a provider that is down, not busy. */
+  sealWaitMs: 60 * 60 * 1000,
 };
 
 const iso = (d: Date | null | undefined) => d?.toISOString() ?? null;
@@ -78,6 +82,16 @@ export async function collectAlerts(prisma: PrismaClient, now = new Date(), t = 
     take: 50,
   });
   for (const w of lagging) alerts.push({ code: 'FINALITY_LAG', orgId: w.orgId, detail: { chainWriteId: w.id, kind: w.kind, txHash: w.txHash, broadcastAt: iso(w.broadcastAt) } });
+
+  // A copy waiting on its seal (#70): the worker tries again every pass, so an hour is a provider that is down.
+  const unsealed = await prisma.chainWrite.findMany({
+    where: { kind: 'ANCHOR_COPY', status: 'INTENT', error: { startsWith: 'SEAL_' }, createdAt: { lt: since(t.sealWaitMs) } },
+    select: { id: true, orgId: true, error: true, createdAt: true },
+    take: 50,
+  });
+  for (const w of unsealed) {
+    alerts.push({ code: 'SEAL_WAITING', orgId: w.orgId, detail: { chainWriteId: w.id, reason: w.error, since: iso(w.createdAt), runbook: 'docs/runbooks/seal-provider.md' } });
+  }
 
   // A key with work waiting whose worker has not passed lately. A key with no
   // work (a retired one) is not watched: its worker is meant to have stopped.

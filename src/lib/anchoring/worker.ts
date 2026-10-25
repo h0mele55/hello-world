@@ -28,6 +28,8 @@ import type { FileStore } from '@/lib/file-store';
 import { NORMALISER_VERSION } from '@/lib/opinion/normalise';
 import { queueRevokedNotices, queueSupersededNotices } from '@/lib/notifications/queue';
 import { REVOCATION_CODES } from '@/lib/revocation-reasons';
+import { sealStampedCopy, type CopySeal } from '@/lib/eseal/copy';
+import { SealError, sealMayRetry } from '@/lib/eseal/types';
 import { checkStampedCopy, stampPdf, StampError } from '@/lib/stamp';
 import { STAMP_VERSION, type StampFields } from '@/lib/stamp-fields';
 import { anyKnown, firstReceipt, hashesOfWrite, issuerLockArgs, receiptOf } from './chain-reads';
@@ -70,9 +72,9 @@ import { classifySendError, type SendOutcome } from './send';
  * Two kinds of write. ANCHOR records an original; when it is FINAL the version
  * is ANCHORED and, unless it is anchor-only, an ANCHOR_COPY is queued in the
  * same transaction. ANCHOR_COPY first stamps the original (src/lib/stamp.ts),
- * re-reads and checks the stamped copy, stores it encrypted, and then anchors
- * it as the original's DISTRIBUTION_COPY; when that is FINAL the version is
- * COMPLETE. An anchor-only version (signed or edit-protected, never rewritten)
+ * re-reads and checks the stamped copy, seals it when the firm seals its
+ * copies (src/lib/eseal/, #70), stores it encrypted, and then anchors it as the
+ * original's DISTRIBUTION_COPY; when that is FINAL the version is COMPLETE. An anchor-only version (signed or edit-protected, never rewritten)
  * gets a verification certificate instead, after its ANCHOR is FINAL.
  *
  * A version that becomes COMPLETE and supersedes an earlier one queues an
@@ -141,6 +143,8 @@ export interface WorkerDeps {
   files: FileStore;
   /** The app's public origin; stamps and certificates point at `${verifyBaseUrl}/verify`. */
   verifyBaseUrl: string;
+  /** The firm's electronic seal (#70): when given, every distribution copy is sealed before it is stored and anchored. */
+  seal?: CopySeal;
   now?: () => Date;
   options?: Partial<WorkerOptions>;
   faults?: WorkerFaults;
@@ -211,6 +215,7 @@ interface Context {
   log: WorkerLog;
   files: FileStore;
   verifyUrl: string;
+  seal: CopySeal | null;
 }
 
 const defaultLog: WorkerLog = (level, message, fields) => {
@@ -288,6 +293,7 @@ export async function runWorkerPass(deps: WorkerDeps): Promise<PassReport> {
     log: deps.log ?? defaultLog,
     files: deps.files,
     verifyUrl: `${deps.verifyBaseUrl.replace(/\/+$/, '')}/verify`,
+    seal: deps.seal ?? null,
   };
   const report: PassReport = { ran: false, steps: [], errors: [], certified: [], revocations: [], rpcDisagreed: false };
   const lockArgs = issuerLockArgs(ctx.chainId, ctx.issuer);
@@ -672,7 +678,8 @@ async function startAnchor(ctx: Context, write: Write): Promise<StepReport> {
 }
 
 /**
- * ANCHOR_COPY: stamp the original (once; a retry reuses the stored copy),
+ * ANCHOR_COPY: stamp the original, and seal it when the firm seals its copies
+ * (once; a retry reuses the stored copy, so a copy is never sealed twice),
  * then anchor the copy as the original's DISTRIBUTION_COPY. Only ever LIVE: it
  * is queued when a LIVE anchor of the original is final.
  */
@@ -686,6 +693,7 @@ async function startCopy(ctx: Context, write: Write): Promise<StepReport> {
   let copyDocHash = version.copyDocHash;
   if (!copyDocHash) {
     const stamped = await stampCopy(ctx, write);
+    if (!stamped.ok && stamped.wait) return release(ctx, write, { error: stamped.reason }, 'waiting: the seal provider did not answer; tried again on the next pass');
     if (!stamped.ok) return fail(ctx, write, `STAMP_${stamped.reason}`);
     copyDocHash = stamped.docHash;
   }
@@ -842,9 +850,13 @@ async function originalRecordOk(ctx: Context, version: { recordId: string | null
  * Stamps the original with its final anchor, re-reads the copy through the
  * isolated parser, and stores it encrypted (Phase 3 hardening: the stamped PDF
  * is re-parsed and re-hashed before its anchor, and its stamp must equal the
- * final record). Nothing is stored unless every check passes.
+ * final record). With the firm's seal (#70) the stamped copy is sealed, the
+ * seal checked against the firm's roots, and the sealed file re-read the same
+ * way: it is the copy stored and anchored. Nothing is stored unless every
+ * check passes. A seal provider that does not answer leaves the copy to wait
+ * (`wait`); one that refuses fails it, for a person.
  */
-async function stampCopy(ctx: Context, write: Write): Promise<{ ok: true; docHash: string } | { ok: false; reason: string }> {
+async function stampCopy(ctx: Context, write: Write): Promise<{ ok: true; docHash: string } | { ok: false; reason: string; wait?: true }> {
   const version = write.reportVersion;
   if (!(await originalRecordOk(ctx, version))) return { ok: false, reason: 'ORIGINAL_RECORD_MISMATCH' };
   if (!version.anchorTxHash) return { ok: false, reason: 'ORIGINAL_TX_UNKNOWN' };
@@ -873,16 +885,33 @@ async function stampCopy(ctx: Context, write: Write): Promise<{ ok: true; docHas
     if (error instanceof StampError) return { ok: false, reason: error.code };
     throw error;
   }
-  const check = await checkStampedCopy(original, stamped, fields);
+  let check = await checkStampedCopy(original, stamped, fields);
   if (!check.ok) return { ok: false, reason: check.reason };
 
-  const stored = await ctx.files.store(stamped);
+  let copy = stamped;
+  let seal: { sealedAt: Date; timestampSerial: string } | null = null;
+  if (ctx.seal) {
+    try {
+      const sealed = await sealStampedCopy(stamped, ctx.seal, ctx.now());
+      check = await checkStampedCopy(original, sealed.sealed, fields, { sealed: true });
+      if (!check.ok) return { ok: false, reason: `SEALED_${check.reason}` };
+      copy = sealed.sealed;
+      seal = { sealedAt: sealed.check.sealedAt, timestampSerial: sealed.check.timestampSerial };
+    } catch (error) {
+      if (!(error instanceof SealError)) throw error;
+      ctx.log('warn', 'the copy could not be sealed', { writeId: write.id, code: error.code, message: error.message });
+      return sealMayRetry(error.code) ? { ok: false, reason: `SEAL_${error.code}`, wait: true } : { ok: false, reason: `SEAL_${error.code}` };
+    }
+  }
+  const docHash = check.docHash;
+
+  const stored = await ctx.files.store(copy);
   try {
     await ctx.prisma.$transaction(async (tx) => {
       const file = await tx.storedFile.create({ data: stored, select: { id: true } });
       const { count } = await tx.reportVersion.updateMany({
         where: { id: version.id, status: 'ANCHORED', copyDocHash: null },
-        data: { copyDocHash: check.docHash, copyStoredFileId: file.id },
+        data: { copyDocHash: docHash, copyStoredFileId: file.id, copySealedAt: seal?.sealedAt ?? null },
       });
       if (count !== 1) throw new ChainError('VERSION_NOT_ANCHORED', `version ${version.id} already has a copy or is not ANCHORED`);
       await appendAuditEvent(
@@ -893,7 +922,7 @@ async function stampCopy(ctx: Context, write: Write): Promise<{ ok: true; docHas
           action: 'version.stamped',
           subjectType: 'ReportVersion',
           subjectId: version.id,
-          data: { chainWriteId: write.id, recordId: fields.recordId, copyDocHash: check.docHash },
+          data: { chainWriteId: write.id, recordId: fields.recordId, copyDocHash: docHash, sealed: seal !== null, timestampSerial: seal?.timestampSerial ?? null },
         },
         ctx.now(),
       );
@@ -902,7 +931,7 @@ async function stampCopy(ctx: Context, write: Write): Promise<{ ok: true; docHas
     await ctx.files.discard(stored.path);
     throw error;
   }
-  return { ok: true, docHash: check.docHash };
+  return { ok: true, docHash };
 }
 
 /**

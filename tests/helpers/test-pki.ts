@@ -65,7 +65,11 @@ export interface TestPki {
   sealChain: Uint8Array[];
   tsaDer: Uint8Array;
   signer: SealSigner;
-  timestamper: Timestamper & { calls: Uint8Array[] };
+  timestamper: Timestamper & {
+    calls: Uint8Array[];
+    /** A token as an authority answering a request would make it: with the request's nonce and the policy asked for. */
+    token(digest: Uint8Array, request?: { nonce?: asn1js.Integer; policy?: string }): Promise<Uint8Array>;
+  };
 }
 
 /**
@@ -96,11 +100,13 @@ export async function createTestPki(
   const calls: Uint8Array[] = [];
   const timestamper: TestPki['timestamper'] = {
     calls,
-    async timestamp(digest) {
+    timestamp: (digest) => timestamper.token(digest),
+    async token(digest, request = {}) {
       calls.push(digest);
       const tstInfo = new pkijs.TSTInfo({
         version: 1,
-        policy: '1.3.6.1.4.1.55555.1.1',
+        policy: request.policy ?? '1.3.6.1.4.1.55555.1.1',
+        ...(request.nonce ? { nonce: request.nonce } : {}),
         messageImprint: new pkijs.MessageImprint({ hashAlgorithm: new pkijs.AlgorithmIdentifier({ algorithmId: OID.sha256 }), hashedMessage: new asn1js.OctetString({ valueHex: digest }) }),
         serialNumber: new asn1js.Integer({ value: tstSerial++ }),
         genTime: clock(),

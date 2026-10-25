@@ -20,4 +20,9 @@ describe('the signing key boundary', () => {
   it('only the scripts acting as the issuer read it, through one module', () => {
     expect(mentioning).toEqual(['scripts/issuer-env.ts']);
   });
+
+  // The same for the seal's credentials at its trust service provider (#70).
+  it.each(['CSC_CLIENT_SECRET', 'CSC_PIN', 'TSA_PASSWORD'])('only the worker’s seal settings read %s, and nothing under src/', (name) => {
+    expect(files.filter((file) => fs.readFileSync(file, 'utf8').includes(name))).toEqual(['scripts/seal-env.ts']);
+  });
 });

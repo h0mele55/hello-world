@@ -1,10 +1,13 @@
-import { execFileSync } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import pg from 'pg';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { hexToBytes } from 'viem';
 import { serializeProof } from '../../src/lib/ots/format';
+import { startFakeSealProvider, type FakeSealProvider } from '../helpers/fake-seal-provider';
+import { createTestPki, pemOf } from '../helpers/test-pki';
 import { admin, approver, createEngagement, preparer, runTag, signIn, uniquePdf, uploadAndConfirm, watchCsp, type TestUser } from './helpers';
 
 /**
@@ -25,13 +28,42 @@ import { admin, approver, createEngagement, preparer, runTag, signIn, uniquePdf,
  * for the worker, which this test runs as a process of its own. The app's
  * server is started without the key (playwright.config.ts). The recipients'
  * email needs Mailpit: SMTP_URL and MAIL_FROM for the mailer, MAILPIT_URL to
- * read what it sent. See the CI job.
+ * read what it sent. See the CI job. The firm seals its copies (#70) through a
+ * stand-in trust service provider on this machine, which the worker reaches
+ * through the same settings as a real one's (scripts/seal-env.ts).
  */
 
 test.skip(!process.env.ANCHOR_NETWORK && !process.env.CI, 'needs a local chain (ANCHOR_NETWORK=local; see CI)');
 
+let sealProvider: FakeSealProvider | undefined;
+let sealEnv: Record<string, string> = {};
+test.beforeAll(async () => {
+  const pki = await createTestPki();
+  sealProvider = await startFakeSealProvider(pki);
+  const roots = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'seal-roots-')), 'roots.pem');
+  fs.writeFileSync(roots, pemOf(pki.rootDer));
+  sealEnv = {
+    SEAL_PROVIDER: 'csc',
+    CSC_URL: sealProvider.cscUrl,
+    CSC_TOKEN_URL: sealProvider.tokenUrl,
+    CSC_CLIENT_ID: sealProvider.clientId,
+    CSC_CLIENT_SECRET: sealProvider.clientSecret,
+    CSC_CREDENTIAL_ID: sealProvider.credentialId,
+    TSA_URL: sealProvider.tsaUrl,
+    SEAL_TRUST_ANCHORS: roots,
+  };
+});
+test.afterAll(async () => {
+  await sealProvider?.close();
+});
+
+/** One pass of the worker, as its own process; run without blocking, as the seal provider answers it from this one. */
 function runWorkerOnce() {
-  execFileSync(path.join(process.cwd(), 'node_modules', '.bin', 'tsx'), ['scripts/worker.ts', '--once'], { env: process.env, stdio: 'pipe' });
+  return new Promise<void>((resolve, reject) => {
+    execFile(path.join(process.cwd(), 'node_modules', '.bin', 'tsx'), ['scripts/worker.ts', '--once'], { env: { ...process.env, ...sealEnv } }, (error, _stdout, stderr) =>
+      error ? reject(new Error(`the worker failed: ${stderr}`)) : resolve(),
+    );
+  });
 }
 
 async function withDb<T>(run: (client: pg.Client) => Promise<T>): Promise<T> {
@@ -156,7 +188,7 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
   await test.step('a dry-run approval is simulated, and the version waits for approval again', async () => {
     await approving.goto(versionUrl);
     await approve(approving, 'Approve dry run');
-    runWorkerOnce();
+    await runWorkerOnce();
     await approving.reload();
     await expect(originalWrite(approving)).toHaveAttribute('data-status', 'SIMULATED');
     await expect(approving.getByTestId('chain-write-reason').first()).toContainText('a live anchor would be accepted');
@@ -167,13 +199,13 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     await setMode(approving, 'LIVE');
     await approving.goto(versionUrl);
     await approve(approving, 'Approve anchor');
-    runWorkerOnce();
+    await runWorkerOnce();
     await approving.reload();
     await expect(originalWrite(approving)).toHaveAttribute('data-status', 'BROADCAST');
     await expect(approving.getByTestId('anchored')).toHaveCount(0);
 
     await mine(3);
-    runWorkerOnce();
+    await runWorkerOnce();
     await approving.reload();
     await expect(originalWrite(approving)).toHaveAttribute('data-status', 'FINAL');
     await expect(approving.getByTestId('anchored')).toBeVisible();
@@ -187,7 +219,7 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     // The pass that settled the original also stamped and sent its copy.
     await expect(approving.locator('[data-testid=chain-write][data-kind=ANCHOR_COPY]')).toHaveAttribute('data-status', 'BROADCAST');
     await mine(3);
-    runWorkerOnce();
+    await runWorkerOnce();
     await approving.reload();
     await expect(approving.getByTestId('complete')).toBeVisible();
     await expect(approving.getByTestId('commitments-hint')).toHaveText('Only these values went on chain, in the record below.');
@@ -198,6 +230,9 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     const pdf = await response.body();
     expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
     expect(pdf.toString('latin1')).toContain('https://github.com/h0mele55/hello-world/ns/audit-anchor/1.0/');
+    // Sealed by the firm (#70): one PAdES signature over the whole file, and the console says so.
+    expect(pdf.toString('latin1')).toContain('/SubFilter /ETSI.CAdES.detached');
+    await expect(approving.getByTestId('copy-sealed')).toContainText('electronic seal');
     copy = pdf;
     // The Bitcoin timestamp's card (#66): the OpenTimestamps job does not run here, so nothing is submitted yet.
     await expect(approving.getByTestId('ots-panel')).toHaveAttribute('data-status', 'NONE');
@@ -275,9 +310,9 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     await uploadAndConfirm(prepared, 'en-signed.pdf', `${tag}9`);
     await approving.goto(prepared.url());
     await approve(approving, 'Approve anchor');
-    runWorkerOnce();
+    await runWorkerOnce();
     await mine(3);
-    runWorkerOnce();
+    await runWorkerOnce();
     await approving.reload();
     await expect(approving.getByTestId('complete')).toBeVisible();
     await expect(approving.locator('[data-testid=chain-write][data-kind=ANCHOR_COPY]')).toHaveCount(0);
@@ -309,11 +344,11 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     await uploadAndConfirm(prepared, 'en-qualified.pdf', tag, 'CORRECTION');
     await approving.goto(prepared.url());
     await approve(approving, 'Approve anchor');
-    runWorkerOnce();
+    await runWorkerOnce();
     await mine(3);
-    runWorkerOnce();
+    await runWorkerOnce();
     await mine(3);
-    runWorkerOnce();
+    await runWorkerOnce();
     await approving.reload();
     await expect(approving.getByTestId('complete')).toBeVisible();
   });
@@ -379,13 +414,13 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     await approving.getByRole('dialog').getByRole('button', { name: 'Approve revocation' }).click();
     await expect(panel).toHaveAttribute('data-status', 'APPROVED');
 
-    runWorkerOnce();
+    await runWorkerOnce();
     await approving.reload();
     await expect(approving.locator('[data-testid=chain-write][data-kind=REVOKE]')).toHaveAttribute('data-status', 'BROADCAST');
     // Sent, not final: not revoked yet (rule 2).
     await expect(panel).toHaveAttribute('data-status', 'APPROVED');
     await mine(3);
-    runWorkerOnce();
+    await runWorkerOnce();
     await approving.reload();
     // Final, and waiting out the registry's delay (#95): the owner may still cancel it.
     await expect(panel).toHaveAttribute('data-status', 'SCHEDULED');
@@ -407,7 +442,7 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     test.skip(!admin.email, 'needs SEED_ADMIN_* (see CI)');
     await passRevocationDelay();
     await mine(3);
-    runWorkerOnce();
+    await runWorkerOnce();
     await approving.goto(versionUrl);
     const panel = approving.getByTestId('revocation-panel');
     await expect(panel).toHaveAttribute('data-status', 'REVOKED');
@@ -460,7 +495,7 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     await prepared.goto('/dashboard');
     await expect(prepared.getByTestId('rpc-disagree')).toContainText('have disagreed about the chain since Jan 2, 2026');
     // The worker reads both (here the one local node, twice), they agree, and the banner goes.
-    runWorkerOnce();
+    await runWorkerOnce();
     await prepared.reload();
     await expect(prepared.getByTestId('rpc-disagree')).toHaveCount(0);
   });

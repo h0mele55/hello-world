@@ -185,7 +185,9 @@ jobs:
       - run: npm ci
       - name: Fixture PDFs reproduce from their generator
         run: npx tsx scripts/gen-pdf-fixtures.ts --check
-      - name: Parser, golden and fuzz tests
+      - name: Poppler's pdfsig, which checks the seal independently (#70)
+        run: sudo apt-get update -q && sudo apt-get install -y --no-install-recommends poppler-utils
+      - name: Parser, golden, fuzz and seal tests
         run: npm run test:pdf
 
   golden-windows:

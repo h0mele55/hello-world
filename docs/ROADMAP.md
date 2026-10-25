@@ -1142,6 +1142,28 @@ script (#61, #67, #68):
   The owner performs it. Until then the hardening box for the key ceremony
   stays open.
 
+6c is the production-chain options (#63). It stops for the owner's decision:
+
+- **The four candidates and their testnets are one table** (`NETWORKS`):
+  mainnet, Base, OP Mainnet and Arbitrum One, and Sepolia, Base Sepolia, OP
+  Sepolia and Arbitrum Sepolia. Each reads `<NETWORK>_RPC_URL`, keeps its own
+  deployment record, and has an explorer and a name. The worker, the verifier
+  and every script take any of them.
+- **The deploy script deploys to the testnets and refuses the production
+  networks** by name until the owner chooses. It is tested on Anvil with Base
+  Sepolia's chain id, and the adapter reaches finality there.
+- **`docs/decision-production-chain.md`** compares the four:
+  - cost per report, measured that day by `scripts/measure-chain-costs.ts`
+    from each chain's fee history and the rollups' own L1-fee oracles;
+  - finality lag, also measured;
+  - who else each depends on, from L2BEAT;
+  - explorers.
+
+  It recommends Ethereum mainnet, with Merkle batching if volume makes cost
+  matter: a mainnet record stays readable without anybody's continued service,
+  and costs about EUR 0.04 a report today and EUR 1 to 17 at 1 to 20 gwei.
+  Arbitrum One is the alternative if cost must be near zero.
+
 **Prompt**
 
 ```text

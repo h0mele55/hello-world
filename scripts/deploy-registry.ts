@@ -2,13 +2,18 @@
  * Deploys AuditReportRegistry and records it in deployments/<network>.json.
  *
  *   npx tsx scripts/deploy-registry.ts sepolia
+ *   npx tsx scripts/deploy-registry.ts base-sepolia      (or optimism-sepolia, arbitrum-sepolia)
+ *
+ * The production networks (mainnet, base, optimism, arbitrum) are refused
+ * until the owner has chosen one (#63, docs/decision-production-chain.md).
  *
  * Reads, from the environment (never from a committed file):
  *   DEPLOYER_PRIVATE_KEY  becomes the owner; refused if it holds more than 0.1 ETH
- *   SEPOLIA_RPC_URL       the endpoint to deploy through
+ *   <NETWORK>_RPC_URL     the endpoint to deploy through, e.g. SEPOLIA_RPC_URL
  *   ISSUER_ADDRESS        the issuer key to register (a different key)
  *   ISSUER_ORG_NAME       the audit firm's name; its keccak256 is the org id
  *   ETHERSCAN_API_KEY     optional; when set, the source is verified on Etherscan
+ *   DEPLOYMENT_FILE       optional; write the record there instead of deployments/<network>.json
  *
  * `local` deploys to an Anvil node at LOCAL_RPC_URL (default http://127.0.0.1:8545)
  * and writes deployments/local.json, which git ignores. It exists to rehearse
@@ -22,9 +27,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createPublicClient, createWalletClient, encodeAbiParameters, formatEther, getAddress, http, isAddress, isHex, parseEther, type PublicClient } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { foundry, sepolia } from 'viem/chains';
 import { deployRegistry, orgIdFor } from '../src/lib/chain/deploy';
-import { deploymentPath } from '../src/lib/chain/networks';
+import { deploymentPath, isNetworkName, NETWORKS, PRODUCTION_NETWORKS, rpcUrlFor, rpcUrlVariable } from '../src/lib/chain/networks';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const MAX_DEPLOYER_BALANCE = parseEther('0.1');
@@ -42,11 +46,14 @@ function env(name: string): string {
 
 async function main() {
   const network = process.argv[2];
-  if (network !== 'sepolia' && network !== 'local') fail('usage: npx tsx scripts/deploy-registry.ts <sepolia|local>');
-  const chain = network === 'sepolia' ? sepolia : foundry;
-  const rpcUrl = network === 'sepolia' ? env('SEPOLIA_RPC_URL') : (process.env.LOCAL_RPC_URL ?? 'http://127.0.0.1:8545');
+  if (!isNetworkName(network)) fail(`usage: npx tsx scripts/deploy-registry.ts <${Object.keys(NETWORKS).join('|')}>`);
+  if (PRODUCTION_NETWORKS.includes(network)) fail(`${network} is a production network: deploying to one waits on the owner's choice of chain (#63)`);
+  const chain = NETWORKS[network];
+  if (network !== 'local') env(rpcUrlVariable(network));
+  const rpcUrl = rpcUrlFor(network);
 
-  const target = deploymentPath(network, ROOT);
+  // DEPLOYMENT_FILE writes the record elsewhere, as the worker reads one from elsewhere (rehearsals, tests).
+  const target = process.env.DEPLOYMENT_FILE ? path.resolve(process.env.DEPLOYMENT_FILE) : deploymentPath(network, ROOT);
   if (fs.existsSync(target)) fail(`${path.relative(ROOT, target)} already exists`);
 
   const key = env('DEPLOYER_PRIVATE_KEY');
@@ -91,9 +98,10 @@ async function main() {
   fs.writeFileSync(target, `${JSON.stringify(record, null, 2)}\n`);
   console.log(`Deployed at ${deployment.address} (block ${deployment.deployBlock}). Wrote ${path.relative(ROOT, target)}.`);
 
-  if (network !== 'sepolia') return;
+  if (network === 'local') return;
+  // One Etherscan key covers every chain here; forge picks the explorer by chain id.
   const constructorArgs = encodeAbiParameters([{ type: 'address' }], [deployer.address]);
-  const verify = ['verify-contract', deployment.address, 'src/AuditReportRegistry.sol:AuditReportRegistry', '--chain', 'sepolia', '--constructor-args', constructorArgs, '--watch'];
+  const verify = ['verify-contract', deployment.address, 'src/AuditReportRegistry.sol:AuditReportRegistry', '--chain', String(chain.id), '--constructor-args', constructorArgs, '--watch'];
   if (!process.env.ETHERSCAN_API_KEY) {
     console.log(`ETHERSCAN_API_KEY is not set. Verify the source later with:\n  (cd contracts && forge ${verify.join(' ')})`);
     return;

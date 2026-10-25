@@ -40,7 +40,7 @@ describe('the anchor target', () => {
 
   it('refuses, by name, a wrong network, a bad address, and a missing, malformed or stale deployment', () => {
     const env = { NODE_ENV: 'test' as const, ANCHOR_NETWORK: 'local', ISSUER_ADDRESS: issuer };
-    expect(() => anchorTargetFromEnv({ ...env, ANCHOR_NETWORK: 'mainnet' }, rootWith(valid))).toThrow(expect.objectContaining({ code: 'ENV_INVALID' }));
+    expect(() => anchorTargetFromEnv({ ...env, ANCHOR_NETWORK: 'polygon' }, rootWith(valid))).toThrow(expect.objectContaining({ code: 'ENV_INVALID' }));
     expect(() => anchorTargetFromEnv({ ...env, ISSUER_ADDRESS: 'nope' }, rootWith(valid))).toThrow(expect.objectContaining({ code: 'ENV_INVALID' }));
     expect(() => anchorTargetFromEnv(env, rootWith(null))).toThrow(expect.objectContaining({ code: 'DEPLOYMENT_MISSING' }));
     expect(() => anchorTargetFromEnv(env, rootWith('{not json'))).toThrow(expect.objectContaining({ code: 'DEPLOYMENT_INVALID' }));

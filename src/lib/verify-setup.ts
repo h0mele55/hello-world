@@ -11,7 +11,7 @@ import type { VerifierConfig } from '@/lib/verify-core';
  * nothing here may be a secret: the verifier's RPC endpoints are their own
  * variables, separate from SEPOLIA_RPC_URL, which may carry a private key.
  *
- *   VERIFY_NETWORK      sepolia or local (default: ANCHOR_NETWORK)
+ *   VERIFY_NETWORK      a network in NETWORKS, e.g. sepolia or local (default: ANCHOR_NETWORK)
  *   VERIFY_RPC_URL_1/2  two independent public endpoints, on different hosts
  *                       (local: both default to LOCAL_RPC_URL)
  */

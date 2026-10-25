@@ -3,7 +3,7 @@
  * the environment only (never a file in the repository):
  *
  *   DATABASE_URL        the app's database
- *   ANCHOR_NETWORK      sepolia or local; deployments/<network>.json names the registry
+ *   ANCHOR_NETWORK      a network in src/lib/chain/networks.ts; deployments/<network>.json names the registry
  *   DEPLOYMENT_FILE     optional; a deployment record other than that file
  *   SIGNER              env (default) or kms
  *   ISSUER_PRIVATE_KEY  with SIGNER=env: the issuer key. Read by scripts only: the web app never holds it.
@@ -12,7 +12,7 @@
  *                       host's (Application Default Credentials). The key never
  *                       leaves KMS (docs/runbooks/kms-key.md).
  *   ISSUER_ADDRESS      optional; when set, must be the key's address (it is what the web app journals)
- *   SEPOLIA_RPC_URL / LOCAL_RPC_URL
+ *   <NETWORK>_RPC_URL   e.g. SEPOLIA_RPC_URL, BASE_SEPOLIA_RPC_URL, LOCAL_RPC_URL
  *
  * Run from the app's directory: the PDF parser and deployments/ are found from there.
  */
@@ -50,7 +50,7 @@ export interface IssuerEnv {
 
 export async function issuerEnv(tool: string): Promise<IssuerEnv> {
   const network = requireEnv(tool, 'ANCHOR_NETWORK');
-  if (!isNetworkName(network)) refuse(tool, 'ANCHOR_NETWORK must be sepolia or local');
+  if (!isNetworkName(network)) refuse(tool, `ANCHOR_NETWORK must be one of ${Object.keys(NETWORKS).join(', ')}`);
   const account = await issuerAccount(tool);
   const declared = process.env.ISSUER_ADDRESS;
   if (declared && getAddress(declared) !== account.address) refuse(tool, 'ISSUER_ADDRESS is not the address of the issuer key');

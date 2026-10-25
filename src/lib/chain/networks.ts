@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { foundry, sepolia } from 'viem/chains';
+import { arbitrum, arbitrumSepolia, base, baseSepolia, foundry, mainnet, optimism, optimismSepolia, sepolia } from 'viem/chains';
 import { parseDeployment, type Deployment } from './deployment';
 import { ChainError, DeploymentError } from './errors';
 
@@ -10,10 +10,29 @@ import { ChainError, DeploymentError } from './errors';
  *
  * `local` is an Anvil node (chain 31337) at LOCAL_RPC_URL, for rehearsing the
  * deploy script and running the worker by hand.
+ *
+ * The production candidates (#63, docs/decision-production-chain.md) and the
+ * Sepolia testnet of each are named here so that every part of the system
+ * (the worker, the verifier, the scripts) handles them the same way. Which one
+ * is used is the owner's decision; until it is made, scripts/deploy-registry.ts
+ * deploys to the testnets only.
  */
 
-export const NETWORKS = { sepolia, local: foundry } as const;
+export const NETWORKS = {
+  sepolia,
+  local: foundry,
+  mainnet,
+  base,
+  'base-sepolia': baseSepolia,
+  optimism,
+  'optimism-sepolia': optimismSepolia,
+  arbitrum,
+  'arbitrum-sepolia': arbitrumSepolia,
+} as const;
 export type NetworkName = keyof typeof NETWORKS;
+
+/** Networks whose anchors would be the firm's real evidence: deployed to only once the owner has chosen (#63). */
+export const PRODUCTION_NETWORKS: readonly NetworkName[] = ['mainnet', 'base', 'optimism', 'arbitrum'];
 
 export function isNetworkName(value: string | undefined): value is NetworkName {
   return value !== undefined && Object.hasOwn(NETWORKS, value);
@@ -46,8 +65,13 @@ export function loadDeploymentFile(network: NetworkName, file: string, root = pr
   return deployment;
 }
 
+/** The variable that holds a network's endpoint: SEPOLIA_RPC_URL, BASE_SEPOLIA_RPC_URL, … and LOCAL_RPC_URL. */
+export const rpcUrlVariable = (network: NetworkName) => `${network.toUpperCase().replace(/-/g, '_')}_RPC_URL`;
+
 export function rpcUrlFor(network: NetworkName, env: NodeJS.ProcessEnv = process.env): string {
-  const url = network === 'sepolia' ? env.SEPOLIA_RPC_URL : (env.LOCAL_RPC_URL || 'http://127.0.0.1:8545');
-  if (!url) throw new ChainError('ENV_MISSING', 'SEPOLIA_RPC_URL is not set');
+  if (network === 'local') return env.LOCAL_RPC_URL || 'http://127.0.0.1:8545';
+  const name = rpcUrlVariable(network);
+  const url = env[name];
+  if (!url) throw new ChainError('ENV_MISSING', `${name} is not set`);
   return url;
 }

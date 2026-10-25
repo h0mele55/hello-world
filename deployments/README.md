@@ -6,6 +6,8 @@ One JSON file per network, written by `scripts/deploy-registry.ts` and read by
 | File | Status |
 | --- | --- |
 | `sepolia.json` | Not deployed yet. Waiting on funded keys ([#4](https://github.com/h0mele55/hello-world/issues/4)). |
+| `base-sepolia.json`, `optimism-sepolia.json`, `arbitrum-sepolia.json` | The production candidates' testnets: deployable now, waiting on funded keys (#4). |
+| `mainnet.json`, `base.json`, `optimism.json`, `arbitrum.json` | Production: refused by the deploy script until the owner chooses the chain ([#63](https://github.com/h0mele55/hello-world/issues/63), `docs/decision-production-chain.md`). |
 
 A file records the chain id, the registry address, the deploy transaction and
 block, the owner, the registered issuer, and `runtimeBytecodeHash`. Code refuses

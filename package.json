@@ -52,7 +52,7 @@
     "@radix-ui/react-radio-group": "1.5.1",
     "@radix-ui/react-tooltip": "1.4.1",
     "@radix-ui/react-visually-hidden": "1.2.13",
-    "@tanstack/react-table": "9.2.8",
+    "@tanstack/react-table": "9.3.1",
     "@visx/axis": "4.0.0",
     "@visx/clip-path": "4.0.0",
     "@visx/event": "4.0.0",

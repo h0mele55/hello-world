@@ -105,7 +105,8 @@
       "CONFIRMED": "Opinion confirmed",
       "APPROVED": "Approved: anchor queued",
       "ANCHORED": "Anchored",
-      "COMPLETE": "Complete"
+      "COMPLETE": "Complete",
+      "REVOKED": "Revoked"
     }
   },
   "engagement": {
@@ -172,7 +173,12 @@
       "TIMEOUT": "Reading this PDF took longer than 20 seconds, so it was stopped.",
       "RESOURCE_LIMIT": "Reading this PDF needed more memory than allowed, so it was stopped.",
       "PARSER_CRASHED": "The PDF reader stopped unexpectedly on this file."
-    }
+    },
+    "NOT_REVOCABLE": "Only a version whose original is anchored can be revoked.",
+    "CONFIRMATION_MISMATCH": "The engagement reference you typed does not match.",
+    "REVOCATION_OPEN": "This version already has an open revocation request.",
+    "NOT_REQUESTED": "This request is no longer waiting for a decision. Reload the page.",
+    "COPY_IN_FLIGHT": "The stamped copy is still on its way to the chain. Approve the revocation once it is final."
   },
   "viewer": {
     "failed": "The PDF could not be shown.",
@@ -302,7 +308,11 @@
       "COPY_NEEDS_LIVE": "A distribution copy is anchored only in Live mode.",
       "CopyExists": "The original already has a distribution copy on chain, made from another file.",
       "RecordRevoked": "The original record has been revoked.",
-      "KIND_UNSUPPORTED": "The worker does not send this kind of write."
+      "KIND_UNSUPPORTED": "The worker does not send this kind of write.",
+      "REVOKED_WITH_OTHER_REASON": "The record on chain was already revoked, with another reason. A person must look at this.",
+      "REVOCATION_NOT_APPROVED": "The revocation was no longer approved.",
+      "ORIGINAL_RECORD_MISMATCH": "The original’s record on chain is not this version’s, or is not final yet.",
+      "AlreadyRevoked": "The record is already revoked."
     },
     "completeCopy": "Complete: the stamped distribution copy is anchored too. Hand recipients this copy; its metadata names its own record.",
     "completeCertificate": "Complete. This report is signed or protected against editing, so it was anchored as issued. Hand recipients the report as issued together with its verification certificate.",
@@ -556,7 +566,8 @@
       "copyTransaction": "Stamped copy’s transaction",
       "explorer": "Etherscan ↗",
       "downloadCopy": "Download the stamped PDF",
-      "downloadCertificate": "Download the certificate"
+      "downloadCertificate": "Download the certificate",
+      "revokedOn": "Revoked on {when} UTC: anyone who checks this version, or a copy of it, is told so."
     },
     "dashboard": {
       "title": "Dashboard",
@@ -595,5 +606,51 @@
         "series": "Lookups"
       }
     }
+  },
+  "revocation": {
+    "title": "Revocation",
+    "intro": "A revocation withdraws this version on chain: anyone who checks it, or a copy of it, is told it was revoked. It cannot be undone. An admin asks for it, and an approver who is someone else approves.",
+    "adminOnly": "Only an admin can ask for a version to be revoked.",
+    "reasonLabel": "Reason",
+    "reasons": {
+      "WITHDRAWN": "Withdrawn",
+      "ISSUED_IN_ERROR": "Issued in error",
+      "SUPERSEDED_AND_WITHDRAWN": "Superseded and withdrawn",
+      "OTHER": "Other reason"
+    },
+    "note": "Note",
+    "noteHint": "Why, for the firm’s records. It is kept encrypted and never sent to the chain.",
+    "confirmLabel": "Type the engagement reference, {ref}, to confirm",
+    "request": "Ask to revoke version {version}",
+    "requestTitle": "Ask for version {version} to be revoked?",
+    "requestBody": "An approver who is someone else must approve the request before anything is sent. Once the revocation is on chain, it cannot be undone.",
+    "requestConfirm": "Ask for revocation",
+    "requested": "{who} asked on {when} UTC for this version to be revoked.",
+    "waitingApprover": "Waiting for an approver who is someone else.",
+    "approve": "Approve revocation",
+    "approveDryRun": "Approve revocation (dry run)",
+    "approveTitle": "Approve this revocation?",
+    "approveBody": "The revocation is written to the journal and sent to the chain. Once its block is final, the verifier reports this version, and every copy of it, as revoked. It cannot be undone.",
+    "approveBodyDryRun": "Dry run: the revocation is simulated against the registry and the result recorded. Nothing is sent, and the request waits for approval again.",
+    "approveConfirm": "Approve revocation",
+    "reject": "Reject",
+    "rejectTitle": "Reject this request?",
+    "rejectBody": "The version stays as it is. An admin can ask again.",
+    "rejectConfirm": "Reject request",
+    "withdraw": "Take the request back",
+    "withdrawTitle": "Take this request back?",
+    "withdrawBody": "The version stays as it is.",
+    "withdrawConfirm": "Take the request back",
+    "queued": "Approved by {who}. The revocation is in the journal; the version counts as revoked once its block is final.",
+    "revoked": "Revoked on {when} UTC. Reason: {reason} (code {code}).",
+    "history": "Earlier requests",
+    "statuses": {
+      "REQUESTED": "Requested",
+      "APPROVED": "Approved",
+      "REVOKED": "Revoked",
+      "REJECTED": "Rejected",
+      "WITHDRAWN": "Taken back"
+    },
+    "closed": "by {who}, {when} UTC"
   }
 }

@@ -11,7 +11,12 @@ export type AnchoringErrorCode =
   | 'MODE_SKIPS_RUNG'
   | 'NOT_ANCHORED'
   | 'ANCHOR_ONLY'
-  | 'NOT_COMPLETE';
+  | 'NOT_COMPLETE'
+  | 'NOT_REVOCABLE'
+  | 'CONFIRMATION_MISMATCH'
+  | 'REVOCATION_OPEN'
+  | 'NOT_REQUESTED'
+  | 'COPY_IN_FLIGHT';
 
 export class AnchoringError extends Error {
   constructor(

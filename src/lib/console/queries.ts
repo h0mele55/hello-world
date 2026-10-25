@@ -113,6 +113,7 @@ export interface TimelineVersion {
   approvedBy: string | null;
   approvedAt: string | null;
   completedAt: string | null;
+  revokedAt: string | null;
   /** The chain the original's final anchor is on, for explorer links. */
   chainId: number | null;
   recordId: string | null;
@@ -146,6 +147,7 @@ export async function getEngagementTimeline(user: SessionUser, engagementId: str
           approvedBy: { select: { email: true } },
           approvedAt: true,
           completedAt: true,
+          revokedAt: true,
           recordId: true,
           anchorTxHash: true,
           anchorBlock: true,
@@ -168,6 +170,7 @@ export async function getEngagementTimeline(user: SessionUser, engagementId: str
     approvedBy: v.approvedBy?.email ?? null,
     approvedAt: v.approvedAt?.toISOString() ?? null,
     completedAt: v.completedAt?.toISOString() ?? null,
+    revokedAt: v.revokedAt?.toISOString() ?? null,
     chainId: v.chainWrites[0]?.chainId ?? null,
     recordId: v.recordId,
     anchorTxHash: v.anchorTxHash,

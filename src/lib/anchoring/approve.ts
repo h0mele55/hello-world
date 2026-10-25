@@ -26,7 +26,7 @@ function requireApprover(user: SessionUser) {
  * which takes a key-share lock that FOR UPDATE would block. An approval holds
  * this row and then asks for the audit lock, so the two would deadlock.
  */
-async function lockOrg(tx: Prisma.TransactionClient, orgId: string): Promise<ChainWriteMode> {
+export async function lockOrg(tx: Prisma.TransactionClient, orgId: string): Promise<ChainWriteMode> {
   const rows = await tx.$queryRaw<{ chainWriteMode: ChainWriteMode }[]>`SELECT "chainWriteMode" FROM "IssuerOrg" WHERE id = ${orgId} FOR NO KEY UPDATE`;
   if (rows.length !== 1) throw new AnchoringError('NOT_FOUND');
   return rows[0].chainWriteMode;

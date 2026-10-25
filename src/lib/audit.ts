@@ -44,14 +44,18 @@ export type AuditAction =
   | 'version.stamped'
   | 'version.certified'
   | 'mfa.enabled'
-  | 'mfa.recovery_code_used';
+  | 'mfa.recovery_code_used'
+  | 'revocation.requested'
+  | 'revocation.approved'
+  | 'revocation.rejected'
+  | 'revocation.withdrawn';
 
 export interface AuditEventInput {
   orgId: string;
   /** The user, or null for the worker. */
   actorId: string | null;
   action: AuditAction;
-  subjectType: 'Engagement' | 'ReportVersion' | 'IssuerOrg' | 'ChainWrite' | 'User';
+  subjectType: 'Engagement' | 'ReportVersion' | 'IssuerOrg' | 'ChainWrite' | 'User' | 'Revocation';
   subjectId: string;
   /** Plain JSON only: strings, safe integers, booleans, null, arrays and objects. */
   data: Record<string, unknown>;

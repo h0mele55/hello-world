@@ -40,6 +40,7 @@ jobs:
       SEED_ORG_NAME: CI Audit Firm
       SEED_PREPARER_EMAIL: preparer@ci.example
       SEED_APPROVER_EMAIL: approver@ci.example
+      SEED_ADMIN_EMAIL: admin@ci.example
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: foundry-rs/foundry-toolchain@dba66c27052e63476d886f22216e119ba7e615bf # v1.9.2
@@ -55,12 +56,14 @@ jobs:
           for name in NEXTAUTH_SECRET FILE_ENCRYPTION_KEY ISSUER_FAMILY_SECRET; do
             value=$(openssl rand -base64 32); echo "::add-mask::$value"; echo "$name=$value" >> "$GITHUB_ENV"
           done
-          for name in SEED_PREPARER_PASSWORD SEED_APPROVER_PASSWORD; do
+          for name in SEED_PREPARER_PASSWORD SEED_APPROVER_PASSWORD SEED_ADMIN_PASSWORD; do
             value=$(openssl rand -hex 16); echo "::add-mask::$value"; echo "$name=$value" >> "$GITHUB_ENV"
           done
-          # The seeded approver signs in with two-step sign-in; the end-to-end tests compute its codes.
-          value=$(node -e "const a='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; console.log([...require('crypto').randomBytes(32)].map((b) => a[b & 31]).join(''))")
-          echo "::add-mask::$value"; echo "SEED_APPROVER_TOTP_SECRET=$value" >> "$GITHUB_ENV"
+          # The seeded approver and admin sign in with two-step sign-in; the end-to-end tests compute their codes.
+          for name in SEED_APPROVER_TOTP_SECRET SEED_ADMIN_TOTP_SECRET; do
+            value=$(node -e "const a='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; console.log([...require('crypto').randomBytes(32)].map((b) => a[b & 31]).join(''))")
+            echo "::add-mask::$value"; echo "$name=$value" >> "$GITHUB_ENV"
+          done
           echo "FILE_STORAGE_DIR=$RUNNER_TEMP/storage" >> "$GITHUB_ENV"
       - name: Vendored Inflect code matches its manifest
         run: npm run vendor:check

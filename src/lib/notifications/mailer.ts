@@ -1,6 +1,6 @@
 import type { PrismaClient } from '@/generated/prisma/client';
 import { appendAuditEvent } from '@/lib/audit';
-import { EMAIL_LOCALES, supersededEmail, type EmailLocale } from './email';
+import { EMAIL_LOCALES, revokedEmail, supersededEmail, type EmailLocale } from './email';
 
 /**
  * Sends the queued notices (src/lib/notifications/queue.ts), one row at a
@@ -71,11 +71,14 @@ export async function deliverNotifications(deps: MailerDeps): Promise<MailerRepo
       where: { id: row.id },
       select: {
         id: true,
+        kind: true,
         recipient: { select: { id: true, name: true, email: true, locale: true, removedAt: true } },
         reportVersion: {
           select: {
             id: true,
             version: true,
+            // A REVOKED notice names the reason of the revocation in effect, never its sealed note.
+            revocations: { where: { status: 'REVOKED' }, select: { reason: true }, orderBy: { revokedAt: 'desc' }, take: 1 },
             engagement: { select: { engagementRef: true, periodEnd: true, familyId: true, client: { select: { name: true, org: { select: { id: true, name: true } } } } } },
           },
         },
@@ -90,7 +93,7 @@ export async function deliverNotifications(deps: MailerDeps): Promise<MailerRepo
     }
 
     const locale: EmailLocale = (EMAIL_LOCALES as readonly string[]).includes(recipient.locale) ? (recipient.locale as EmailLocale) : 'en';
-    const { subject, text } = supersededEmail({
+    const facts = {
       locale,
       recipientName: recipient.name,
       firm: org.name,
@@ -100,7 +103,18 @@ export async function deliverNotifications(deps: MailerDeps): Promise<MailerRepo
       version: version.version,
       latestUrl: `${appUrl}/r/${version.engagement.familyId}/latest`,
       verifyUrl: `${appUrl}/verify`,
-    });
+    };
+    const revocation = version.revocations[0];
+    if (notice.kind === 'REVOKED' && !revocation) {
+      // Queued only when a version is REVOKED, so this is a broken row: a person looks at it.
+      await deps.prisma.$transaction(async (tx) => {
+        await tx.notification.updateMany({ where: { id: notice.id, status: 'PENDING' }, data: { status: 'FAILED', lastError: 'NO_REVOCATION', leaseUntil: null } });
+        await appendAuditEvent(tx, { orgId: org.id, actorId: null, action: 'notification.failed', subjectType: 'Notification', subjectId: notice.id, data: { recipientId: recipient.id, reportVersionId: version.id, reason: 'NO_REVOCATION', attempts: row.attempts } }, now());
+      });
+      report.failed.push(notice.id);
+      continue;
+    }
+    const { subject, text } = notice.kind === 'REVOKED' ? revokedEmail({ ...facts, reason: revocation.reason }) : supersededEmail(facts);
 
     try {
       await deps.transport.send({ to: recipient.email, subject, text });

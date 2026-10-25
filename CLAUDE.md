@@ -413,14 +413,18 @@ to one inflect-compliance commit.
   row and cancels what was not yet sent to them.
 - **Notices are an outbox.** When a version 2 or later becomes COMPLETE, the
   worker queues one `Notification` per live recipient in the same transaction
-  (`queueSupersededNotices`, `src/lib/notifications/queue.ts`). Do not send
+  (`queueSupersededNotices`, `src/lib/notifications/queue.ts`); when a
+  revocation takes effect and a version is REVOKED, one of kind REVOKED
+  (`queueRevokedNotices`, #96), never while it is only scheduled, since the
+  owner may still cancel it. Do not send
   mail from a use case or the worker: only the mailer sends
   (`src/lib/notifications/mailer.ts`, run by `scripts/mailer.ts`), at least
   once, under a lease, giving up after five attempts (FAILED).
 - **The email carries no PDF, no opinion and no figure** (decision #8):
   names, the engagement's reference, the period end, the version number and
   two links, as plain text with no attachment (`supersededEmail`,
-  `src/lib/notifications/email.ts`). Every value from the database passes
+  `revokedEmail`, `src/lib/notifications/email.ts`). A withdrawal names the
+  reason's fixed label, never the admin's sealed note. Every value from the database passes
   through `oneLine`. Never add a field from the report or the opinion, and
   never store or log what an SMTP server said: only a name for the error.
 - **`SMTP_URL` can hold credentials** and is never logged. Development and CI

@@ -921,6 +921,50 @@ describe('telling recipients about a newer version', () => {
     expect((await versionOf(v2)).status).toBe('COMPLETE');
     expect(await prisma.notification.findMany({ select: { recipientId: true, reportVersionId: true } })).toEqual([{ recipientId, reportVersionId: v2 }]);
   });
+
+  it('tells each live recipient once a revocation is in effect: not while it waits, nor when the owner cancels it (#96)', async () => {
+    await goLive();
+    const e = await engagement();
+    const recipientId = await withRecipients(e.id);
+    const v1 = await confirmedVersion(e.id, 'en-unmodified.pdf');
+    await anchorThrough(v1);
+    await mine();
+    await pass();
+    const { recordId } = await versionOf(v1);
+    const revoked = () => prisma.notification.findMany({ where: { kind: 'REVOKED' }, select: { recipientId: true, reportVersionId: true, status: true } });
+    const ask = async (reason: 'ISSUED_IN_ERROR' | 'WITHDRAWN') => {
+      const { revocationId } = await requestRevocation(admin, { versionId: v1, reason, note: 'x', confirmation: e.engagementRef });
+      await approveRevocation(approver, revocationId, target);
+      await pass();
+      await mine();
+      await pass();
+      return revocationId;
+    };
+
+    // Scheduled, then cancelled by the owner: nobody is told of a withdrawal that did not happen.
+    const first = await ask('ISSUED_IN_ERROR');
+    expect(await prisma.revocation.findUniqueOrThrow({ where: { id: first } })).toMatchObject({ status: 'SCHEDULED' });
+    expect(await revoked()).toEqual([]);
+    const wallet = createWalletClient({ chain: foundry, transport: http(anvil.url), account: owner });
+    await publicClient.waitForTransactionReceipt({
+      hash: await wallet.writeContract({ address: deployment.address, abi: registryAbi, functionName: 'cancelRevocation', args: [recordId as Hex] }),
+    });
+    await mine();
+    await pass();
+    expect(await prisma.revocation.findUniqueOrThrow({ where: { id: first } })).toMatchObject({ status: 'CANCELLED' });
+    expect(await revoked()).toEqual([]);
+
+    // Asked again and left to take effect: each live recipient is told, once, in the same transaction.
+    await ask('WITHDRAWN');
+    await waitOutDelay();
+    await mine();
+    await pass();
+    expect((await versionOf(v1)).status).toBe('REVOKED');
+    expect(await revoked()).toEqual([{ recipientId, reportVersionId: v1, status: 'PENDING' }]);
+    expect(await prisma.auditEvent.findFirstOrThrow({ where: { action: 'notification.queued', subjectId: v1 } })).toMatchObject({ data: { count: 1, kind: 'REVOKED' } });
+    await pass();
+    expect(await revoked()).toHaveLength(1);
+  });
 });
 
 describe('rotating the issuer key (docs/runbooks/key-rotation.md)', () => {

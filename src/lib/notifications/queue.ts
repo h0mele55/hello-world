@@ -25,3 +25,23 @@ export async function queueSupersededNotices(
   await appendAuditEvent(tx, { orgId, actorId: null, action: 'notification.queued', subjectType: 'ReportVersion', subjectId: version.id, data: { count } }, now);
   return count;
 }
+
+/**
+ * When a revocation takes effect and a version is REVOKED (#96), everyone
+ * listed as holding the engagement's report is queued an email, in the same
+ * transaction: a withdrawn report that keeps circulating is what the anchor
+ * exists to stop. Not when it is only scheduled: the registry's owner may
+ * still cancel it, and a recipient told of a withdrawal that never happened
+ * is misled.
+ */
+export async function queueRevokedNotices(tx: Prisma.TransactionClient, version: { id: string; engagementId: string }, orgId: string, now: Date): Promise<number> {
+  const recipients = await tx.recipient.findMany({ where: { engagementId: version.engagementId, removedAt: null }, select: { id: true } });
+  if (recipients.length === 0) return 0;
+  const { count } = await tx.notification.createMany({
+    data: recipients.map((r) => ({ recipientId: r.id, reportVersionId: version.id, kind: 'REVOKED' as const })),
+    skipDuplicates: true,
+  });
+  if (count === 0) return 0;
+  await appendAuditEvent(tx, { orgId, actorId: null, action: 'notification.queued', subjectType: 'ReportVersion', subjectId: version.id, data: { count, kind: 'REVOKED' } }, now);
+  return count;
+}

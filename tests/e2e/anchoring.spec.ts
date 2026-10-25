@@ -373,6 +373,32 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     await expect(approving.getByTestId('revocation-final')).toContainText('Issued in error (code 2)');
   });
 
+  await test.step('each recipient is told that version 1 is withdrawn, with the reason and nothing else (#96)', async () => {
+    test.skip(!admin.email, 'needs SEED_ADMIN_* (see CI)');
+    if (!process.env.SMTP_URL && !process.env.CI) return;
+    runMailerOnce();
+    const english = (await mailTo(recipients.en)).find((m) => m.Subject.includes('is withdrawn'));
+    const bulgarian = (await mailTo(recipients.bg)).find((m) => m.Subject.includes('е оттеглена'));
+    expect(english?.Subject).toContain('version 1 of the audit report for Example Manufacturing AD is withdrawn');
+    expect(english?.Text).toContain('Reason given: Issued in error.');
+    expect(bulgarian?.Text).toContain('Посочена причина: Издаден по грешка.');
+    for (const message of [english!, bulgarian!]) {
+      expect(message.Attachments).toEqual([]);
+      expect(message.HTML).toBe('');
+      expect(message.Text).toContain(`E2E-${tag}`);
+      // The reason's label, never the note the admin typed.
+      expect(message.Text).not.toContain('Issued against the wrong period.');
+      for (const text of ['In our opinion', 'except for', 'Qualified', 'IFRS', 'financial position', '31 December']) {
+        expect(message.Text).not.toContain(text);
+      }
+    }
+    await prepared.goto(engagementUrl);
+    for (const badge of await prepared.getByTestId('recipient-last').all()) {
+      await expect(badge).toHaveAttribute('data-kind', 'REVOKED');
+      await expect(badge).toContainText('Withdrawal of version 1: sent');
+    }
+  });
+
   await test.step('the verifier reports version 1’s copy and original as revoked, and version 2 as the latest', async () => {
     test.skip(!admin.email, 'needs SEED_ADMIN_* (see CI)');
     await visitor.goto('/verify');

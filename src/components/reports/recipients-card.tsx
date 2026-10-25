@@ -38,8 +38,8 @@ export async function RecipientsCard({ user, engagementId }: { user: SessionUser
               <span className="text-content-muted">{r.email}</span>
               <StatusBadge variant="neutral">{t(`locales.${r.locale as 'en' | 'bg'}`)}</StatusBadge>
               {r.last ? (
-                <StatusBadge variant={STATUS_VARIANT[r.last.status]} data-testid="recipient-last">
-                  {t(`last.${r.last.status}`, { version: r.last.version, when: format.dateTime(new Date(r.last.at), { dateStyle: 'medium', timeZone: 'UTC' }) })}
+                <StatusBadge variant={STATUS_VARIANT[r.last.status]} data-testid="recipient-last" data-kind={r.last.kind}>
+                  {t(`${r.last.kind === 'REVOKED' ? 'lastRevoked' : 'last'}.${r.last.status}`, { version: r.last.version, when: format.dateTime(new Date(r.last.at), { dateStyle: 'medium', timeZone: 'UTC' }) })}
                 </StatusBadge>
               ) : null}
               {canManage ? <RemoveRecipientButton recipientId={r.id} name={r.name} /> : null}

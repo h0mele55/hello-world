@@ -93,7 +93,7 @@ export async function listRecipients(user: SessionUser, engagementId: string) {
       notifications: {
         orderBy: { createdAt: 'desc' },
         take: 1,
-        select: { status: true, sentAt: true, createdAt: true, reportVersion: { select: { version: true } } },
+        select: { kind: true, status: true, sentAt: true, createdAt: true, reportVersion: { select: { version: true } } },
       },
     },
   });
@@ -105,7 +105,7 @@ export async function listRecipients(user: SessionUser, engagementId: string) {
       email: r.email,
       locale: r.locale,
       addedAt: r.addedAt.toISOString(),
-      last: last ? { status: last.status, version: last.reportVersion.version, at: (last.sentAt ?? last.createdAt).toISOString() } : null,
+      last: last ? { kind: last.kind, status: last.status, version: last.reportVersion.version, at: (last.sentAt ?? last.createdAt).toISOString() } : null,
     };
   });
 }

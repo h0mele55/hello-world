@@ -31,7 +31,9 @@ something goes wrong, `docs/runbooks/` says what to do.
 ## The mailer
 
 When a newer version of a report is complete, everyone listed as holding the
-engagement's report is queued an email. `npm run mailer` sends them. It needs
+engagement's report is queued an email; so they are when a revocation takes
+effect and a version is withdrawn (#96), with the reason's label and never the
+firm's note. `npm run mailer` sends them. It needs
 `DATABASE_URL`, `SMTP_URL`, `MAIL_FROM` and `APP_PUBLIC_URL` (for the links),
 and holds no issuer key.
 

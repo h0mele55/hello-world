@@ -25,7 +25,7 @@ import { docHashOf } from '@/lib/commitments';
 import { explorerTxUrl, networkNameOf } from '@/lib/chain/explorer';
 import type { FileStore } from '@/lib/file-store';
 import { NORMALISER_VERSION } from '@/lib/opinion/normalise';
-import { queueSupersededNotices } from '@/lib/notifications/queue';
+import { queueRevokedNotices, queueSupersededNotices } from '@/lib/notifications/queue';
 import { REVOCATION_CODES } from '@/lib/revocation-reasons';
 import { checkStampedCopy, stampPdf, StampError } from '@/lib/stamp';
 import { STAMP_VERSION, type StampFields } from '@/lib/stamp-fields';
@@ -865,7 +865,8 @@ async function certifyAnchorOnly(ctx: Context, report: PassReport) {
  * the original's record at the finalized block (rule 2), so the answer is
  * final:
  *   - the same request, its time come: in effect. The version and the
- *     revocation are REVOKED, as of the time it took effect. Terminal.
+ *     revocation are REVOKED, as of the time it took effect, and the
+ *     engagement's recipients are queued a notice (#96). Terminal.
  *   - the same request, its time not come: still pending; nothing changes.
  *   - not the same request: the registry's owner cancelled it. The revocation
  *     is CANCELLED and the version stands; the firm may ask again.
@@ -910,6 +911,8 @@ async function settleScheduledRevocations(ctx: Context, report: PassReport) {
           if (closed.count !== 1) return false;
           const revoked = await tx.reportVersion.updateMany({ where: { id: version.id, status: { in: ['ANCHORED', 'COMPLETE'] } }, data: { status: 'REVOKED', revokedAt } });
           if (revoked.count !== 1) throw new ChainError('VERSION_NOT_ANCHORED', `version ${version.id} is not ANCHORED or COMPLETE`);
+          // The recipients learn of it now that it is in effect, not while it may still be cancelled (#96).
+          await queueRevokedNotices(tx, version, version.engagement.client.orgId, ctx.now());
         } else {
           const closed = await tx.revocation.updateMany({ where: { id: revocation.id, status: 'SCHEDULED' }, data: { status: 'CANCELLED', closedAt: ctx.now() } });
           if (closed.count !== 1) return false;

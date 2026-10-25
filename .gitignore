@@ -15,3 +15,4 @@ contracts/out/
 contracts/cache/
 contracts/broadcast/
 deployments/local.json
+.cache/

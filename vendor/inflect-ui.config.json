@@ -1,0 +1,38 @@
+{
+  "repository": "https://github.com/rodnapamet/inflect-compliance.git",
+  "ref": "3e9f3ef28e18dc2be8d393502e3e5ee413f72bbd",
+  "entries": [
+    "packages/ui/src/lib/cn.ts",
+    "packages/ui/src/components/ui/button.tsx",
+    "packages/ui/src/components/ui/card.tsx",
+    "packages/ui/src/components/ui/tooltip.tsx",
+    "packages/ui/src/components/ui/typography.tsx",
+    "packages/ui/src/components/ui/empty-state.tsx",
+    "packages/ui/src/components/ui/error-state.tsx",
+    "packages/ui/src/components/ui/skeleton.tsx",
+    "packages/ui/src/components/ui/hooks/use-copy-to-clipboard.tsx",
+    "packages/ui/src/components/ui/icons/nucleo/shield-check.tsx",
+    "packages/ui/src/components/ui/icons/nucleo/badge-check.tsx",
+    "packages/ui/src/components/ui/icons/nucleo/cloud-upload.tsx",
+    "src/components/ui/input.tsx",
+    "src/components/ui/textarea.tsx",
+    "src/components/ui/form-field.tsx",
+    "src/components/ui/modal.tsx",
+    "src/components/ui/sheet.tsx",
+    "src/components/ui/status-badge.tsx",
+    "src/components/ui/copy-button.tsx",
+    "src/components/ui/confirm-dialog.tsx"
+  ],
+  "importRewrites": [
+    {
+      "file": "src/components/ui/copy-button.tsx",
+      "from": "./hooks",
+      "to": "./hooks/use-copy-to-clipboard",
+      "reason": "./hooks is inflect's app-wide hooks barrel; it re-exports app-only hooks (keyboard shortcuts, undo toasts) that would drag in code outside the package."
+    }
+  ],
+  "messages": {
+    "locales": ["en", "bg"],
+    "keys": ["common.ui", "common.error", "common.skeleton", "common.copy", "common.cancel", "common.close"]
+  }
+}

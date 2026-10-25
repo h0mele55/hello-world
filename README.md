@@ -1,4 +1,31 @@
-# hello-world
+# hello-world → Audit Report Anchoring
+
+A prototype that anchors audit-report PDFs on a public testnet, links each PDF
+to the block that recorded it, points every reissued version to the latest, and
+lets outside parties check a copy in their own browser without uploading it.
+
+**Status:** Phase 0 of 7, the foundation: a Next.js app built on Inflect's UI
+primitives. Nothing touches a chain or a PDF yet. Testnet anchors, once they
+exist, are prototype evidence, not legal evidence.
+
+- Plan, phases and the prompt for each phase: [`docs/ROADMAP.md`](docs/ROADMAP.md)
+- Design decisions: [`docs/adr/`](docs/adr/)
+- Rules for contributors and coding agents: [`CLAUDE.md`](CLAUDE.md)
+
+```bash
+npm ci
+npm run dev        # http://localhost:3000, and /kitchen-sink for the UI kit
+npm test           # unit tests
+npm run build && npm run test:e2e
+```
+
+`vendor/inflect-ui/` is a pinned copy of components from
+[inflect-compliance](https://github.com/rodnapamet/inflect-compliance), licensed
+under BUSL-1.1 (see `vendor/inflect-ui/LICENSE`). Do not edit it; see
+`CLAUDE.md`.
+
+## Where this repo started
+
 My First Git Repository
 This is one of my first plays with git. So far i am a bit lagging in experience but i compensate with drive and zeal to learn.
 I will make it happen. 

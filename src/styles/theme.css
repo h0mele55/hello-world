@@ -1,0 +1,161 @@
+/*
+ * hello-world's palette for the 47 tokens in
+ * vendor/inflect-ui/tokens.contract.css, plus the ones tailwind.config.js maps
+ * to utilities. The contract file loads first and this file overrides every
+ * name in it; tests/unit/theme.test.ts fails if a contract token, a token the
+ * Tailwind config reads, or a token the vendored code reads is missing here in
+ * either theme, and checks the text-on-surface contrast pairs.
+ *
+ * Brand: ledger teal. Light is the default; <html data-theme="dark"> switches.
+ *
+ * Three tokens are box-shadow VALUES, not colours: --btn-still-lift,
+ * --btn-still-press and --ctrl-edge-focus (the vendored Button and Input use
+ * them inside shadow-[…]). The contract file's fallbacks for them are colour
+ * literals, which are invalid as box-shadows, so they must be set here.
+ */
+
+:root,
+[data-theme='light'] {
+  color-scheme: light;
+
+  --bg-page: #f5f7f6;
+  --bg-default: #ffffff;
+  --bg-elevated: #ffffff;
+  --bg-subtle: #eef2f0;
+  --bg-muted: #e3e8e6;
+  --bg-overlay: rgba(8, 20, 17, 0.45);
+  --bg-inverted: #10201c;
+  --bg-success: #e4f4e9;
+  --bg-success-emphasis: #1f8a4c;
+  --bg-warning: #fcf1dc;
+  --bg-warning-emphasis: #b7790e;
+  --bg-error: #fbe9e7;
+  --bg-error-emphasis: #b42d22;
+  --bg-info: #e5effa;
+  --bg-info-emphasis: #2a66ad;
+  --bg-attention: #fdf6d8;
+
+  --border-subtle: #dfe5e2;
+  --border-default: #c4cdc9;
+  --border-emphasis: #8f9c97;
+  --border-strong: #5f6c67;
+  --border-success: #26834a;
+  --border-warning: #a06d0c;
+  --border-error: #b93529;
+  --border-info: #2a68b0;
+
+  --brand-default: #0f766e;
+  --brand-emphasis: #0b5f58;
+  --brand-muted: #117f77;
+  --brand-subtle: #e2f1ef;
+  --brand-secondary-default: #1e3a5f;
+
+  --btn-still-top: rgba(255, 255, 255, 0.3);
+  --btn-still-bot: rgba(0, 0, 0, 0.14);
+  --btn-still-lift: 0 1px 2px rgba(10, 40, 34, 0.14), 0 2px 6px rgba(10, 40, 34, 0.09);
+  --btn-still-press: inset 0 2px 4px rgba(0, 0, 0, 0.22);
+  --btn-still-danger: #a3241b;
+  --btn-still-danger-deep: #831a13;
+  --btn-still-danger-lift: #b92e24;
+
+  --content-default: #1b2622;
+  --content-emphasis: #08110e;
+  --content-muted: #4f5c57;
+  --content-subtle: #5d6a65;
+  --content-inverted: #ffffff;
+  --content-brand: #0b6b63;
+  --content-success: #1a6a39;
+  --content-warning: #774b04;
+  --content-error: #a2261b;
+  --content-info: #1c5896;
+  --content-attention: #6d5300;
+
+  --ctrl-edge-rest: #7b8a84;
+  --ctrl-edge-hover: #56645f;
+  --ctrl-edge-focus: 0 0 0 3px rgba(15, 118, 110, 0.22), 0 1px 2px rgba(16, 40, 34, 0.1);
+
+  --primary: #0f766e;
+  --ring: rgba(15, 118, 110, 0.45);
+  --ring-offset-background: #ffffff;
+  --accent-default: var(--brand-default);
+  --accent-emphasis: var(--brand-emphasis);
+
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  --shadow-sm: 0 1px 2px rgba(16, 40, 34, 0.06);
+  --shadow: 0 4px 12px rgba(16, 40, 34, 0.08);
+  --shadow-lg: 0 8px 24px rgba(16, 40, 34, 0.12);
+}
+
+[data-theme='dark'] {
+  color-scheme: dark;
+
+  --bg-page: #0a110f;
+  --bg-default: #101916;
+  --bg-elevated: #16211d;
+  --bg-subtle: #131d1a;
+  --bg-muted: #1b2723;
+  --bg-overlay: rgba(0, 0, 0, 0.6);
+  --bg-inverted: #e8efec;
+  --bg-success: #0f2919;
+  --bg-success-emphasis: #2f9d5c;
+  --bg-warning: #2c2007;
+  --bg-warning-emphasis: #c98f1f;
+  --bg-error: #311310;
+  --bg-error-emphasis: #d8483b;
+  --bg-info: #0d2135;
+  --bg-info-emphasis: #3d82d1;
+  --bg-attention: #2a2408;
+
+  --border-subtle: #1f2c28;
+  --border-default: #2b3a35;
+  --border-emphasis: #4a5d56;
+  --border-strong: #7f928b;
+  --border-success: #3fae6a;
+  --border-warning: #d29b2b;
+  --border-error: #ee6a5d;
+  --border-info: #5c9ce2;
+
+  --brand-default: #2ec4b3;
+  --brand-emphasis: #1fa999;
+  --brand-muted: #5ad6c7;
+  --brand-subtle: rgba(46, 196, 179, 0.14);
+  --brand-secondary-default: #7fb2e5;
+
+  --btn-still-top: rgba(255, 255, 255, 0.22);
+  --btn-still-bot: rgba(0, 0, 0, 0.3);
+  --btn-still-lift: 0 1px 2px rgba(0, 8, 6, 0.45), 0 2px 8px rgba(0, 8, 6, 0.3);
+  --btn-still-press: inset 0 2px 5px rgba(0, 0, 0, 0.42);
+  --btn-still-danger: #b91c1c;
+  --btn-still-danger-deep: #991b1b;
+  --btn-still-danger-lift: #dc2626;
+
+  --content-default: #dbe5e1;
+  --content-emphasis: #f4f8f6;
+  --content-muted: #a3b2ac;
+  --content-subtle: #8fa09a;
+  --content-inverted: #04110e;
+  --content-brand: #4fd1c1;
+  --content-success: #6fd398;
+  --content-warning: #f0c060;
+  --content-error: #f69287;
+  --content-info: #8ab9ef;
+  --content-attention: #ecd36a;
+
+  --ctrl-edge-rest: #5b6d66;
+  --ctrl-edge-hover: #7f928b;
+  --ctrl-edge-focus: 0 0 0 3px rgba(46, 196, 179, 0.25), 0 1px 2px rgba(0, 0, 0, 0.3);
+
+  --primary: #2ec4b3;
+  --ring: rgba(46, 196, 179, 0.55);
+  --ring-offset-background: #0a110f;
+  --accent-default: var(--brand-default);
+  --accent-emphasis: var(--brand-emphasis);
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
+}

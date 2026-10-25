@@ -69,9 +69,13 @@ const EOF_MARKER = Buffer.from('%%EOF', 'latin1');
 /** How far from the end the last "%%EOF" may sit; writers pad with a little whitespace. */
 const EOF_WINDOW = 1024;
 
-/** The child script lives in the source tree and runs under plain Node. */
+/**
+ * The child script lives in the source tree and runs under plain Node. The
+ * bundler is told to leave the path alone: the script must run as its own
+ * process, not be bundled into the server.
+ */
 export function parserChildPath(): string {
-  return path.join(process.cwd(), 'src', 'lib', 'pdf', 'parse-child.mjs');
+  return path.join(/*turbopackIgnore: true*/ process.cwd(), 'src', 'lib', 'pdf', 'parse-child.mjs');
 }
 
 const FLAG_OF_NAME: Record<string, keyof PdfFlags> = {

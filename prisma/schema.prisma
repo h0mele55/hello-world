@@ -1,0 +1,159 @@
+// The issuer's own records. Nothing here goes on chain; the chain only ever
+// sees the commitments computed from it (CLAUDE.md rule 1). Free text that is
+// confidential (the opinion, the manifest, what the parser extracted) is
+// stored AES-256-GCM encrypted (src/lib/sealed.ts), never in clear.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  PREPARER
+  APPROVER
+}
+
+enum ReportType {
+  STANDALONE
+  CONSOLIDATED
+}
+
+enum OpinionType {
+  UNMODIFIED
+  QUALIFIED
+  ADVERSE
+  DISCLAIMER
+}
+
+enum VersionStatus {
+  DRAFT
+  CONFIRMED
+}
+
+enum ReasonCode {
+  INITIAL
+  CORRECTION
+  SUBSEQUENT_EVENT
+  OTHER
+}
+
+/// The audit firm. One for the prototype (#5); everything hangs off it so a
+/// second firm needs no schema change.
+model IssuerOrg {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  users     User[]
+  clients   Client[]
+}
+
+model User {
+  id           String          @id @default(cuid())
+  orgId        String
+  org          IssuerOrg       @relation(fields: [orgId], references: [id])
+  email        String          @unique
+  name         String
+  passwordHash String
+  role         Role
+  createdAt    DateTime        @default(now())
+  engagements  Engagement[]
+  prepared     ReportVersion[] @relation("preparedBy")
+  confirmed    ReportVersion[] @relation("confirmedBy")
+
+  @@index([orgId])
+}
+
+model Client {
+  id                 String       @id @default(cuid())
+  orgId              String
+  org                IssuerOrg    @relation(fields: [orgId], references: [id])
+  name               String
+  /// Spaces removed and upper-cased, as the family key canonicalises it.
+  registrationNumber String
+  /// ISO 3166-1 alpha-2.
+  country            String
+  createdAt          DateTime     @default(now())
+  engagements        Engagement[]
+
+  @@unique([orgId, country, registrationNumber])
+}
+
+/// A report family: every version of one report (#6).
+model Engagement {
+  id            String          @id @default(cuid())
+  clientId      String
+  client        Client          @relation(fields: [clientId], references: [id])
+  /// The firm's own engagement reference, part of the family key.
+  engagementRef String
+  periodEnd     DateTime        @db.Date
+  reportType    ReportType
+  /// HMAC-SHA256 under ISSUER_FAMILY_SECRET (src/lib/commitments.ts).
+  familyId      String          @unique
+  createdById   String
+  createdBy     User            @relation(fields: [createdById], references: [id])
+  createdAt     DateTime        @default(now())
+  versions      ReportVersion[]
+
+  @@unique([clientId, engagementRef, periodEnd, reportType])
+}
+
+model ReportVersion {
+  id                 String        @id @default(cuid())
+  engagementId       String
+  engagement         Engagement    @relation(fields: [engagementId], references: [id])
+  version            Int
+  reasonCode         ReasonCode
+  status             VersionStatus @default(DRAFT)
+  /// SHA-256 of the exact file; one file is one version, ever.
+  docHash            String        @unique
+  pageCount          Int
+  /// Signed or edit-protected: anchored as is, never rewritten (#74).
+  anchorOnly         Boolean
+  /// Parser flags: signed, javascript, embeddedFiles, xfa, editProtected.
+  flags              Json
+  storedFileId       String        @unique
+  storedFile         StoredFile    @relation(fields: [storedFileId], references: [id])
+  /// Sealed JSON: what the opinion locator found, or why it found nothing.
+  extraction         Bytes
+  // Set together, only when a person confirms (CLAUDE.md rule 6).
+  opinionType        OpinionType?
+  /// Sealed: the normalised opinion text the person confirmed.
+  confirmedOpinion   Bytes?
+  reportDate         DateTime?     @db.Date
+  /// Fresh from the CSPRNG per version; unique, so a reused salt is refused.
+  opinionSalt        Bytes?        @unique
+  opinionCommitment  String?
+  manifestSalt       Bytes?        @unique
+  /// Sealed canonical JSON of manifest v1.
+  manifest           Bytes?
+  manifestHash       String?       @unique
+  preparedById       String
+  preparedBy         User          @relation("preparedBy", fields: [preparedById], references: [id])
+  confirmedById      String?
+  confirmedBy        User?         @relation("confirmedBy", fields: [confirmedById], references: [id])
+  confirmedAt        DateTime?
+  createdAt          DateTime      @default(now())
+
+  @@unique([engagementId, version])
+  @@index([preparedById])
+  @@index([confirmedById])
+}
+
+/// An uploaded PDF, encrypted at rest under FILE_ENCRYPTION_KEY.
+model StoredFile {
+  id         String         @id @default(cuid())
+  /// Relative to FILE_STORAGE_DIR.
+  path       String         @unique
+  iv         Bytes
+  authTag    Bytes
+  keyVersion Int
+  /// SHA-256 of the plaintext, checked again on every read.
+  sha256     String
+  size       Int
+  createdAt  DateTime       @default(now())
+  version    ReportVersion?
+}

@@ -167,7 +167,6 @@ async function extract(bytes, limits) {
   try {
     doc = await pdfjs.getDocument({
       data: bytes,
-      isEvalSupported: false,
       disableFontFace: true,
       useSystemFonts: false,
       enableXfa: false,

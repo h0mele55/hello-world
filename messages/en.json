@@ -4,7 +4,8 @@
     "tagline": "Anchor audit-report PDFs on a public testnet, and let anyone check a copy in their browser.",
     "prototypeNotice": "Prototype. Testnet anchors are not legal evidence.",
     "kitchenSinkLink": "See the UI kit",
-    "roadmapLink": "Read the roadmap"
+    "roadmapLink": "Read the roadmap",
+    "signInLink": "Sign in"
   },
   "preferences": {
     "theme": "Theme",
@@ -55,5 +56,156 @@
     "openSheet": "Open sheet",
     "sheetTitle": "Version history",
     "sheetBody": "Each version names its parent, so every copy resolves to the latest."
+  },
+  "nav": {
+    "signOut": "Sign out",
+    "roles": {
+      "PREPARER": "Preparer",
+      "APPROVER": "Approver"
+    }
+  },
+  "login": {
+    "title": "Sign in",
+    "email": "Email",
+    "password": "Password",
+    "submit": "Sign in",
+    "failed": "The email or password is wrong, or there have been too many attempts. Try again in a few minutes."
+  },
+  "reports": {
+    "title": "Reports",
+    "newEngagement": "New engagement",
+    "empty": {
+      "title": "No engagements yet",
+      "description": "A preparer creates an engagement, then uploads the first version of its report."
+    },
+    "summary": "Registration no. {registrationNumber} · period ending {periodEnd} · {reportType} · engagement {engagementRef}",
+    "noVersions": "No versions uploaded yet.",
+    "versionLabel": "Version {version}",
+    "versions": "Versions",
+    "reportTypes": {
+      "STANDALONE": "Standalone",
+      "CONSOLIDATED": "Consolidated"
+    },
+    "status": {
+      "DRAFT": "Draft: opinion not confirmed",
+      "CONFIRMED": "Opinion confirmed"
+    }
+  },
+  "engagement": {
+    "newTitle": "New engagement",
+    "newIntro": "An engagement is one report and all its versions. Its details form the report's pseudonymous id; only that id, never these details, ever goes on chain.",
+    "clientName": "Client name",
+    "registrationNumber": "Registration number",
+    "registrationNumberHint": "The UIC for a Bulgarian company. Spaces are ignored.",
+    "country": "Country",
+    "countryHint": "Two letters, e.g. BG.",
+    "engagementRef": "Engagement reference",
+    "engagementRefHint": "Your firm's own reference for this engagement.",
+    "periodEnd": "Period end",
+    "reportType": "Report type",
+    "create": "Create engagement"
+  },
+  "upload": {
+    "title": "Upload a version",
+    "file": "Report PDF for version {version}",
+    "fileHint": "At most 25 MB and 500 pages. The file is stored encrypted.",
+    "reason": "Why is the report being reissued?",
+    "reasons": {
+      "CORRECTION": "Correction",
+      "SUBSEQUENT_EVENT": "Subsequent event",
+      "OTHER": "Other"
+    },
+    "submit": "Upload",
+    "draftPending": "A draft version is waiting for its opinion to be confirmed. Confirm or discard it before uploading another."
+  },
+  "errors": {
+    "UNAUTHENTICATED": "Your session has ended. Sign in again.",
+    "FORBIDDEN": "Your role cannot do this.",
+    "CROSS_ORIGIN": "This request did not come from this site.",
+    "NOT_FOUND": "Not found.",
+    "INVALID_INPUT": "Some details are missing or not valid. Check the form.",
+    "TOO_LARGE": "The file is larger than 25 MB.",
+    "UNSUPPORTED_MEDIA_TYPE": "Only PDF files can be uploaded.",
+    "PDF_REFUSED": "This PDF was refused.",
+    "DOC_ALREADY_UPLOADED": "This exact file has already been uploaded.",
+    "ENGAGEMENT_EXISTS": "An engagement with these details already exists.",
+    "DRAFT_PENDING": "A draft version is already waiting for confirmation.",
+    "VERSION_CONFLICT": "Someone uploaded a version at the same time. Reload and try again.",
+    "NOT_DRAFT": "This version is no longer a draft.",
+    "INTERNAL": "Something went wrong. Nothing was changed.",
+    "refusals": {
+      "NOT_A_PDF": "This file is not a PDF.",
+      "TRUNCATED": "This PDF is cut short: it does not end the way a complete PDF does. Upload the complete file.",
+      "TOO_LARGE": "This PDF is larger than 25 MB.",
+      "TOO_MANY_PAGES": "This PDF has more than 500 pages.",
+      "TOO_MUCH_TEXT": "This PDF has more text than an audit report could hold.",
+      "ENCRYPTED": "This PDF needs a password to open. Upload a copy that opens without one.",
+      "UNPARSEABLE": "This PDF could not be read.",
+      "TIMEOUT": "Reading this PDF took longer than 20 seconds, so it was stopped.",
+      "RESOURCE_LIMIT": "Reading this PDF needed more memory than allowed, so it was stopped.",
+      "PARSER_CRASHED": "The PDF reader stopped unexpectedly on this file."
+    }
+  },
+  "viewer": {
+    "failed": "The PDF could not be shown.",
+    "previous": "Previous page",
+    "next": "Next page",
+    "page": "Page {page} of {pageCount}",
+    "loading": "Loading…",
+    "canvasLabel": "Page {page} of the report"
+  },
+  "opinion": {
+    "types": {
+      "UNMODIFIED": "Unmodified",
+      "QUALIFIED": "Qualified",
+      "ADVERSE": "Adverse",
+      "DISCLAIMER": "Disclaimer of opinion"
+    },
+    "notFound": {
+      "NO_TEXT_LAYER": "This PDF has no text layer (it may be a scan), so the opinion could not be read from it.",
+      "NO_OPINION_HEADING": "No opinion heading was found.",
+      "MULTIPLE_OPINION_HEADINGS": "More than one opinion heading was found, for example in a bilingual report.",
+      "NO_BASIS_HEADING": "The opinion heading was found, but not the \"Basis for…\" heading after it.",
+      "HEADING_TYPE_MISMATCH": "The opinion heading and the \"Basis for…\" heading name different opinion types.",
+      "EMPTY_OPINION": "The opinion section is empty.",
+      "OPINION_TOO_LONG": "The text found is too long to be only the opinion."
+    }
+  },
+  "confirm": {
+    "foundHint": "Found under the heading \"{heading}\" on pages {from}–{to}. Check it against the report.",
+    "typeItIn": "Type or paste the opinion paragraph from the report.",
+    "type": "Opinion type",
+    "text": "Opinion text",
+    "textDescription": "Exactly as it appears in the report. Spacing and line breaks do not matter.",
+    "reportDate": "Date of the auditor's report",
+    "reportDateHint": "The date the report was signed.",
+    "confirmButton": "Confirm opinion",
+    "discardButton": "Discard draft",
+    "dialogTitle": "Commit to this opinion?",
+    "dialogBody": "The type and text become part of this version's commitment, which will be anchored. They cannot be changed afterwards; a correction is a new version.",
+    "dialogConfirm": "Confirm opinion",
+    "discardTitle": "Discard this draft?",
+    "discardBody": "The uploaded file and everything extracted from it are deleted. Nothing has been anchored.",
+    "discardConfirm": "Discard draft"
+  },
+  "version": {
+    "anchorOnly": "Anchor only",
+    "anchorOnlySigned": "This PDF carries a digital signature, so it will be anchored as it is and never rewritten.",
+    "anchorOnlyProtected": "This PDF is protected against editing, so it will be anchored as it is and never rewritten.",
+    "flags": {
+      "javascript": "This PDF contains JavaScript.",
+      "embeddedFiles": "This PDF contains embedded files.",
+      "xfa": "This PDF contains an XFA form."
+    },
+    "confirmTitle": "Confirm the opinion",
+    "awaitingPreparer": "Waiting for a preparer to confirm the opinion.",
+    "confirmedTitle": "Confirmed opinion",
+    "opinionType": "Opinion type",
+    "reportDate": "Report date",
+    "commitments": "Commitments",
+    "commitmentsHint": "Only these values will go on chain. Nothing has been anchored yet.",
+    "docHash": "Document hash",
+    "opinionCommitment": "Opinion commitment",
+    "manifestHash": "Manifest hash"
   }
 }

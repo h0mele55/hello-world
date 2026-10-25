@@ -11,6 +11,9 @@ export default defineConfig({
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
     trace: 'retain-on-failure',
+    // A Chromium already on the machine, when its build differs from the
+    // one this Playwright version downloads.
+    ...(process.env.PW_CHROMIUM_PATH ? { launchOptions: { executablePath: process.env.PW_CHROMIUM_PATH } } : {}),
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {

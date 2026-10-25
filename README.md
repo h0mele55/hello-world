@@ -4,10 +4,12 @@ A prototype that anchors audit-report PDFs on a public testnet, links each PDF
 to the block that recorded it, points every reissued version to the latest, and
 lets outside parties check a copy in their own browser without uploading it.
 
-**Status:** Phases 0 and 1 of 7 are done: a Next.js app built on Inflect's UI
-primitives, and the registry contract with its chain adapter, tested on a local
-Anvil chain. It is not deployed to Sepolia yet, and nothing touches a PDF yet.
-Testnet anchors, once they exist, are prototype evidence, not legal evidence.
+**Status:** Phases 0–2 of 7 are done. A preparer signs in, uploads an audit
+report, confirms its opinion beside the rendered PDF, and gets the commitments
+that will be anchored. The registry contract and chain adapter are built and
+tested on a local Anvil chain, but not deployed to Sepolia yet, and the app
+does not anchor anything yet (Phase 3). Testnet anchors, once they exist, are
+prototype evidence, not legal evidence.
 
 - Plan, phases and the prompt for each phase: [`docs/ROADMAP.md`](docs/ROADMAP.md)
 - Design decisions: [`docs/adr/`](docs/adr/)
@@ -15,6 +17,10 @@ Testnet anchors, once they exist, are prototype evidence, not legal evidence.
 
 ```bash
 npm ci
+cp .env.example .env               # fill in the values it describes
+set -a; . ./.env; set +a           # Prisma 7 reads the environment, not .env
+docker compose up -d               # Postgres, with POSTGRES_PASSWORD from .env
+npx prisma migrate deploy && npm run db:seed
 npm run dev        # http://localhost:3000, and /kitchen-sink for the UI kit
 npm test           # unit tests
 npm run build && npm run test:e2e

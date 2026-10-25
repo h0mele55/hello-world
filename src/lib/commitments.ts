@@ -46,7 +46,7 @@ export function docHashOf(fileBytes: Uint8Array): Hex {
 }
 
 /** A fresh salt from the operating system's CSPRNG. Never reuse one across versions. */
-export function newSalt(): Uint8Array {
+export function newSalt(): Uint8Array<ArrayBuffer> {
   return new Uint8Array(randomBytes(SALT_BYTES));
 }
 

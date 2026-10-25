@@ -197,6 +197,9 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
     expect(pdf.toString('latin1')).toContain('https://github.com/h0mele55/hello-world/ns/audit-anchor/1.0/');
     copy = pdf;
+    // The Bitcoin timestamp's card (#66): the OpenTimestamps job does not run here, so nothing is submitted yet.
+    await expect(approving.getByTestId('ots-panel')).toHaveAttribute('data-status', 'NONE');
+    await expect(approving.getByTestId('download-ots')).toHaveCount(0);
   });
 
   await test.step('the engagement’s timeline shows where the version landed', async () => {

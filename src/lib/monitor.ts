@@ -6,7 +6,8 @@ import { AUDIT_CHECK_STALE_MS, WATCH_STALE_MS, WORKER_STALE_MS } from '@/lib/sta
  * writes that failed or wait too long for finality, an issuer key held by an
  * unsettled write, a worker that stopped, a low balance, endpoints that
  * disagree, a broken or stopped audit check, a stopped registry watch or a
- * write it found, and notices that could not be sent. `npm run monitor`
+ * write it found, notices that could not be sent, and OpenTimestamps proofs
+ * that were not made, wait too long for Bitcoin or turned out wrong (#66). `npm run monitor`
  * (scripts/monitor.ts) prints each and exits 1, for the scheduler to alert.
  *
  * Alerts carry ids, codes, counts and times only: never a client's name, a
@@ -24,7 +25,10 @@ export type AlertCode =
   | 'AUDIT_CHECK_STALE'
   | 'WATCH_STALE'
   | 'UNJOURNALED_OPEN'
-  | 'NOTICE_FAILED';
+  | 'NOTICE_FAILED'
+  | 'OTS_NOT_SUBMITTED'
+  | 'OTS_PENDING_LONG'
+  | 'OTS_BROKEN';
 
 export interface Alert {
   code: AlertCode;
@@ -42,6 +46,10 @@ export const MONITOR_THRESHOLDS = {
   workerStaleMs: WORKER_STALE_MS,
   auditCheckStaleMs: AUDIT_CHECK_STALE_MS,
   watchStaleMs: WATCH_STALE_MS,
+  /** A version final this long ago (counted from its approval) should have its OpenTimestamps proof: the job submits every pass. */
+  otsSubmitMs: 24 * 60 * 60 * 1000,
+  /** Calendars put their batches on Bitcoin within hours; two days is a calendar or an explorer that stopped. */
+  otsPendingMs: 48 * 60 * 60 * 1000,
 };
 
 const iso = (d: Date | null | undefined) => d?.toISOString() ?? null;
@@ -109,6 +117,27 @@ export async function collectAlerts(prisma: PrismaClient, now = new Date(), t = 
     // The mailer records each notice it gave up on in the audit log, with its time.
     const notices = await prisma.auditEvent.count({ where: { orgId, action: 'notification.failed', at: { gte: since(t.recentMs).toISOString() } } });
     if (notices) alerts.push({ code: 'NOTICE_FAILED', orgId, detail: { count: notices, runbook: 'docs/runbooks/mail.md' } });
+
+    // The OpenTimestamps job (#66).
+    const ofFirm = { reportVersion: { engagement: { client: { orgId } } } };
+    const unsubmitted = await prisma.reportVersion.findMany({
+      where: { engagement: { client: { orgId } }, status: { in: ['ANCHORED', 'COMPLETE', 'REVOKED'] }, manifestHash: { not: null }, otsProof: null, approvedAt: { lt: since(t.otsSubmitMs) } },
+      select: { approvedAt: true },
+      orderBy: { approvedAt: 'asc' },
+    });
+    if (unsubmitted.length) alerts.push({ code: 'OTS_NOT_SUBMITTED', orgId, detail: { count: unsubmitted.length, oldestApprovedAt: iso(unsubmitted[0].approvedAt), runbook: 'docs/runbooks/opentimestamps.md' } });
+    const waitingOts = await prisma.otsProof.findMany({ where: { ...ofFirm, status: 'PENDING', submittedAt: { lt: since(t.otsPendingMs) } }, select: { submittedAt: true, lastError: true }, orderBy: { submittedAt: 'asc' } });
+    if (waitingOts.length) {
+      alerts.push({
+        code: 'OTS_PENDING_LONG',
+        orgId,
+        detail: { count: waitingOts.length, oldestSubmittedAt: iso(waitingOts[0].submittedAt), reasons: [...new Set(waitingOts.map((p) => p.lastError).filter(Boolean))], runbook: 'docs/runbooks/opentimestamps.md' },
+      });
+    }
+    const brokenOts = await prisma.otsProof.findMany({ where: { ...ofFirm, status: 'BROKEN', checkedAt: { gte: since(t.recentMs) } }, select: { id: true, reportVersionId: true, lastError: true, checkedAt: true }, take: 50 });
+    for (const p of brokenOts) {
+      alerts.push({ code: 'OTS_BROKEN', orgId, detail: { otsProofId: p.id, reportVersionId: p.reportVersionId, reason: p.lastError, at: iso(p.checkedAt), runbook: 'docs/runbooks/opentimestamps.md' } });
+    }
   }
   return alerts;
 }

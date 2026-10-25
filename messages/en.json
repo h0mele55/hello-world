@@ -346,6 +346,27 @@
       "REVOKE": "Revocation"
     }
   },
+  "ots": {
+    "title": "Bitcoin timestamp",
+    "what": "A second, independent timestamp of the manifest hash, on Bitcoin through OpenTimestamps. It does not rest on this firm's registry or on the chain the report is anchored on.",
+    "none": "Not submitted yet. The OpenTimestamps job submits each version once its anchor is final.",
+    "pending": "Waiting for Bitcoin: submitted {when} (UTC) to {count} calendars. Bitcoin usually confirms within a few hours.",
+    "complete": "In Bitcoin block {height}, mined about {when} (UTC). The manifest hash existed by then.",
+    "broken": "This proof does not lead to the block it names ({reason}). It shows no time, and a person must look at it (docs/runbooks/opentimestamps.md).",
+    "block": "Bitcoin block",
+    "download": "Download the .ots proof",
+    "status": {
+      "PENDING": "Waiting for Bitcoin",
+      "COMPLETE": "On Bitcoin",
+      "BROKEN": "Broken"
+    },
+    "reasons": {
+      "CALENDARS_UNREACHABLE": "The calendars could not be reached on the last try.",
+      "BITCOIN_UNREADABLE": "The block explorers could not be read on the last try.",
+      "BITCOIN_DISAGREE": "The two block explorers gave different blocks on the last try.",
+      "BITCOIN_BAD_HEADER": "The block explorers gave a block without Bitcoin's proof of work."
+    }
+  },
   "settings": {
     "title": "Settings",
     "modeTitle": "Chain write mode",

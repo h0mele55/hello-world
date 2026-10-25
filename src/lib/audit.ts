@@ -59,6 +59,10 @@ export type AuditAction =
   | 'notification.queued'
   | 'notification.sent'
   | 'notification.failed'
+  // The OpenTimestamps job (#66).
+  | 'ots.submitted'
+  | 'ots.complete'
+  | 'ots.broken'
   // An audit-log head's journal row (#94): the anchor.* steps under their own prefix, and the check that queued it.
   | 'audit_head.queued'
   | 'audit_head.simulated'

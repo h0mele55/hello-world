@@ -857,8 +857,8 @@ revocation shows as Revoked in the verifier.
 - [x] Multi-factor sign-in is required for APPROVER and ADMIN
 - [x] Sign-in and mutations are rate-limited, with lockout after repeated failures
 - [ ] Notification emails carry no PDF, no opinion text and no figures
-- [ ] The nightly audit-chain check alerts on any break
-- [ ] Database and encrypted file store are backed up, and one restore has been tested
+- [x] The nightly audit-chain check alerts on any break
+- [x] Database and encrypted file store are backed up, and one restore has been tested
 
 **As built: Phase 5 ships in three pull requests.** 5a is roles, two-step
 sign-in and the rate limits (#52, #58). Departures from the prompt below, and
@@ -942,6 +942,29 @@ decisions it left open:
 - **The seed can turn the admin's two-step sign-in on too**
   (`SEED_ADMIN_TOTP_SECRET`, development and CI only), so the end-to-end test
   runs the whole flow with two people.
+
+5d is the audit-log viewer, the nightly check and backups (#57, #59):
+
+- **`/audit-log`** lists the firm's events newest first, 50 a page, and
+  re-derives the whole chain on every view: intact with its head hash, or
+  broken at a named event.
+- **The nightly check does more than re-derive.** A chain whose tail was cut
+  off, or whose history was rewritten and re-hashed by someone who controls
+  the database, still verifies on its own. So each run is recorded and held
+  to the last intact one: the chain may only have grown, and the event that
+  was its head must still be there with the same hash (`TRUNCATED`,
+  `REWRITTEN`). It exits 1 with an error line on a break, and a broken check
+  puts a banner on every console page. A check older than 36 hours shows as
+  stopped, so a check that silently stopped running is not mistaken for a
+  clean one. Scheduling is the host's (cron); `docs/operations.md` gives the
+  lines.
+- **Backups**: a dump of the database and a copy of the store as it is on
+  disk, with checksums. The encryption key is never in a backup. A restore
+  goes only into an empty database and directory, and a separate check
+  confirms the copy: migrations, every audit chain against the source, and
+  every stored file decrypted against its SHA-256. CI runs the round trip,
+  and the two refusals, after the end-to-end tests: that is the tested
+  restore.
 
 **Prompt**
 

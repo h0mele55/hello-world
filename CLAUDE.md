@@ -24,8 +24,9 @@ Sepolia run waits on #4. Phase 4 (the shared verification code, `/verify`,
 CSP and rate limits) is done on Anvil, which completes the prototype; its
 Sepolia run waits on #4 too. Phase 5, the issuer console, is under way: roles,
 two-step sign-in and rate limits (5a), the client list, version timeline
-and dashboard (5b), and revocation (5c) are done; recipients, the audit-log
-viewer and backups (5d) are next.
+and dashboard (5b), revocation (5c), and the audit-log viewer, nightly
+chain check and backups (5d) are done; recipients and the two-person exit gate
+(5e) are next. `docs/operations.md` says what runs besides the app.
 
 ## Rules every phase keeps
 
@@ -80,6 +81,9 @@ npm run db:seed                # the firm and its users, from SEED_* in the envi
 npm run test:db                # intake and approval use cases against TEST_DATABASE_URL (name must end in _test)
 npm run test:anchoring         # the worker against TEST_DATABASE_URL and a throwaway Anvil node
 npm run worker                 # the anchoring worker; add `-- --once` for one pass
+npm run audit:check            # the nightly audit-chain check; exit 1 on a break
+scripts/backup.sh              # database dump + encrypted store copy (docs/operations.md)
+npm run test:backup            # back up, restore into <db>_restore_test, check the copy
 
 # The verifier
 npm run build:verifier         # dist/verifier.html and dist/verify-report.mjs, for VERIFY_NETWORK (or ANCHOR_NETWORK)
@@ -330,6 +334,22 @@ to one inflect-compliance commit.
   `/r/<familyId>/latest` response is sent, and never throws. No family id, no
   address, no time of day is stored. `/verify` runs in the visitor's browser
   and is not counted.
+
+## The audit log and backups
+
+- **`/audit-log` re-derives the chain on every view** and shows the last
+  nightly check. `npm run audit:check` (`src/lib/audit-check.ts`) records
+  every run in `AuditChainCheck` and holds the chain to the last intact check:
+  it may only have grown, and its old head must still be there. That catches
+  a tail cut off (`TRUNCATED`) and history rewritten and re-hashed
+  (`REWRITTEN`), which the chain alone would pass. A broken check puts a
+  banner on every console page and stays reported; a check older than 36
+  hours shows as stopped.
+- **Backups** are `scripts/backup.sh` (`pg_dump` custom format, the store as
+  it is on disk, `SHA256SUMS`); `FILE_ENCRYPTION_KEY` is never in a backup.
+  `scripts/restore.sh` restores only into an empty database and an empty
+  directory, and `scripts/verify-restore.ts` checks the copy. CI runs the
+  round trip after the end-to-end tests (`npm run test:backup`).
 
 ## Conventions
 

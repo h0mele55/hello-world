@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { getTranslations } from 'next-intl/server';
 import { StatusBadge } from '@inflect/ui/components/ui/status-badge';
 import { getIssuerKeyStatus, resolveAnchorTarget } from '@/lib/anchoring/queries';
+import { latestNightlyCheck } from '@/lib/console/audit-log';
 import { requireUser } from '@/lib/page-auth';
 import { MFA_ROLES } from '@/lib/roles';
 import { PreferencesBar } from '@/components/preferences-bar';
@@ -14,7 +15,7 @@ export const dynamic = 'force-dynamic';
 export default async function ConsoleLayout({ children }: { children: ReactNode }) {
   const user = await requireUser();
   const t = await getTranslations();
-  const key = await getIssuerKeyStatus(resolveAnchorTarget().target);
+  const [key, nightly] = await Promise.all([getIssuerKeyStatus(resolveAnchorTarget().target), latestNightlyCheck(user)]);
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-section px-default py-page">
       <header className="flex flex-col gap-default">
@@ -41,6 +42,9 @@ export default async function ConsoleLayout({ children }: { children: ReactNode 
           <NavLink href="/reports" testId="nav-reports" except={['/reports/settings']}>
             {t('nav.reports')}
           </NavLink>
+          <NavLink href="/audit-log" testId="nav-audit-log">
+            {t('nav.auditLog')}
+          </NavLink>
           <NavLink href="/reports/settings" testId="nav-settings">
             {t('nav.settings')}
           </NavLink>
@@ -52,6 +56,14 @@ export default async function ConsoleLayout({ children }: { children: ReactNode 
         </nav>
       </header>
       <StatusBadge variant="warning">{t('app.prototypeNotice')}</StatusBadge>
+      {nightly.state === 'BROKEN' ? (
+        <p role="alert" className="text-content-error" data-testid="audit-broken">
+          {t('nav.auditBroken', { seq: nightly.seq })}{' '}
+          <Link href="/audit-log" className="underline">
+            {t('nav.auditLog')}
+          </Link>
+        </p>
+      ) : null}
       {key?.low ? (
         <p role="alert" className="text-content-error" data-testid="low-balance">
           {t('nav.lowBalance')}

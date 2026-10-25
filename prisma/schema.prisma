@@ -104,14 +104,15 @@ enum ReasonCode {
 /// The audit firm. One for the prototype (#5); everything hangs off it so a
 /// second firm needs no schema change.
 model IssuerOrg {
-  id             String         @id @default(cuid())
+  id             String            @id @default(cuid())
   name           String
-  chainWriteMode ChainWriteMode @default(DISABLED)
-  createdAt      DateTime       @default(now())
+  chainWriteMode ChainWriteMode    @default(DISABLED)
+  createdAt      DateTime          @default(now())
   users          User[]
   clients        Client[]
   auditEvents    AuditEvent[]
   lookupCounts   LookupCount[]
+  auditChecks    AuditChainCheck[]
 }
 
 model User {
@@ -390,4 +391,24 @@ model Revocation {
   @@index([requestedById])
   @@index([approvedById])
   @@index([closedById])
+}
+
+/// What the nightly check found when it re-derived a firm's audit chain
+/// (scripts/check-audit-chain.ts). Each check also compares the chain with the
+/// last intact check, so history that was cut short or rewritten, and then
+/// re-hashed so the chain verifies, is still caught.
+model AuditChainCheck {
+  id        String    @id @default(cuid())
+  orgId     String
+  org       IssuerOrg @relation(fields: [orgId], references: [id])
+  checkedAt DateTime
+  ok        Boolean
+  /// Events in the chain, and its last hash, when intact.
+  count     Int
+  head      String?
+  /// The first event that did not verify, and why.
+  brokenSeq Int?
+  reason    String?
+
+  @@index([orgId, checkedAt])
 }

@@ -161,6 +161,8 @@ jobs:
           grep -q '"chainHeads":1' "$RUNNER_TEMP/check-2.log"
       - name: The registry watch finds every write the tests made in the journal (#93)
         run: npm run watch:registry
+      - name: The database says what the chain says, version by version (#111)
+        run: npm run reconcile:chain
       - name: Nothing needs a person after the tests (#68)
         run: npm run monitor
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

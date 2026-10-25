@@ -31,6 +31,7 @@
     "watch:registry": "tsx scripts/watch-registry.ts",
     "mailer": "tsx scripts/mailer.ts",
     "ots": "tsx scripts/ots.ts",
+    "reconcile:chain": "tsx scripts/reconcile-chain.ts",
     "test:backup": "scripts/test-backup-restore.sh",
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",

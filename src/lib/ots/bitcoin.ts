@@ -108,8 +108,7 @@ export function esploraSource(baseUrl: string, fetchImpl: typeof fetch = fetch):
   };
 }
 
-/** The two explorers' public origins by default, run by different operators. */
-export const BITCOIN_EXPLORERS = ['https://blockstream.info/api', 'https://mempool.space/api'] as const;
+export { BITCOIN_EXPLORERS } from './explorers';
 
 /** A cache of agreed headers by height, for one pass: calendars put many proofs in one block. */
 export type HeaderCache = Map<number, Promise<BlockHeader>>;

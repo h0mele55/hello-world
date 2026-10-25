@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { appCsp, verifierCsp } from '@/lib/csp';
+import { EXPLORER_ORIGINS } from '@/lib/ots/explorers';
 import { clientAddressOf, createLimiter, LOOKUP_PER_ADDRESS, LOOKUP_TOTAL, takeLookup } from '@/lib/rate-limit';
 
 describe('the lookup rate limit', () => {
@@ -41,6 +42,9 @@ describe("the verifier's Content Security Policy", () => {
 
   it('connects only to its own origin and the two RPC endpoints, and frames nothing', () => {
     expect(directive('connect-src')).toBe("connect-src 'self' https://rpc.one.example https://rpc.two.example");
+    // The Bitcoin explorers (#66) are added by name, and only when the proxy passes them.
+    const withExplorers = verifierCsp({ nonce: 'x', rpcOrigins: ['https://rpc.one.example'], explorerOrigins: EXPLORER_ORIGINS });
+    expect(withExplorers.split('; ').find((d) => d.startsWith('connect-src '))).toBe("connect-src 'self' https://rpc.one.example https://blockstream.info https://mempool.space");
     expect(directive('worker-src')).toBe("worker-src 'self' blob:");
     expect(directive('object-src')).toBe("object-src 'none'");
     expect(directive('frame-ancestors')).toBe("frame-ancestors 'none'");

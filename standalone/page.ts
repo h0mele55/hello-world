@@ -1,6 +1,6 @@
 import * as pdfjs from 'pdfjs-dist';
 import { explorerAddressUrl, explorerBlockUrl, explorerTxUrl, networkNameOf } from '@/lib/chain/explorer';
-import { openRegistryView, readDocument, verifyFile, type PdfjsLike, type RecordSummary, type Verdict } from '@/lib/verify-core';
+import { bitcoinTimestampFor, defaultExplorers, issuerProofFetcher, openRegistryView, readDocument, verifyFile, type BitcoinTimestamp, type PdfjsLike, type RecordSummary, type Verdict } from '@/lib/verify-core';
 import type { StandaloneSetup } from './config';
 
 /**
@@ -9,7 +9,9 @@ import type { StandaloneSetup } from './config';
  * it reads the registry through two public endpoints. Everything it needs is
  * inlined at build time: verify-core, pdf.js and its worker, the registry
  * settings and the English and Bulgarian wording. Its CSP allows connections
- * to the two endpoints only. It writes text, never markup, into the page.
+ * to the two endpoints only, and, when it was built with the issuer's origin,
+ * to that origin's /ots route and the two Bitcoin explorers, for a matched
+ * report's Bitcoin timestamp (#66). It writes text, never markup, into the page.
  */
 
 type Tree = { [key: string]: string | Tree };
@@ -24,7 +26,8 @@ const setup = __VERIFIER_SETUP__;
 pdfjs.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([__PDF_WORKER__], { type: 'text/javascript' }));
 
 let locale: Locale = navigator.language.toLowerCase().startsWith('bg') ? 'bg' : 'en';
-let last: { name: string; verdict: Shown } | null = null;
+type Checked = { name: string; verdict: Shown; stamp?: BitcoinTimestamp | 'CHECKING' };
+let last: Checked | null = null;
 
 function t(key: string, values: Record<string, string | number> = {}): string {
   let node: string | Tree | undefined = __MESSAGES__[locale];
@@ -128,7 +131,29 @@ function renderVerdict() {
     if ('latest' in verdict) add(t('details.latest'), verdict.latest, 'record-latest');
     box.append(el('p', t('details.asOf', { block: verdict.asOfBlock }), { class: 'muted' }));
   }
+  if (last.stamp) box.append(stampSection(last.stamp));
   out.append(box);
+}
+
+const STAMP_TONE: Record<BitcoinTimestamp['status'], string> = { CONFIRMED: 'ok', PENDING: 'muted', NONE: 'muted', UNAVAILABLE: 'muted', INVALID: 'bad' };
+
+/** The matched report's Bitcoin timestamp, beside the verdict and never part of it. */
+function stampSection(stamp: BitcoinTimestamp | 'CHECKING'): HTMLElement {
+  const section = el('section', undefined, { class: 'record', 'data-testid': 'bitcoin-timestamp', 'data-status': stamp === 'CHECKING' ? 'CHECKING' : stamp.status });
+  section.append(el('h3', t('bitcoin.title')));
+  if (stamp === 'CHECKING') {
+    section.append(el('p', t('bitcoin.checking'), { class: 'muted' }));
+  } else if (stamp.status === 'CONFIRMED') {
+    section.append(el('p', t('bitcoin.CONFIRMED', { when: utcDate(stamp.time), height: stamp.height }), { class: 'ok', 'data-testid': 'bitcoin-timestamp-body' }));
+    const block = el('p', `${t('bitcoin.block')}: `);
+    block.append(el('code', stamp.blockHash), document.createTextNode(' '), link(`https://mempool.space/block/${stamp.blockHash.slice(2)}`, t('bitcoin.block')));
+    section.append(block);
+  } else {
+    const text = stamp.status === 'UNAVAILABLE' || stamp.status === 'INVALID' ? t(`bitcoin.${stamp.status}`, { reason: t(`bitcoin.reasons.${stamp.reason}`) }) : t(`bitcoin.${stamp.status}`);
+    section.append(el('p', text, { class: STAMP_TONE[stamp.status], 'data-testid': 'bitcoin-timestamp-body' }));
+  }
+  section.append(el('p', t('bitcoin.apart'), { class: 'muted' }));
+  return section;
 }
 
 function renderStatic() {
@@ -164,8 +189,18 @@ async function check(file: File) {
     verdict = { kind: 'CANNOT_VERIFY', reason: 'UNEXPECTED' };
   }
   $('status').textContent = '';
-  last = { name: file.name, verdict };
+  const current: Checked = { name: file.name, verdict, stamp: 'matched' in verdict && setup.appUrl ? 'CHECKING' : undefined };
+  last = current;
   renderVerdict();
+  if ('matched' in verdict && setup.appUrl) {
+    const stamp = await bitcoinTimestampFor(verdict.matched.manifestHash, { fetchProof: issuerProofFetcher(setup.appUrl), explorers: defaultExplorers() }).catch(
+      (): BitcoinTimestamp => ({ status: 'UNAVAILABLE', reason: 'ISSUER_UNREACHABLE' }),
+    );
+    // A file dropped meanwhile has replaced this one.
+    if (last !== current) return;
+    current.stamp = stamp;
+    renderVerdict();
+  }
 }
 
 $<HTMLInputElement>('file').addEventListener('change', (event) => {

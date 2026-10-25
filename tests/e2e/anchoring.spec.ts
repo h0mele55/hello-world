@@ -3,6 +3,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import pg from 'pg';
 import { expect, test, type Browser, type Page } from '@playwright/test';
+import { hexToBytes } from 'viem';
+import { serializeProof } from '../../src/lib/ots/format';
 import { admin, approver, createEngagement, preparer, runTag, signIn, uniquePdf, uploadAndConfirm, watchCsp, type TestUser } from './helpers';
 
 /**
@@ -230,12 +232,27 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     await expect(visitor.getByTestId('verdict')).toHaveAttribute('data-kind', 'AUTHENTIC_LATEST');
     await expect(visitor.getByTestId('record-matched')).toContainText('Distribution copy');
     await expect(visitor.getByTestId('record-matched-issuer')).toHaveText(issuerName);
+    // The Bitcoin timestamp (#66), asked of the issuer by the manifest hash: none yet, as the OpenTimestamps job does not run here.
+    await expect(visitor.getByTestId('bitcoin-timestamp')).toHaveAttribute('data-status', 'NONE');
 
+    // Had the issuer submitted it, the page would say it waits for Bitcoin: a pending proof of the very manifest it asked for.
+    const asked: string[] = [];
+    await visitor.route('**/ots/*', (route) => {
+      const manifestHash = new URL(route.request().url()).pathname.split('/').pop() as `0x${string}`;
+      asked.push(manifestHash);
+      const pending = serializeProof({ digest: hexToBytes(manifestHash), timestamp: { attestations: [{ kind: 'pending', uri: 'https://alice.btc.calendar.opentimestamps.org' }], ops: [] } });
+      return route.fulfill({ body: Buffer.from(pending), headers: { 'content-type': 'application/octet-stream' } });
+    });
     await visitor.getByTestId('verify-another').click();
     await expect(visitor.getByTestId('verdict')).toHaveCount(0);
     await verify(uniquePdf('en-unmodified.pdf', tag));
     await expect(visitor.getByTestId('verdict')).toHaveAttribute('data-kind', 'AUTHENTIC_LATEST');
     await expect(visitor.getByTestId('record-matched')).toContainText('Original');
+    await expect(visitor.getByTestId('bitcoin-timestamp')).toHaveAttribute('data-status', 'PENDING');
+    // The original and its copy share one manifest; only its hash was asked for, never the file's.
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatch(/^0x[0-9a-f]{64}$/);
+    await visitor.unrouteAll({ behavior: 'wait' });
 
     // Bytes appended after the end of the file: not the registered file, though its opinion reads the same.
     await visitor.getByTestId('verify-another').click();
@@ -243,6 +260,8 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     await verify(Buffer.concat([copy, Buffer.from('\n%appended\n')]));
     await expect(visitor.getByTestId('verdict')).toHaveAttribute('data-kind', 'ALTERED_OPINION_APPEARS_UNCHANGED');
     await expect(visitor.getByTestId('verdict-body')).toContainText('This is not the file the issuer anchored');
+    // A file that is not the registered one gets no timestamp: the manifest's time says nothing about it.
+    await expect(visitor.getByTestId('bitcoin-timestamp')).toHaveCount(0);
 
     await visitor.getByTestId('latest-link').click();
     await expect(visitor.getByTestId('latest-page')).toHaveAttribute('data-status', 'FOUND');

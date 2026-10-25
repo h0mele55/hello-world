@@ -6,8 +6,8 @@ import { runTag, uniquePdf } from './helpers';
  * page must decide in the browser (rule 5): with the app's API answering 503
  * it still reaches a verdict, and no request it makes carries the file.
  *
- * Needs Anvil at LOCAL_RPC_URL with the registry deployed and
- * ANCHOR_NETWORK=local, as the anchoring test does. See the CI job.
+ * Needs Anvil at LOCAL_RPC_URL with the registry deployed in a finalized
+ * block and ANCHOR_NETWORK=local, as the anchoring test does. See the CI job.
  */
 
 test.skip(!process.env.ANCHOR_NETWORK && !process.env.CI, 'needs a local chain (ANCHOR_NETWORK=local; see CI)');

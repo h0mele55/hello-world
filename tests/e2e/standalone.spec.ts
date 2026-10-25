@@ -8,7 +8,8 @@ import { runTag, uniquePdf } from './helpers';
  * dist/verifier.html, opened straight from disk with no server at all
  * (rule 5): it reaches a verdict through the two RPC endpoints baked into it,
  * declares a CSP that allows nothing else, and sends no part of the file.
- * CI builds it (`npm run build:verifier`) against the local Anvil registry.
+ * CI builds it (`npm run build:verifier`) against the local Anvil registry,
+ * whose deployment it finalizes first: an unfinalized registry is refused.
  */
 
 const HTML = path.join(process.cwd(), 'dist', 'verifier.html');

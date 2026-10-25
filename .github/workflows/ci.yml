@@ -84,6 +84,9 @@ jobs:
           cast rpc --rpc-url http://127.0.0.1:8545 anvil_setBalance "$issuer_address" 0x8AC7230489E80000 > /dev/null
           DEPLOYER_PRIVATE_KEY="$deployer" ISSUER_ADDRESS="$issuer_address" ISSUER_ORG_NAME="$SEED_ORG_NAME" \
             LOCAL_RPC_URL=http://127.0.0.1:8545 npx tsx scripts/deploy-registry.ts local
+          # Finalize the deployment, as a real one long is: the verifier reads the
+          # registry's code at the finalized block and refuses a chain without it.
+          cast rpc --rpc-url http://127.0.0.1:8545 anvil_mine 0x3 > /dev/null
           {
             echo "ANCHOR_NETWORK=local"
             echo "LOCAL_RPC_URL=http://127.0.0.1:8545"

@@ -16,4 +16,4 @@ export const POST = handler<{ params: Promise<{ engagementId: string }> }>(async
   if (!bytes) return errorResponse('TOO_LARGE');
   const uploaded = await uploadVersion(user, { engagementId, reasonCode: reasonCode.data, bytes });
   return NextResponse.json({ id: uploaded.id, version: uploaded.version, anchorOnly: uploaded.anchorOnly, flags: uploaded.flags, found: uploaded.extraction.status === 'FOUND' }, { status: 201 });
-});
+}, { may: 'prepare' });

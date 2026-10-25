@@ -172,7 +172,7 @@ beforeEach(async () => {
   const org = await prisma.issuerOrg.create({ data: { name: 'Example Audit OOD' } });
   const make = async (email: string, role: 'PREPARER' | 'APPROVER'): Promise<SessionUser> => {
     const user = await prisma.user.create({ data: { orgId: org.id, email, name: email, role, passwordHash: 'x' } });
-    return { id: user.id, email, name: email, role, orgId: org.id };
+    return { id: user.id, email, name: email, role, orgId: org.id, mfa: role === 'APPROVER' ? 'VERIFIED' : 'NOT_REQUIRED' };
   };
   preparer = await make('preparer@example.test', 'PREPARER');
   approver = await make('approver@example.test', 'APPROVER');

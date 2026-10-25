@@ -15,4 +15,4 @@ export const POST = handler<{ params: Promise<{ versionId: string }> }>(async (r
   // approveVersion checks the role first, then refuses a missing target by name.
   const result = await approveVersion(user, (await ctx.params).versionId, resolveAnchorTarget().target);
   return NextResponse.json(result);
-});
+}, { may: 'approve' });

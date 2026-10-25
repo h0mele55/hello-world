@@ -46,3 +46,9 @@ export function clientAddressOf(headers: Headers, env: Readonly<Record<string, s
   if (env.TRUST_PROXY_HEADERS !== '1') return null;
   return headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null;
 }
+
+/** Writes through the API: 60 a minute per signed-in user (#58). */
+export const MUTATIONS_PER_USER = 60;
+const mutations = createLimiter({ limit: MUTATIONS_PER_USER, windowMs: 60_000 });
+
+export const takeMutation = (userId: string, now = Date.now()) => mutations.take(userId, now);

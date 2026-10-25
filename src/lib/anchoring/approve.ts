@@ -4,6 +4,7 @@ import { Prisma } from '@/generated/prisma/client';
 import type { ChainWriteMode } from '@/generated/prisma/enums';
 import { appendAuditEvent } from '@/lib/audit';
 import { db } from '@/lib/db';
+import { requireRole } from '@/lib/roles';
 import { AnchoringError } from './errors';
 import { MODE_LADDER, rungOf } from './ladder';
 import type { AnchorTarget } from './target';
@@ -15,7 +16,7 @@ import type { AnchorTarget } from './target';
  */
 
 function requireApprover(user: SessionUser) {
-  if (user.role !== 'APPROVER') throw new AnchoringError('FORBIDDEN', 'only an approver may do this');
+  requireRole(user, 'approve');
 }
 
 /**
@@ -38,7 +39,7 @@ export async function getChainWriteMode(user: SessionUser): Promise<ChainWriteMo
 }
 
 export async function setChainWriteMode(user: SessionUser, mode: ChainWriteMode) {
-  requireApprover(user);
+  requireRole(user, 'setChainMode');
   if (!MODE_LADDER.includes(mode)) throw new AnchoringError('MODE_SKIPS_RUNG');
   return db().$transaction(async (tx) => {
     const from = await lockOrg(tx, user.orgId);

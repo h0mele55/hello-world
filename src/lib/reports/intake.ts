@@ -10,6 +10,7 @@ import { buildManifest, canonicalManifest, manifestHashOf } from '@/lib/manifest
 import { locateOpinion, type LocateResult } from '@/lib/opinion/locate';
 import { dropRunningLines, normaliseText } from '@/lib/opinion/normalise';
 import { parsePdf, type PdfFlags, type PdfRefusal } from '@/lib/pdf/parse';
+import { requireRole } from '@/lib/roles';
 import { open, openJson, seal, sealJson, type Bytes } from '@/lib/sealed';
 import { serverEnv } from '@/lib/server-env';
 import { discardStoredFile, readStoredFile, storeFile } from '@/lib/storage';
@@ -23,7 +24,6 @@ import { discardStoredFile, readStoredFile, storeFile } from '@/lib/storage';
  */
 
 export type IntakeErrorCode =
-  | 'FORBIDDEN'
   | 'NOT_FOUND'
   | 'INVALID_INPUT'
   | 'PDF_REFUSED'
@@ -44,7 +44,7 @@ export class IntakeError extends Error {
 }
 
 function requirePreparer(user: SessionUser) {
-  if (user.role !== 'PREPARER') throw new IntakeError('FORBIDDEN', 'only a preparer may do this');
+  requireRole(user, 'prepare');
 }
 
 const isUniqueViolation = (error: unknown) => error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';

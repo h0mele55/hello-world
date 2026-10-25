@@ -10,6 +10,7 @@ import { MODE_LADDER } from '@/lib/anchoring/ladder';
 import { getIssuerKeyStatus, resolveAnchorTarget } from '@/lib/anchoring/queries';
 import { explorerAddressUrl } from '@/lib/chain/explorer';
 import { requireUser } from '@/lib/page-auth';
+import { mayDo } from '@/lib/roles';
 
 function Address({ label, value, href }: { label: string; value: string; href: string | null }) {
   return (
@@ -55,7 +56,7 @@ export default async function SettingsPage() {
             {t(`modes.${mode}`)}
           </StatusBadge>
         </p>
-        {user.role === 'APPROVER' ? <ChainModeForm current={mode} /> : <p className="text-content-muted">{t('approverOnly')}</p>}
+        {mayDo(user.role, 'setChainMode') ? <ChainModeForm current={mode} /> : <p className="text-content-muted">{t('approverOnly')}</p>}
       </Card>
       <Card className="flex flex-col gap-default">
         <Heading level={2}>{t('chainTitle')}</Heading>

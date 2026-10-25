@@ -1,9 +1,39 @@
+import { randomInt } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
-import { expect, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page } from '@playwright/test';
+import { generate } from 'otplib';
 
-export const preparer = { email: process.env.SEED_PREPARER_EMAIL ?? '', password: process.env.SEED_PREPARER_PASSWORD ?? '' };
-export const approver = { email: process.env.SEED_APPROVER_EMAIL ?? '', password: process.env.SEED_APPROVER_PASSWORD ?? '' };
+export interface TestUser {
+  email: string;
+  password: string;
+  /** The base32 TOTP secret of an account with two-step sign-in on. */
+  totp?: string;
+}
+
+export const preparer: TestUser = { email: process.env.SEED_PREPARER_EMAIL ?? '', password: process.env.SEED_PREPARER_PASSWORD ?? '' };
+/** Seeded with two-step sign-in on (SEED_APPROVER_TOTP_SECRET), as every approver must have it. */
+export const approver: TestUser = { email: process.env.SEED_APPROVER_EMAIL ?? '', password: process.env.SEED_APPROVER_PASSWORD ?? '', totp: process.env.SEED_APPROVER_TOTP_SECRET };
+
+const PERIOD = 30;
+const lastStep = new Map<string, number>();
+
+/**
+ * A code for a time step this process has not used for the secret yet: the
+ * app accepts each step once. The next step is still within the app's
+ * tolerance; beyond that, wait for the clock.
+ */
+export async function nextCode(secret: string): Promise<string> {
+  for (;;) {
+    const step = Math.floor(Date.now() / 1000 / PERIOD);
+    const use = Math.max(step, (lastStep.get(secret) ?? 0) + 1);
+    if (use <= step + 1) {
+      lastStep.set(secret, use);
+      return generate({ secret, epoch: use * PERIOD });
+    }
+    await new Promise((resolve) => setTimeout(resolve, ((step + 1) * PERIOD + 1) * 1000 - Date.now()));
+  }
+}
 
 /**
  * Digits unique to one test run, so engagements and file hashes collide
@@ -17,11 +47,40 @@ export function uniquePdf(name: string, tag: string): Buffer {
   return Buffer.concat([bytes, Buffer.from(`%e2e ${tag}\n`)]);
 }
 
-export async function signIn(page: Page, user: { email: string; password: string }) {
+const addressed = new WeakSet<BrowserContext>();
+
+/**
+ * Gives the browser context a client address of its own on requests to the
+ * app, as a trusted proxy would set it (the test server trusts
+ * X-Forwarded-For): sign-in is limited per address, and parallel tests are
+ * different people, not one office signing in a dozen times a minute.
+ */
+export async function fromOwnAddress(page: Page) {
+  const context = page.context();
+  if (addressed.has(context)) return;
+  addressed.add(context);
+  const address = `198.18.${randomInt(256)}.${randomInt(1, 255)}`;
+  const app = new URL(test.info().project.use.baseURL ?? 'http://127.0.0.1:3100').origin;
+  await context.route(
+    (url) => url.origin === app,
+    (route) => route.continue({ headers: { ...route.request().headers(), 'x-forwarded-for': address } }),
+  );
+}
+
+export async function signIn(page: Page, user: TestUser) {
+  await fromOwnAddress(page);
   await page.goto('/login');
   await page.getByRole('textbox', { name: 'Email' }).fill(user.email);
   await page.getByRole('textbox', { name: 'Password' }).fill(user.password);
   await page.getByRole('button', { name: 'Sign in' }).click();
+  if (user.totp) {
+    // Another test process may have just spent this period's code for the same account: then try the next one.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await page.getByTestId('login-code').fill(await nextCode(user.totp));
+      await page.getByRole('button', { name: 'Sign in' }).click();
+      if (await page.waitForURL(/\/reports$/, { timeout: 5_000 }).then(() => true, () => false)) return;
+    }
+  }
   await expect(page).toHaveURL(/\/reports$/);
 }
 

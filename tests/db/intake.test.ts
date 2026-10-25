@@ -29,6 +29,10 @@ const ENGAGEMENT: NewEngagement = {
   reportType: 'STANDALONE',
 };
 
+async function expectForbidden(promise: Promise<unknown>) {
+  await expect(promise).rejects.toMatchObject({ name: 'AccessError', code: 'FORBIDDEN' });
+}
+
 async function expectIntakeError(promise: Promise<unknown>, code: string, detail?: string) {
   const error = await promise.then(
     () => null,
@@ -46,7 +50,7 @@ beforeEach(async () => {
   const other = await prisma.issuerOrg.create({ data: { name: 'Another Firm' } });
   const make = async (orgId: string, email: string, role: 'PREPARER' | 'APPROVER'): Promise<SessionUser> => {
     const user = await prisma.user.create({ data: { orgId, email, name: email, role, passwordHash: 'x' } });
-    return { id: user.id, email, name: email, role, orgId };
+    return { id: user.id, email, name: email, role, orgId, mfa: role === 'APPROVER' ? 'VERIFIED' : 'NOT_REQUIRED' };
   };
   preparer = await make(org.id, 'preparer@example.test', 'PREPARER');
   approver = await make(org.id, 'approver@example.test', 'APPROVER');
@@ -66,7 +70,7 @@ describe('engagements', () => {
   });
 
   it('refuses an approver, a duplicate, and input that cannot be canonical', async () => {
-    await expectIntakeError(createEngagement(approver, ENGAGEMENT), 'FORBIDDEN');
+    await expectForbidden(createEngagement(approver, ENGAGEMENT));
     await createEngagement(preparer, ENGAGEMENT);
     await expectIntakeError(createEngagement(preparer, { ...ENGAGEMENT, registrationNumber: '123456789' }), 'ENGAGEMENT_EXISTS');
     await expectIntakeError(createEngagement(preparer, { ...ENGAGEMENT, periodEnd: '2025-02-30' }), 'INVALID_INPUT');
@@ -139,7 +143,7 @@ describe('upload', () => {
   it('refuses an approver and anyone outside the firm', async () => {
     const engagement = await createEngagement(preparer, ENGAGEMENT);
     const bytes = fixture('en-unmodified.pdf');
-    await expectIntakeError(uploadVersion(approver, { engagementId: engagement.id, reasonCode: 'INITIAL', bytes }), 'FORBIDDEN');
+    await expectForbidden(uploadVersion(approver, { engagementId: engagement.id, reasonCode: 'INITIAL', bytes }));
     await expectIntakeError(uploadVersion(outsider, { engagementId: engagement.id, reasonCode: 'INITIAL', bytes }), 'NOT_FOUND');
     const uploaded = await uploadVersion(preparer, { engagementId: engagement.id, reasonCode: 'INITIAL', bytes });
     await expectIntakeError(getVersion(outsider, uploaded.id), 'NOT_FOUND');
@@ -181,7 +185,7 @@ describe('confirmation (rule 6)', () => {
   it('runs once, only for a preparer, and never for an empty text or a bad date', async () => {
     const uploaded = await draft();
     const confirmation = { versionId: uploaded.id, opinionType: 'QUALIFIED' as const, text: 'Some opinion.', reportDate: '2026-03-20' };
-    await expectIntakeError(confirmOpinion(approver, confirmation), 'FORBIDDEN');
+    await expectForbidden(confirmOpinion(approver, confirmation));
     await expectIntakeError(confirmOpinion(preparer, { ...confirmation, text: '  \n ' }), 'INVALID_INPUT');
     await expectIntakeError(confirmOpinion(preparer, { ...confirmation, reportDate: '20.03.2026' }), 'INVALID_INPUT');
     expect((await prisma.reportVersion.findUniqueOrThrow({ where: { id: uploaded.id } })).status).toBe('DRAFT');

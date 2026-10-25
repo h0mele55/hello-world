@@ -1,6 +1,5 @@
 /** Named refusals of the anchoring use cases (CLAUDE.md rule 7). */
 export type AnchoringErrorCode =
-  | 'FORBIDDEN'
   | 'NOT_FOUND'
   | 'NOT_CONFIRMED'
   | 'FOUR_EYES'

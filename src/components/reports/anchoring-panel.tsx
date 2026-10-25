@@ -11,6 +11,7 @@ import { getVersionAnchoring, resolveAnchorTarget } from '@/lib/anchoring/querie
 import { explorerTxUrl } from '@/lib/chain/explorer';
 import { ApproveAnchorButton } from './approve-anchor-button';
 import { RetryCopyButton } from './retry-copy-button';
+import { mayDo } from '@/lib/roles';
 
 const WRITE_VARIANT = {
   INTENT: 'neutral',
@@ -88,7 +89,7 @@ export async function AnchoringPanel({ user, versionId, status }: { user: Sessio
           {anchoring.anchorOnly ? t('certificatePending') : copyNeedsRetry ? t('copyFailed') : t('copyPending')}
         </p>
       ) : null}
-      {copyNeedsRetry && user.role === 'APPROVER' ? <RetryCopyButton versionId={versionId} /> : null}
+      {copyNeedsRetry && mayDo(user.role, 'approve') ? <RetryCopyButton versionId={versionId} /> : null}
 
       {(status === 'ANCHORED' || status === 'COMPLETE') && anchoring.recordId ? (
         <div className="flex flex-col gap-default" data-testid="anchored">
@@ -102,7 +103,7 @@ export async function AnchoringPanel({ user, versionId, status }: { user: Sessio
         </div>
       ) : null}
 
-      {status === 'CONFIRMED' && user.role === 'APPROVER' ? (
+      {status === 'CONFIRMED' && mayDo(user.role, 'approve') ? (
         !target ? (
           <p className="text-content-warning" data-testid="anchoring-not-configured">
             {t('notConfigured')} <span className="text-content-muted">({problem})</span>
@@ -121,7 +122,7 @@ export async function AnchoringPanel({ user, versionId, status }: { user: Sessio
           </>
         )
       ) : null}
-      {status === 'CONFIRMED' && user.role === 'PREPARER' ? <p className="text-content-muted">{t('waitingApprover')}</p> : null}
+      {status === 'CONFIRMED' && mayDo(user.role, 'prepare') ? <p className="text-content-muted">{t('waitingApprover')}</p> : null}
       {status === 'APPROVED' ? (
         <p className="text-content-muted" data-testid="anchor-queued">
           {t('queued', { approver: anchoring.approvedBy ?? '' })}

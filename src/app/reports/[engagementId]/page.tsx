@@ -7,6 +7,7 @@ import { requireUser } from '@/lib/page-auth';
 import { UploadForm } from '@/components/reports/upload-form';
 import { VersionStatusBadge } from '@/components/reports/version-status-badge';
 import { getEngagement } from '@/lib/reports/queries';
+import { mayDo } from '@/lib/roles';
 
 export default async function EngagementPage({ params }: { params: Promise<{ engagementId: string }> }) {
   const user = await requireUser();
@@ -39,7 +40,7 @@ export default async function EngagementPage({ params }: { params: Promise<{ eng
           ))}
         </ul>
       </Card>
-      {user.role === 'PREPARER' ? (
+      {mayDo(user.role, 'prepare') ? (
         <Card className="flex flex-col gap-default">
           <Heading level={2}>{tUpload('title')}</Heading>
           {hasDraft ? <p className="text-content-muted">{tUpload('draftPending')}</p> : <UploadForm engagementId={engagement.id} nextVersion={nextVersion} />}

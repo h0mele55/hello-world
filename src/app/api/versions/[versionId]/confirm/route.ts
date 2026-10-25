@@ -17,4 +17,4 @@ export const POST = handler<{ params: Promise<{ versionId: string }> }>(async (r
   const { opinionType, text, reportDate } = body.data;
   const result = await confirmOpinion(user, { versionId: (await ctx.params).versionId, opinionType, text, reportDate });
   return NextResponse.json(result);
-});
+}, { may: 'prepare' });

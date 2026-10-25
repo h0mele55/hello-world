@@ -12,9 +12,13 @@ datasource db {
   provider = "postgresql"
 }
 
+/// Who may do what is one table in src/lib/roles.ts. APPROVER and ADMIN sign
+/// in with a second factor.
 enum Role {
+  ADMIN
   PREPARER
   APPROVER
+  VIEWER
 }
 
 enum ReportType {
@@ -99,7 +103,30 @@ model User {
   confirmed    ReportVersion[] @relation("confirmedBy")
   approved     ReportVersion[] @relation("approvedBy")
 
+  /// The TOTP secret, sealed (context `User:<id>:totpSecret`); null until set up.
+  totpSecret        Bytes?
+  /// When the user confirmed their first code: the second factor is on from then.
+  totpEnabledAt     DateTime?
+  /// The last time step accepted, so no code is accepted twice.
+  totpLastStep      Int?
+  /// The sealed secret of a setup in progress (context `User:<id>:totpPendingSecret`).
+  totpPendingSecret Bytes?
+  recoveryCodes     RecoveryCode[]
+
   @@index([orgId])
+}
+
+/// One-time codes for a lost authenticator. Only SHA-256 of each code is
+/// stored; the codes are shown once, when the second factor is set up.
+model RecoveryCode {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String    @unique
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
 }
 
 model Client {

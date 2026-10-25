@@ -4,6 +4,7 @@ import { getTranslations } from 'next-intl/server';
 import { StatusBadge } from '@inflect/ui/components/ui/status-badge';
 import { getIssuerKeyStatus, resolveAnchorTarget } from '@/lib/anchoring/queries';
 import { requireUser } from '@/lib/page-auth';
+import { MFA_ROLES } from '@/lib/roles';
 import { PreferencesBar } from '@/components/preferences-bar';
 import { SignOutButton } from '@/components/sign-out-button';
 
@@ -23,6 +24,11 @@ export default async function ReportsLayout({ children }: { children: ReactNode 
           <Link href="/reports/settings" className="text-content-muted hover:underline" data-testid="nav-settings">
             {t('nav.settings')}
           </Link>
+          {MFA_ROLES.includes(user.role) ? (
+            <Link href="/account/mfa" className="text-content-muted hover:underline" data-testid="nav-mfa">
+              {t('nav.twoStep')}
+            </Link>
+          ) : null}
           <span className="text-content-muted" data-testid="signed-in-as">
             {user.email}
           </span>

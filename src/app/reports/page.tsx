@@ -7,13 +7,14 @@ import { Heading } from '@inflect/ui/components/ui/typography';
 import { requireUser } from '@/lib/page-auth';
 import { VersionStatusBadge } from '@/components/reports/version-status-badge';
 import { listEngagements } from '@/lib/reports/queries';
+import { mayDo } from '@/lib/roles';
 
 export default async function ReportsPage() {
   const user = await requireUser();
   const t = await getTranslations('reports');
   const engagements = await listEngagements(user);
   const newButton =
-    user.role === 'PREPARER' ? (
+    mayDo(user.role, 'prepare') ? (
       <Link href="/reports/new" className={buttonVariants({ variant: 'primary' })} data-testid="new-engagement">
         {t('newEngagement')}
       </Link>

@@ -39,7 +39,14 @@ export const PDF_REFUSALS = [
 export type PdfRefusal = (typeof PDF_REFUSALS)[number];
 
 const Line = z.strictObject({ text: z.string(), x: z.number(), y: z.number(), size: z.number() });
-const Flags = z.strictObject({ signed: z.boolean(), javascript: z.boolean(), embeddedFiles: z.boolean(), xfa: z.boolean() });
+const Flags = z.strictObject({
+  signed: z.boolean(),
+  javascript: z.boolean(),
+  embeddedFiles: z.boolean(),
+  xfa: z.boolean(),
+  /** Encrypted with an owner password only: it opens freely but restricts editing (#74). */
+  editProtected: z.boolean(),
+});
 const ParsedPdfSchema = z.strictObject({
   pageCount: z.int().min(1),
   pages: z.array(z.strictObject({ lines: z.array(Line) })),
@@ -74,6 +81,7 @@ const FLAG_OF_NAME: Record<string, keyof PdfFlags> = {
   EmbeddedFile: 'embeddedFiles',
   EmbeddedFiles: 'embeddedFiles',
   XFA: 'xfa',
+  Encrypt: 'editProtected',
 };
 
 /**
@@ -84,7 +92,7 @@ const FLAG_OF_NAME: Record<string, keyof PdfFlags> = {
  * state: a file of millions of distinct names costs time, not memory.
  */
 export function scanRawFlags(bytes: Uint8Array): PdfFlags {
-  const flags: PdfFlags = { signed: false, javascript: false, embeddedFiles: false, xfa: false };
+  const flags: PdfFlags = { signed: false, javascript: false, embeddedFiles: false, xfa: false, editProtected: false };
   const text = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('latin1');
   // Only names short enough to be one of ours, made of letters and escapes.
   for (const match of text.matchAll(/\/((?:[A-Za-z]|#[0-9A-Fa-f]{2}){2,40})(?![^\s/<>[\]()%{}])/g)) {
@@ -109,12 +117,9 @@ export async function parsePdf(bytes: Uint8Array, overrides: Partial<PdfLimits> 
   const answer = await runChild(bytes, limits);
   if (!answer.ok) return answer;
   const raw = scanRawFlags(bytes);
-  const flags: PdfFlags = {
-    signed: answer.pdf.flags.signed || raw.signed,
-    javascript: answer.pdf.flags.javascript || raw.javascript,
-    embeddedFiles: answer.pdf.flags.embeddedFiles || raw.embeddedFiles,
-    xfa: answer.pdf.flags.xfa || raw.xfa,
-  };
+  const flags = Object.fromEntries(
+    (Object.keys(raw) as (keyof PdfFlags)[]).map((name) => [name, answer.pdf.flags[name] || raw[name]]),
+  ) as PdfFlags;
   return { ok: true, pdf: { ...answer.pdf, flags } };
 }
 

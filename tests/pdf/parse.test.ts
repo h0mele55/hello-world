@@ -55,12 +55,17 @@ describe('parsePdf', () => {
     expect(await parsePdf(bytes)).toEqual({ ok: false, reason: 'TOO_MANY_PAGES' });
   });
 
-  it('refuses an encrypted file, with or without a password to open it', async () => {
-    const draw = (doc: PDFKit.PDFDocument) => doc.text('Opinion');
-    const userPassword = await pdfkit({ userPassword: 'secret', ownerPassword: 'owner' }, draw);
-    const ownerOnly = await pdfkit({ ownerPassword: 'owner', permissions: { modifying: false } }, draw);
+  it('refuses a file that needs a password to open', async () => {
+    const userPassword = await pdfkit({ userPassword: 'secret', ownerPassword: 'owner' }, (doc) => doc.text('Opinion'));
     expect(await parsePdf(userPassword)).toEqual({ ok: false, reason: 'ENCRYPTED' });
-    expect(await parsePdf(ownerOnly)).toEqual({ ok: false, reason: 'ENCRYPTED' });
+  });
+
+  it('reads an edit-protected file and flags it, so it can be anchored without stamping (#74)', async () => {
+    const ownerOnly = await pdfkit({ ownerPassword: 'owner', permissions: { modifying: false } }, (doc) => doc.text('Opinion'));
+    const result = await parsePdf(ownerOnly);
+    if (!result.ok) throw new Error(result.reason);
+    expect(result.pdf.flags.editProtected).toBe(true);
+    expect(result.pdf.pages[0].lines[0].text).toBe('Opinion');
   });
 
   it('flags JavaScript and embedded files', async () => {

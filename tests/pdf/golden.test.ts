@@ -51,7 +51,7 @@ describe('golden hashes for the synthetic corpus', () => {
 
       const parsed = await parsePdf(bytes);
       if (!parsed.ok) throw new Error(`refused: ${parsed.reason}`);
-      expect(parsed.pdf.flags.signed).toBe(report.render?.signed === true);
+      expect(parsed.pdf.flags).toEqual({ signed: report.render?.signed === true, javascript: false, embeddedFiles: false, xfa: false, editProtected: false });
 
       const located = locateOpinion(linesOf(parsed.pdf));
       if ('notFound' in report.expect) {

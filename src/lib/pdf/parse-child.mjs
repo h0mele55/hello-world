@@ -75,7 +75,6 @@ async function extract(bytes, limits) {
   }
 
   const { info, metadata } = await doc.getMetadata();
-  if (info?.EncryptFilterName) return { ok: false, reason: 'ENCRYPTED' };
   const pageCount = doc.numPages;
   if (!Number.isInteger(pageCount) || pageCount < 1) return { ok: false, reason: 'UNPARSEABLE', detail: 'no pages' };
   if (pageCount > limits.maxPages) return { ok: false, reason: 'TOO_MANY_PAGES' };
@@ -99,6 +98,9 @@ async function extract(bytes, limits) {
     javascript: Boolean(jsActions && Object.keys(jsActions).length > 0),
     embeddedFiles: Boolean(attachments && Object.keys(attachments).length > 0),
     xfa: Boolean(info?.IsXFAPresent),
+    // Opened without a password, yet encrypted: an owner password that only
+    // restricts editing. Accepted anchor-only (#74).
+    editProtected: Boolean(info?.EncryptFilterName),
   };
 
   const xmp = metadata && typeof metadata.getRaw === 'function' ? metadata.getRaw() : null;

@@ -343,8 +343,10 @@ Postgres, sign-in, upload with encrypted storage and the confirmation screen
 - **A file without `%%EOF` in its last kilobyte is refused as `TRUNCATED`.**
   pdfjs recovers what it can from a cut-off file, which would hand back part
   of a report as if it were whole.
-- **Encrypted means any encryption**, including an owner password that only
-  restricts editing. #74 asks whether to accept those anchor-only.
+- **`ENCRYPTED` means a password is needed to open the file.** A file with
+  only an owner password, which opens freely but restricts editing, is read
+  and flagged `editProtected`; it is anchored without stamping, like a signed
+  one (owner decision 2026-10-25, #74). Phase 2b sets `anchorOnly` for it.
 - **The family id preimage carries `v: 1`**, so a later key layout cannot
   collide with this one. The key is `registrationNumber` (spaces removed,
   upper-cased), `periodEnd`, `reportType` (`STANDALONE` or `CONSOLIDATED`)

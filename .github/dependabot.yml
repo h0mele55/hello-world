@@ -5,6 +5,12 @@ updates:
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    ignore:
+      # TypeScript 7 cannot land yet: typescript-eslint, which eslint-config-next
+      # pulls in, refuses it on purpose (#80). Lift this once both support it,
+      # and check the vendored tree still re-derives from upstream.
+      - dependency-name: typescript
+        update-types: ['version-update:semver-major']
   - package-ecosystem: github-actions
     directory: /
     schedule:

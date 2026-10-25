@@ -483,9 +483,9 @@ to the true state.
 - [x] Idempotent: the same file twice returns the existing record and sends no transaction (database unique key plus `recordOfDoc` check)
 - [x] One writer per issuer key under an advisory lock; a stuck transaction is replaced at the same nonce with a higher fee, never a new nonce
 - [x] INDETERMINATE is never resent automatically; it settles from chain state
-- [ ] The stamped PDF is re-parsed and re-hashed before its anchor, and its XMP block and transaction must equal the final record (3b)
+- [x] The stamped PDF is re-parsed and re-hashed before its anchor, and its XMP block and transaction must equal the final record
 - [x] The testnet signing key lives in env on the server only and never reaches the browser
-- [ ] A hash-chained internal audit log covers upload, confirm, approve, anchor, stamp and revoke (3a covers all but stamp and revoke, which arrive with 3b and Phase 5)
+- [ ] A hash-chained internal audit log covers upload, confirm, approve, anchor, stamp and revoke (all but revoke, which arrives with the revocation flow in Phase 5, #55)
 - [x] An alert fires when the issuer balance drops below 0.02 Sepolia ETH
 
 **As built: Phase 3 ships in two pull requests.** 3a is approval, the write
@@ -575,6 +575,47 @@ Departures from the prompt below, and decisions it left open:
   balance, a second worker locked out, and the worker script itself. The
   end-to-end test drives the UI through a dry run and a live anchor to FINAL
   on Anvil.
+
+3b, stamping and the certificate (#38, #39):
+
+- **The stamp is an incremental update.** `@cantoo/pdf-lib` appends a new
+  catalog, Info dictionary and XMP stream after the original's `%%EOF`, so
+  the original file is byte for byte the copy's prefix: its pages are
+  untouched by construction, not by assertion. The XMP description sits in
+  the namespace `https://github.com/h0mele55/hello-world/ns/audit-anchor/1.0/`
+  beside any XMP the document already had; the Info keys mirror it
+  (`AuditAnchorRecordId`, …). Fields: `stamp` (version 1), `chainId`,
+  `contract`, `recordId`, `txHash`, `blockNumber`, `familyId`, `version`,
+  `verifyUrl`, `opinionType`, `opinionSalt`, `norm`. No dates.
+- **Stamping is deterministic**, so a retry produces the same copy: the
+  registry allows one copy per original (`CopyExists`).
+- **The copy is checked before it is stored or sent**: the decrypted original
+  must hash to the anchored `docHash`; the original's record must be on chain,
+  final, unrevoked and in the recorded block; the copy must begin with the
+  original, re-parse in the isolated parser to the same pages, text and flags,
+  and carry the expected stamp in both its XMP and its Info. Any failure is a
+  named `STAMP_…` reason; the version stays ANCHORED and an approver can retry.
+- **ANCHOR_COPY is queued in the transaction that makes the original FINAL**,
+  and handled by the same journal and worker as the original: idempotent by
+  `recordOfDoc`, a FINAL copy record must match family, version, commitments,
+  parent and block. The version is COMPLETE, and the copy downloadable, only
+  once the copy's block is finalized. A database CHECK holds that COMPLETE
+  carries its proof.
+- **Anchor-only versions get a one-page certificate** in English and
+  Bulgarian (DejaVu Sans embedded for Cyrillic): document hash, record,
+  family, network, contract, transaction, block, explorer link, and a QR code
+  to the verifier, with the testnet disclaimer. It is not anchored: it points
+  at the record, which vouches for the report. Of the 24 public reports in the
+  corpus, 10 are signed or edit-protected and take this path; the other 14
+  all stamp and pass the check.
+- **The worker needs the file key** (`FILE_ENCRYPTION_KEY`, its version and
+  `FILE_STORAGE_DIR`, the same values as the app's) and `APP_PUBLIC_URL`,
+  which stamps and certificates point at. It still holds no other app
+  secret: the encrypted file store is a factory (`src/lib/file-store.ts`)
+  the app and the worker each configure.
+- **Found on the way**: pdf.js 6 returns custom Info keys as a `Map`, which
+  the parser's string filter silently dropped; it reads them now.
+
 
 **Prompt**
 

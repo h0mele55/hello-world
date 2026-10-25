@@ -145,6 +145,9 @@
     "ALREADY_QUEUED": "An anchor for this version is already queued.",
     "MODE_UNCHANGED": "The write mode is already set to that.",
     "MODE_SKIPS_RUNG": "The write mode widens one step at a time: Disabled, then Dry run, then Live.",
+    "NOT_ANCHORED": "This version's original is not anchored yet.",
+    "ANCHOR_ONLY": "This version is signed or edit-protected, so it has no stamped copy.",
+    "NOT_COMPLETE": "This version is not complete yet: its anchor is not final.",
     "INTERNAL": "Something went wrong. Nothing was changed.",
     "refusals": {
       "NOT_A_PDF": "This file is not a PDF.",
@@ -280,7 +283,32 @@
       "RPC_ERROR": "The node answered with an unexpected error. The outcome is being read from the chain; nothing is resent.",
       "RECORD_MISMATCH": "The record on chain does not match what was sent. A person must look at this.",
       "CANNOT_REPLACE": "The pending transaction could not be replaced.",
-      "NotIssuer": "The issuer key is not registered with the registry."
+      "NotIssuer": "The issuer key is not registered with the registry.",
+      "STAMP_CHECK": "The stamped copy did not pass its check against the original and the final record, so nothing was stored or sent.",
+      "ANCHOR_ONLY": "This version is signed or edit-protected, so it is never stamped.",
+      "VERSION_NOT_ANCHORED": "The original is not anchored.",
+      "COPY_NEEDS_LIVE": "A distribution copy is anchored only in Live mode.",
+      "CopyExists": "The original already has a distribution copy on chain, made from another file.",
+      "RecordRevoked": "The original record has been revoked.",
+      "KIND_UNSUPPORTED": "The worker does not send this kind of write."
+    },
+    "completeCopy": "Complete: the stamped distribution copy is anchored too. Hand recipients this copy; its metadata names its own record.",
+    "completeCertificate": "Complete. This report is signed or protected against editing, so it was anchored as issued. Hand recipients the report as issued together with its verification certificate.",
+    "downloadCopy": "Download the anchored copy",
+    "downloadCertificate": "Download the certificate",
+    "copyRecordId": "Copy record id",
+    "copyTxHash": "Copy transaction",
+    "copyPending": "The original is anchored. Its distribution copy is being stamped, checked and anchored.",
+    "copyFailed": "The original is anchored, but its distribution copy was not. See the reason below.",
+    "certificatePending": "Anchored as issued. The verification certificate is being prepared.",
+    "retryCopy": "Retry the distribution copy",
+    "retryTitle": "Retry the distribution copy?",
+    "retryBody": "The worker stamps the original again (or reuses a copy already checked) and anchors it from the issuer key. The version's approval covers its copy.",
+    "retryConfirm": "Retry",
+    "kinds": {
+      "ANCHOR": "Original",
+      "ANCHOR_COPY": "Distribution copy",
+      "REVOKE": "Revocation"
     }
   },
   "settings": {

@@ -9,7 +9,10 @@ export type AnchoringErrorCode =
   | 'PREDECESSOR_NOT_ANCHORED'
   | 'ALREADY_QUEUED'
   | 'MODE_UNCHANGED'
-  | 'MODE_SKIPS_RUNG';
+  | 'MODE_SKIPS_RUNG'
+  | 'NOT_ANCHORED'
+  | 'ANCHOR_ONLY'
+  | 'NOT_COMPLETE';
 
 export class AnchoringError extends Error {
   constructor(

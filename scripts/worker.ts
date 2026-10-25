@@ -11,17 +11,23 @@
  *   ISSUER_PRIVATE_KEY  the issuer key. Read here and nowhere else: the web app never holds it.
  *   ISSUER_ADDRESS      optional; when set, must be the key's address (it is what the web app journals)
  *   SEPOLIA_RPC_URL / LOCAL_RPC_URL
+ *   FILE_ENCRYPTION_KEY, FILE_ENCRYPTION_KEY_VERSION, FILE_STORAGE_DIR
+ *                       the same values as the app's: the worker reads originals and stores copies
+ *   APP_PUBLIC_URL      the app's public origin; stamps and certificates point at <origin>/verify
+ *   DEPLOYMENT_FILE     optional; a deployment record other than deployments/<network>.json
  *
  * Any number of workers may run: an advisory lock lets one work a given
  * issuer key at a time.
  */
+import path from 'node:path';
 import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 import { createPublicClient, getAddress, http, isHex, type PublicClient } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { PrismaClient } from '../src/generated/prisma/client';
 import { runWorkerPass } from '../src/lib/anchoring/worker';
-import { isNetworkName, loadDeployment, NETWORKS, rpcUrlFor } from '../src/lib/chain/networks';
+import { createFileStore } from '../src/lib/file-store';
+import { isNetworkName, loadDeployment, loadDeploymentFile, NETWORKS, rpcUrlFor } from '../src/lib/chain/networks';
 
 function fail(message: string): never {
   console.error(JSON.stringify({ level: 'error', message: `worker refused to start: ${message}` }));
@@ -44,7 +50,17 @@ async function main() {
   const declared = process.env.ISSUER_ADDRESS;
   if (declared && getAddress(declared) !== account.address) fail('ISSUER_ADDRESS is not the address of ISSUER_PRIVATE_KEY');
 
-  const deployment = loadDeployment(network);
+  const keyBytes = Buffer.from(env('FILE_ENCRYPTION_KEY'), 'base64');
+  if (keyBytes.length !== 32) fail('FILE_ENCRYPTION_KEY must be base64 of exactly 32 bytes');
+  const keyVersion = Number(process.env.FILE_ENCRYPTION_KEY_VERSION || 1);
+  if (!Number.isInteger(keyVersion) || keyVersion < 1) fail('FILE_ENCRYPTION_KEY_VERSION must be a positive integer');
+  const sealingKey = { key: new Uint8Array(keyBytes), version: keyVersion };
+  const files = createFileStore({ dir: path.resolve(process.env.FILE_STORAGE_DIR || 'storage'), current: sealingKey, keys: [sealingKey] });
+  const verifyBaseUrl = env('APP_PUBLIC_URL');
+  if (!/^https?:\/\/[^\s]+$/.test(verifyBaseUrl)) fail('APP_PUBLIC_URL must be an http(s) URL');
+
+  // Run from the app's directory: the PDF parser and deployments/ are found from there.
+  const deployment = process.env.DEPLOYMENT_FILE ? loadDeploymentFile(network, path.resolve(process.env.DEPLOYMENT_FILE)) : loadDeployment(network);
   const publicClient = createPublicClient({ chain: NETWORKS[network], transport: http(rpcUrlFor(network)) }) as PublicClient;
   const databaseUrl = env('DATABASE_URL');
   const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl, max: 4, connectionTimeoutMillis: 10_000 }) });
@@ -62,7 +78,7 @@ async function main() {
   console.log(JSON.stringify({ level: 'info', message: 'worker started', network, issuer: account.address, registry: deployment.address }));
   try {
     do {
-      const report = await runWorkerPass({ prisma, lockClient, publicClient, account, deployment });
+      const report = await runWorkerPass({ prisma, lockClient, publicClient, account, deployment, files, verifyBaseUrl });
       console.log(
         JSON.stringify({
           level: 'info',
@@ -72,6 +88,7 @@ async function main() {
           balanceWei: report.balanceWei?.toString(),
           lowBalance: report.lowBalance,
           steps: report.steps.length,
+          certified: report.certified.length,
           errors: report.errors.length,
         }),
       );

@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { getFormatter, getTranslations } from 'next-intl/server';
+import { buttonVariants } from '@inflect/ui/components/ui/button-variants';
 import { Card } from '@inflect/ui/components/ui/card';
 import { CopyButton } from '@inflect/ui/components/ui/copy-button';
 import { StatusBadge } from '@inflect/ui/components/ui/status-badge';
@@ -9,6 +10,7 @@ import type { ChainWriteStatus, VersionStatus } from '@/generated/prisma/enums';
 import { getVersionAnchoring, resolveAnchorTarget } from '@/lib/anchoring/queries';
 import { explorerTxUrl } from '@/lib/chain/explorer';
 import { ApproveAnchorButton } from './approve-anchor-button';
+import { RetryCopyButton } from './retry-copy-button';
 
 const WRITE_VARIANT = {
   INTENT: 'neutral',
@@ -51,15 +53,42 @@ export async function AnchoringPanel({ user, versionId, status }: { user: Sessio
   const chainId = target?.chainId ?? anchoring.writes[0]?.chainId ?? 0;
 
   function reason(code: string) {
+    // A stamp that did not pass its check is one sentence, with the check's own code beside it.
+    if (code.startsWith('STAMP_')) return t('reasons.STAMP_CHECK');
     const [name, detail] = code.split(':');
     const key = `reasons.${name}` as const;
     return t.has(key) ? `${t(key)}${detail ? ` (${detail})` : ''}` : null;
   }
+  const copyWrites = anchoring.writes.filter((w) => w.kind === 'ANCHOR_COPY');
+  const copyNeedsRetry = status === 'ANCHORED' && !anchoring.anchorOnly && copyWrites.length > 0 && copyWrites.every((w) => w.status === 'FAILED');
 
   return (
     <Card className="flex flex-col gap-default" data-testid="anchoring-panel">
       <Heading level={2}>{t('title')}</Heading>
       <p className="text-content-muted">{t('prototypeEvidence')}</p>
+
+      {status === 'COMPLETE' ? (
+        <div className="flex flex-col gap-default" data-testid="complete">
+          <p className="text-content-success">{anchoring.anchorOnly ? t('completeCertificate') : t('completeCopy')}</p>
+          <div>
+            <a
+              className={buttonVariants({ variant: 'primary' })}
+              href={`/api/versions/${versionId}/${anchoring.anchorOnly ? 'certificate' : 'copy'}`}
+              data-testid={anchoring.anchorOnly ? 'download-certificate' : 'download-copy'}
+            >
+              {anchoring.anchorOnly ? t('downloadCertificate') : t('downloadCopy')}
+            </a>
+          </div>
+          {anchoring.copyRecordId ? <Value label={t('copyRecordId')} value={anchoring.copyRecordId} testId="copy-record-id" /> : null}
+          {anchoring.copyTxHash ? <Value label={t('copyTxHash')} value={anchoring.copyTxHash} href={explorerTxUrl(chainId, anchoring.copyTxHash)} /> : null}
+        </div>
+      ) : null}
+      {status === 'ANCHORED' ? (
+        <p className="text-content-muted" data-testid="copy-pending">
+          {anchoring.anchorOnly ? t('certificatePending') : copyNeedsRetry ? t('copyFailed') : t('copyPending')}
+        </p>
+      ) : null}
+      {copyNeedsRetry && user.role === 'APPROVER' ? <RetryCopyButton versionId={versionId} /> : null}
 
       {(status === 'ANCHORED' || status === 'COMPLETE') && anchoring.recordId ? (
         <div className="flex flex-col gap-default" data-testid="anchored">
@@ -105,9 +134,10 @@ export async function AnchoringPanel({ user, versionId, status }: { user: Sessio
       ) : (
         <ol className="flex flex-col gap-default" data-testid="chain-writes">
           {anchoring.writes.map((write) => (
-            <li key={write.id} className="flex flex-col gap-tight border-l-2 border-border-subtle pl-default" data-testid="chain-write" data-status={write.status}>
+            <li key={write.id} className="flex flex-col gap-tight border-l-2 border-border-subtle pl-default" data-testid="chain-write" data-status={write.status} data-kind={write.kind}>
               <div className="flex flex-wrap items-center gap-tight">
                 <StatusBadge variant={WRITE_VARIANT[write.status]}>{t(`status.${write.status}`)}</StatusBadge>
+                <StatusBadge variant="neutral">{t(`kinds.${write.kind}`)}</StatusBadge>
                 <StatusBadge variant="neutral">{t(`modes.${write.mode}`)}</StatusBadge>
                 <span className="text-sm text-content-muted">{format.dateTime(write.createdAt, { dateStyle: 'medium', timeStyle: 'short' })}</span>
               </div>

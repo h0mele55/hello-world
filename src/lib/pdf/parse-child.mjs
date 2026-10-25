@@ -156,7 +156,8 @@ function linesOf(items) {
 function stringsOf(dict) {
   const out = {};
   if (!dict || typeof dict !== 'object') return out;
-  for (const [key, value] of Object.entries(dict)) {
+  // pdf.js 6 hands custom Info keys over as a Map, the standard ones as an object.
+  for (const [key, value] of dict instanceof Map ? dict.entries() : Object.entries(dict)) {
     if (typeof value === 'string') out[key] = value;
   }
   return out;

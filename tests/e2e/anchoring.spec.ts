@@ -4,9 +4,12 @@ import { expect, test, type Page } from '@playwright/test';
 import { approver, createEngagement, preparer, runTag, signIn, uploadAndConfirm } from './helpers';
 
 /**
- * Phase 3a end to end, on a local Anvil chain: an approver widens the write
+ * Phase 3 end to end, on a local Anvil chain: an approver widens the write
  * mode one rung at a time, approves a dry run that is only simulated, then a
- * live anchor that the worker sends and settles once its block is finalized.
+ * live anchor that the worker sends and settles once its block is finalized;
+ * the worker then stamps and anchors the distribution copy, which can be
+ * downloaded once the version is complete. A signed report gets a
+ * verification certificate instead.
  *
  * Needs, besides the seeded database: Anvil at LOCAL_RPC_URL started with
  * `--slots-in-an-epoch 1`, the registry deployed there (deployments/local.json),
@@ -46,14 +49,17 @@ async function setMode(page: Page, mode: (typeof LADDER)[number]) {
   }
 }
 
+/** The newest journal row for the original (the list is newest first, copies included). */
+const originalWrite = (page: Page) => page.locator('[data-testid=chain-write][data-kind=ANCHOR]').first();
+
 async function approve(page: Page, label: string) {
   await page.getByTestId('approve-anchor').filter({ hasText: label }).click();
   await page.getByRole('dialog').getByRole('button', { name: 'Approve' }).click();
   await expect(page.getByTestId('anchor-queued')).toBeVisible();
 }
 
-test('a dry run is only simulated; a live anchor is sent and becomes final with its block', async ({ page }) => {
-  test.setTimeout(180_000);
+test('a dry run is only simulated; a live anchor is sent, final, then stamped, copied and downloadable', async ({ page }) => {
+  test.setTimeout(240_000);
   const tag = runTag();
   let versionUrl = '';
 
@@ -80,7 +86,7 @@ test('a dry run is only simulated; a live anchor is sent and becomes final with 
     await approve(page, 'Approve dry run');
     runWorkerOnce();
     await page.reload();
-    await expect(page.getByTestId('chain-write').first()).toHaveAttribute('data-status', 'SIMULATED');
+    await expect(originalWrite(page)).toHaveAttribute('data-status', 'SIMULATED');
     await expect(page.getByTestId('chain-write-reason').first()).toContainText('a live anchor would be accepted');
     await expect(page.getByTestId('approve-anchor')).toBeVisible();
   });
@@ -91,15 +97,52 @@ test('a dry run is only simulated; a live anchor is sent and becomes final with 
     await approve(page, 'Approve anchor');
     runWorkerOnce();
     await page.reload();
-    await expect(page.getByTestId('chain-write').first()).toHaveAttribute('data-status', 'BROADCAST');
+    await expect(originalWrite(page)).toHaveAttribute('data-status', 'BROADCAST');
     await expect(page.getByTestId('anchored')).toHaveCount(0);
 
     await mine(3);
     runWorkerOnce();
     await page.reload();
-    await expect(page.getByTestId('chain-write').first()).toHaveAttribute('data-status', 'FINAL');
+    await expect(originalWrite(page)).toHaveAttribute('data-status', 'FINAL');
     await expect(page.getByTestId('anchored')).toBeVisible();
     await expect(page.getByTestId('anchor-record-id')).toHaveText(/^0x[0-9a-f]{64}$/);
-    await expect(page.getByText('Anchored', { exact: true })).toBeVisible();
+    await expect(page.getByTestId('copy-pending')).toBeVisible();
+  });
+
+  await test.step('the distribution copy is stamped and anchored; the version is complete', async () => {
+    // The pass that settled the original also stamped and sent its copy.
+    await expect(page.locator('[data-testid=chain-write][data-kind=ANCHOR_COPY]')).toHaveAttribute('data-status', 'BROADCAST');
+    await mine(3);
+    runWorkerOnce();
+    await page.reload();
+    await expect(page.getByTestId('complete')).toBeVisible();
+    await expect(page.getByTestId('copy-record-id')).toHaveText(/^0x[0-9a-f]{64}$/);
+    await expect(page.getByText('Complete', { exact: true })).toBeVisible();
+    const response = await page.request.get(await page.getByTestId('download-copy').getAttribute('href') ?? '');
+    expect(response.status()).toBe(200);
+    const pdf = await response.body();
+    expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
+    expect(pdf.toString('latin1')).toContain('https://github.com/h0mele55/hello-world/ns/audit-anchor/1.0/');
+  });
+
+  await test.step('a signed report is anchored as issued and gets a certificate', async () => {
+    await page.context().clearCookies();
+    await signIn(page, preparer);
+    await createEngagement(page, `${tag}9`);
+    await uploadAndConfirm(page, 'en-signed.pdf', `${tag}9`);
+    const signedUrl = page.url();
+    await page.context().clearCookies();
+    await signIn(page, approver);
+    await page.goto(signedUrl);
+    await approve(page, 'Approve anchor');
+    runWorkerOnce();
+    await mine(3);
+    runWorkerOnce();
+    await page.reload();
+    await expect(page.getByTestId('complete')).toBeVisible();
+    await expect(page.locator('[data-testid=chain-write][data-kind=ANCHOR_COPY]')).toHaveCount(0);
+    const response = await page.request.get(await page.getByTestId('download-certificate').getAttribute('href') ?? '');
+    expect(response.status()).toBe(200);
+    expect((await response.body()).subarray(0, 5).toString()).toBe('%PDF-');
   });
 });

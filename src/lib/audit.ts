@@ -38,7 +38,10 @@ export type AuditAction =
   | 'anchor.replaced'
   | 'anchor.indeterminate'
   | 'anchor.final'
-  | 'anchor.failed';
+  | 'anchor.failed'
+  | 'anchor.copy_requeued'
+  | 'version.stamped'
+  | 'version.certified';
 
 export interface AuditEventInput {
   orgId: string;

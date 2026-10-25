@@ -78,6 +78,7 @@ npm run contracts:artifact     # regenerate src/lib/chain/registry-artifact.ts a
 npm run test:integration       # chain adapter and verifier against throwaway Anvil nodes
 npx tsx scripts/deploy-registry.ts <sepolia|local>       # deploy; reads keys from env only
 npx tsx scripts/owner-call.ts <sepolia|local> <add-issuer|remove-issuer|transfer-owner|accept-owner> [address]   # prints the owner's transaction; sends nothing
+npx tsx scripts/kms-address.ts <KMS key version name>     # the address of a Cloud KMS issuer key, to register it
 
 # Database (Postgres 16: `docker compose up -d`, or any local server; Prisma 7 does not read .env)
 npm run db:migrate             # create and apply a migration in development
@@ -206,6 +207,13 @@ to one inflect-compliance commit.
   with a key. Only `scripts/issuer-env.ts` (used by the worker and the
   operator tools) reads `ISSUER_PRIVATE_KEY`, and
   `tests/unit/key-boundary.test.ts` refuses the name anywhere under `src/`.
+- **With `SIGNER=kms` the key never leaves Cloud KMS**
+  (`src/lib/chain/kms-account.ts`): a viem account that sends KMS the keccak
+  digest, checks every CRC32C integrity field, reads the DER signature
+  strictly, normalises it to low s and recovers the parity against the key's
+  own address. Any doubt is a named `KmsSignerError` and nothing is sent. Tests
+  use `tests/helpers/fake-kms.ts`; the ceremony for a real key is
+  `docs/runbooks/kms-key.md`.
 - **Journal before the bytes leave.** The worker signs, writes the nonce and
   hash to the row, then sends. Every transition is one transaction,
   conditional on the row being as it was read, and writes its audit event.

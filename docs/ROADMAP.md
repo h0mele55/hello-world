@@ -1108,6 +1108,40 @@ script (#61, #67, #68):
   restarted it. Now a failed pass is tried again after the interval, and after
   20 in a row the process exits for its supervisor to restart.
 
+6b is the issuer key in Cloud KMS (#62):
+
+- **`SIGNER=kms`** makes the worker and the operator tools sign with a KMS key
+  version (`KMS_KEY_NAME`), through `src/lib/chain/kms-account.ts`: a viem
+  custom account.
+  - **The digest.** KMS signs the 32-byte digest it is given, so the digest
+    sent is Ethereum's keccak256 hash.
+  - **The signature.** The DER it returns is read strictly, `s` is normalised
+    to the low form, and the parity is found by recovering the key's own
+    address.
+  - **The checks.** Every CRC32C field KMS offers is checked, and so is the key
+    version that signed. Any doubt is a named refusal, and nothing is sent.
+  - **A raw `ISSUER_PRIVATE_KEY` left beside it is refused.**
+- **Tested against a stand-in KMS** backed by a real key, which returns the
+  high-s form on purpose:
+  - every transaction, message and typed-data signature equals the key's own,
+    byte for byte;
+  - on Anvil, a version is anchored, copied and completed with exactly two KMS
+    signatures;
+  - a corrupted KMS answer sends nothing, and the write goes once KMS answers
+    well.
+- **`@google-cloud/kms` 6.2.1**, the newest release more than two weeks old,
+  is loaded only when `SIGNER=kms`; its client fits the account's interface
+  without a cast.
+- **The key ceremony is `docs/runbooks/kms-key.md`**:
+  - making an HSM key;
+  - granting the worker sign and view rights on that key only;
+  - logging every signature;
+  - reading its address (`scripts/kms-address.ts`);
+  - switching over as a key rotation.
+
+  The owner performs it. Until then the hardening box for the key ceremony
+  stays open.
+
 **Prompt**
 
 ```text

@@ -5,7 +5,12 @@
  *   DATABASE_URL        the app's database
  *   ANCHOR_NETWORK      sepolia or local; deployments/<network>.json names the registry
  *   DEPLOYMENT_FILE     optional; a deployment record other than that file
- *   ISSUER_PRIVATE_KEY  the issuer key. Read by scripts only: the web app never holds it.
+ *   SIGNER              env (default) or kms
+ *   ISSUER_PRIVATE_KEY  with SIGNER=env: the issuer key. Read by scripts only: the web app never holds it.
+ *   KMS_KEY_NAME        with SIGNER=kms: the Cloud KMS key version that signs
+ *                       (projects/…/cryptoKeyVersions/N); credentials are the
+ *                       host's (Application Default Credentials). The key never
+ *                       leaves KMS (docs/runbooks/kms-key.md).
  *   ISSUER_ADDRESS      optional; when set, must be the key's address (it is what the web app journals)
  *   SEPOLIA_RPC_URL / LOCAL_RPC_URL
  *
@@ -16,6 +21,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 import { createPublicClient, getAddress, http, isHex, type LocalAccount, type PublicClient } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import { createKmsAccount, KmsSignerError } from '../src/lib/chain/kms-account';
 import { PrismaClient } from '../src/generated/prisma/client';
 import type { Deployment } from '../src/lib/chain/deployment';
 import { isNetworkName, loadDeployment, loadDeploymentFile, NETWORKS, rpcUrlFor, type NetworkName } from '../src/lib/chain/networks';
@@ -45,11 +51,9 @@ export interface IssuerEnv {
 export async function issuerEnv(tool: string): Promise<IssuerEnv> {
   const network = requireEnv(tool, 'ANCHOR_NETWORK');
   if (!isNetworkName(network)) refuse(tool, 'ANCHOR_NETWORK must be sepolia or local');
-  const key = requireEnv(tool, 'ISSUER_PRIVATE_KEY');
-  if (!isHex(key) || key.length !== 66) refuse(tool, 'ISSUER_PRIVATE_KEY is not a 32-byte hex key');
-  const account = privateKeyToAccount(key);
+  const account = await issuerAccount(tool);
   const declared = process.env.ISSUER_ADDRESS;
-  if (declared && getAddress(declared) !== account.address) refuse(tool, 'ISSUER_ADDRESS is not the address of ISSUER_PRIVATE_KEY');
+  if (declared && getAddress(declared) !== account.address) refuse(tool, 'ISSUER_ADDRESS is not the address of the issuer key');
 
   const deployment = process.env.DEPLOYMENT_FILE ? loadDeploymentFile(network, path.resolve(process.env.DEPLOYMENT_FILE)) : loadDeployment(network);
   const publicClient = createPublicClient({ chain: NETWORKS[network], transport: http(rpcUrlFor(network)) }) as PublicClient;
@@ -69,4 +73,26 @@ export async function issuerEnv(tool: string): Promise<IssuerEnv> {
       await prisma.$disconnect();
     },
   };
+}
+
+/** The account that signs as the issuer: a raw key from the environment, or a Cloud KMS key version. */
+async function issuerAccount(tool: string): Promise<LocalAccount> {
+  const signer = process.env.SIGNER || 'env';
+  if (signer === 'env') {
+    const key = requireEnv(tool, 'ISSUER_PRIVATE_KEY');
+    if (!isHex(key) || key.length !== 66) refuse(tool, 'ISSUER_PRIVATE_KEY is not a 32-byte hex key');
+    return privateKeyToAccount(key);
+  }
+  if (signer !== 'kms') refuse(tool, 'SIGNER must be env or kms');
+  // A raw key left beside a KMS key is a copy of a secret nobody uses: refuse it rather than ignore it.
+  if (process.env.ISSUER_PRIVATE_KEY) refuse(tool, 'ISSUER_PRIVATE_KEY is set, but SIGNER=kms signs with KMS: remove it');
+  const keyName = requireEnv(tool, 'KMS_KEY_NAME');
+  const { KeyManagementServiceClient } = await import('@google-cloud/kms');
+  try {
+    return await createKmsAccount({ client: new KeyManagementServiceClient(), keyName });
+  } catch (error) {
+    if (error instanceof KmsSignerError) refuse(tool, `${error.code}: ${error.message}`);
+    // The name only: a client error can carry request details.
+    refuse(tool, `KMS could not be reached (${error instanceof Error ? error.name : typeof error})`);
+  }
 }

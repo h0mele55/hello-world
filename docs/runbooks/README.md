@@ -8,6 +8,7 @@ never to do. `docs/operations.md` says what runs day to day, and
 | Runbook | When |
 | --- | --- |
 | [key-rotation.md](key-rotation.md) | Replacing the issuer key: on a schedule, when moving to KMS, or because it may be stolen |
+| [kms-key.md](kms-key.md) | Making the issuer key in Cloud KMS and switching the worker to it (the key ceremony) |
 | [ownership-to-safe.md](ownership-to-safe.md) | Moving the registry's ownership from the deployer key to a Safe (#67) |
 | [stuck-writes.md](stuck-writes.md) | A write that does not reach FINAL, an issuer key held by an INDETERMINATE write, a low balance |
 | [rpc-outage.md](rpc-outage.md) | An RPC endpoint that is down, slow or disagrees, for the worker or the verifier |

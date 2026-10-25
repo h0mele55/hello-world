@@ -9,6 +9,12 @@ import type { Language, OpinionType } from './types';
  * NOT_FOUND with a reason, and a person types or pastes the opinion instead.
  * A wrong passage presented as found would be committed permanently, so every
  * doubt is a miss (CLAUDE.md rule 7).
+ *
+ * A PDF holding several auditor's reports (an annual-report bundle, a
+ * bilingual report) has several opinion headings. Picking one would be a
+ * guess, so it answers CANDIDATES (#77): every one, but only when each is
+ * complete on its own, with its own "Basis for …" heading before the next
+ * opinion heading. The person chooses, and still confirms the text (rule 6).
  */
 
 const HEADINGS: Record<Language, Record<string, OpinionType>> = {
@@ -69,6 +75,8 @@ function basisHeadingType(language: Language, text: string): OpinionType | undef
 
 /** An opinion longer than this is far more likely a heading missed than a real opinion. */
 export const MAX_OPINION_CHARS = 4000;
+/** More opinion headings than this is not a bundle of reports a person can choose from. */
+export const MAX_CANDIDATES = 10;
 
 export type NotFoundReason =
   | 'NO_TEXT_LAYER'
@@ -79,17 +87,19 @@ export type NotFoundReason =
   | 'EMPTY_OPINION'
   | 'OPINION_TOO_LONG';
 
+export interface OpinionPassage {
+  type: OpinionType;
+  language: Language;
+  heading: string;
+  /** Normalised (normaliser v1); ready to commit once a person confirms it. */
+  text: string;
+  pageRange: [number, number];
+}
+
 export type LocateResult =
-  | {
-      status: 'FOUND';
-      type: OpinionType;
-      language: Language;
-      heading: string;
-      /** Normalised (normaliser v1); ready to commit once a person confirms it. */
-      text: string;
-      pageRange: [number, number];
-      confidence: 'HIGH';
-    }
+  | ({ status: 'FOUND'; confidence: 'HIGH' } & OpinionPassage)
+  /** Two or more reports, in the order they appear; the person chooses one. */
+  | { status: 'CANDIDATES'; candidates: OpinionPassage[] }
   | { status: 'NOT_FOUND'; reason: NotFoundReason };
 
 /** A section number before a heading: "1", "1.", "2.1", "IV.", "(a)". */
@@ -131,30 +141,38 @@ export function locateOpinion(lines: readonly PageLine[]): LocateResult {
     return match ? [{ index, ...match }] : [];
   });
   if (headings.length === 0) return { status: 'NOT_FOUND', reason: 'NO_OPINION_HEADING' };
-  // Two opinion headings: a bilingual report, or an opinion on something
-  // else. Picking one would be a guess.
-  if (headings.length > 1) return { status: 'NOT_FOUND', reason: 'MULTIPLE_OPINION_HEADINGS' };
+  if (headings.length === 1) {
+    const passage = passageAt(lines, headings[0], lines.length);
+    return 'reason' in passage ? { status: 'NOT_FOUND', reason: passage.reason } : { status: 'FOUND', confidence: 'HIGH', ...passage };
+  }
 
-  const [{ index: start, language, type }] = headings;
-  const end = lines.findIndex((line, i) => i > start && basisHeadingType(language, line.text) !== undefined);
-  if (end === -1) return { status: 'NOT_FOUND', reason: 'NO_BASIS_HEADING' };
+  // Several reports, or an opinion on something else. Each must be a whole
+  // passage that ends before the next opinion heading begins; any doubt about
+  // one, and none is offered: picking would be a guess.
+  if (headings.length > MAX_CANDIDATES) return { status: 'NOT_FOUND', reason: 'MULTIPLE_OPINION_HEADINGS' };
+  const candidates: OpinionPassage[] = [];
+  for (const [i, heading] of headings.entries()) {
+    const passage = passageAt(lines, heading, headings[i + 1]?.index ?? lines.length);
+    if ('reason' in passage) return { status: 'NOT_FOUND', reason: 'MULTIPLE_OPINION_HEADINGS' };
+    candidates.push(passage);
+  }
+  return { status: 'CANDIDATES', candidates };
+}
+
+/** The passage from an opinion heading to its "Basis for …" heading, which must come before `limit`. */
+function passageAt(lines: readonly PageLine[], heading: { index: number; language: Language; type: OpinionType }, limit: number): OpinionPassage | { reason: NotFoundReason } {
+  const { index: start, language, type } = heading;
+  const end = lines.findIndex((line, i) => i > start && i < limit && basisHeadingType(language, line.text) !== undefined);
+  if (end === -1) return { reason: 'NO_BASIS_HEADING' };
 
   // "Basis for Qualified Opinion" after "Adverse Opinion" means the layout
   // was not read the way the report was written.
-  if (basisHeadingType(language, lines[end].text) !== type) return { status: 'NOT_FOUND', reason: 'HEADING_TYPE_MISMATCH' };
+  if (basisHeadingType(language, lines[end].text) !== type) return { reason: 'HEADING_TYPE_MISMATCH' };
 
   const body = lines.slice(start + 1, end).filter((line) => normaliseText(line.text) !== '');
   const text = joinLines(body.map((line) => line.text));
-  if (text === '') return { status: 'NOT_FOUND', reason: 'EMPTY_OPINION' };
-  if (text.length > MAX_OPINION_CHARS) return { status: 'NOT_FOUND', reason: 'OPINION_TOO_LONG' };
+  if (text === '') return { reason: 'EMPTY_OPINION' };
+  if (text.length > MAX_OPINION_CHARS) return { reason: 'OPINION_TOO_LONG' };
 
-  return {
-    status: 'FOUND',
-    type,
-    language,
-    heading: normaliseText(lines[start].text),
-    text,
-    pageRange: [lines[start].page, body[body.length - 1].page],
-    confidence: 'HIGH',
-  };
+  return { type, language, heading: normaliseText(lines[start].text), text, pageRange: [lines[start].page, body[body.length - 1].page] };
 }

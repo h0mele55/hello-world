@@ -216,6 +216,10 @@
   "confirm": {
     "foundHint": "Found under the heading \"{heading}\" on pages {from}–{to}. Check it against the report.",
     "typeItIn": "Type or paste the opinion paragraph from the report.",
+    "candidatesHint": "This PDF holds {count} auditor's reports. Choose the one this version anchors: its opinion is filled in below for you to check against the report.",
+    "candidatesLabel": "Which report?",
+    "candidate": "Report {n}: {type}, under “{heading}”, pages {from}–{to}",
+    "noCandidate": "None of these: I will type the opinion in",
     "type": "Opinion type",
     "text": "Opinion text",
     "textDescription": "Exactly as it appears in the report. Spacing and line breaks do not matter.",
@@ -244,6 +248,7 @@
     "confirmedTitle": "Confirmed opinion",
     "opinionType": "Opinion type",
     "reportDate": "Report date",
+    "fromCandidate": "Taken from report {n} of the {count} in this PDF (pages {from}–{to}).",
     "commitments": "Commitments",
     "commitmentsHint": "Only these values will go on chain. Nothing has been anchored yet.",
     "commitmentsOnChain": "Only these values went on chain, in the record below.",

@@ -43,7 +43,10 @@ export default async function VersionPage({ params }: { params: Promise<{ versio
   const tTypes = await getTranslations('opinion.types');
   const { flags } = version;
   const warnings = (['javascript', 'embeddedFiles', 'xfa'] as const).filter((flag) => flags[flag]);
-  const initialPage = version.extraction.status === 'FOUND' ? version.extraction.pageRange[0] : 1;
+  const { extraction } = version;
+  const initialPage = extraction.status === 'FOUND' ? extraction.pageRange[0] : extraction.status === 'CANDIDATES' ? extraction.candidates[0].pageRange[0] : 1;
+  // Which of the PDF's reports the confirmed opinion was taken from (#77).
+  const fromCandidate = extraction.status === 'CANDIDATES' && version.opinionCandidate !== null ? extraction.candidates[version.opinionCandidate] : undefined;
 
   return (
     <main className="flex flex-col gap-section">
@@ -86,6 +89,11 @@ export default async function VersionPage({ params }: { params: Promise<{ versio
                 <span className="text-content-muted">{t('reportDate')}: </span>
                 {version.reportDate}
               </p>
+              {fromCandidate && extraction.status === 'CANDIDATES' ? (
+                <p className="text-content-muted" data-testid="confirmed-candidate">
+                  {t('fromCandidate', { n: version.opinionCandidate! + 1, count: extraction.candidates.length, from: fromCandidate.pageRange[0], to: fromCandidate.pageRange[1] })}
+                </p>
+              ) : null}
               <blockquote className="whitespace-pre-wrap border-l-2 border-border-default pl-default text-content-default" data-testid="confirmed-text">
                 {version.confirmedOpinion}
               </blockquote>

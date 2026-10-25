@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { locateOpinion, MAX_OPINION_CHARS } from '@/lib/opinion/locate';
+import { locateOpinion, MAX_CANDIDATES, MAX_OPINION_CHARS } from '@/lib/opinion/locate';
 import { dropRunningLines, joinLines, normaliseText, type PageLine } from '@/lib/opinion/normalise';
 
 const ch = (code: number) => String.fromCharCode(code);
@@ -159,7 +159,8 @@ describe('locateOpinion', () => {
       [[], 'NO_TEXT_LAYER'],
       [page('  ', ''), 'NO_TEXT_LAYER'],
       [page('Report', 'Some text'), 'NO_OPINION_HEADING'],
-      [page('Opinion', 'x', 'Basis for Opinion', 'Мнение', 'y', 'База за мнение'), 'MULTIPLE_OPINION_HEADINGS'],
+      // Two opinion headings, one of them incomplete: neither is offered (#77).
+      [page('Opinion', 'x', 'Basis for Opinion', 'Мнение', 'y'), 'MULTIPLE_OPINION_HEADINGS'],
       [page('Opinion', 'x', 'Other matter'), 'NO_BASIS_HEADING'],
       [page('Мнение', 'x', 'Basis for Opinion'), 'NO_BASIS_HEADING'],
       [page('Qualified Opinion', 'x', 'Basis for Adverse Opinion'), 'HEADING_TYPE_MISMATCH'],
@@ -183,5 +184,57 @@ describe('locateOpinion', () => {
   it('takes only a whole-line basis heading that names an opinion type', () => {
     expect(locateOpinion(page('Opinion', 'x.', 'Basis for opinion and emphasis'))).toEqual({ status: 'NOT_FOUND', reason: 'NO_BASIS_HEADING' });
     expect(locateOpinion(page('Opinion', 'x.', 'Basis For Opinion:'))).toMatchObject({ status: 'FOUND', text: 'x.' });
+  });
+
+  describe('a PDF holding several reports (#77)', () => {
+    it('offers every report, in order, when each is a whole passage of its own', () => {
+      const lines: PageLine[] = [
+        { page: 3, text: 'Disclaimer of Opinion' },
+        { page: 3, text: 'We do not express an opinion on the council’s statements.' },
+        { page: 3, text: 'Basis for Disclaimer of Opinion' },
+        { page: 4, text: 'We were unable to obtain evidence.' },
+        { page: 116, text: 'Opinion on the financial statements' },
+        { page: 116, text: 'In our opinion, the pension fund’s statements' },
+        { page: 117, text: 'present fairly.' },
+        { page: 117, text: 'Basis for Opinion' },
+      ];
+      expect(locateOpinion(lines)).toEqual({
+        status: 'CANDIDATES',
+        candidates: [
+          { type: 'DISCLAIMER', language: 'en', heading: 'Disclaimer of Opinion', text: 'We do not express an opinion on the council’s statements.', pageRange: [3, 3] },
+          { type: 'UNMODIFIED', language: 'en', heading: 'Opinion on the financial statements', text: 'In our opinion, the pension fund’s statements present fairly.', pageRange: [116, 117] },
+        ],
+      });
+    });
+
+    it('offers both languages of a bilingual report, for the person to choose', () => {
+      expect(locateOpinion(page('Opinion', 'x', 'Basis for Opinion', 'Мнение', 'y', 'База за мнение'))).toMatchObject({
+        status: 'CANDIDATES',
+        candidates: [
+          { language: 'en', text: 'x' },
+          { language: 'bg', text: 'y' },
+        ],
+      });
+    });
+
+    it('offers none when one passage would run into the next report, or does not end as it began', () => {
+      // The first report's basis heading comes only after the second report's opinion heading.
+      expect(locateOpinion(page('Opinion', 'x', 'Qualified Opinion', 'y', 'Basis for Opinion', 'Basis for Qualified Opinion'))).toEqual({
+        status: 'NOT_FOUND',
+        reason: 'MULTIPLE_OPINION_HEADINGS',
+      });
+      expect(locateOpinion(page('Opinion', 'x', 'Basis for Opinion', 'Adverse Opinion', 'y', 'Basis for Qualified Opinion'))).toEqual({
+        status: 'NOT_FOUND',
+        reason: 'MULTIPLE_OPINION_HEADINGS',
+      });
+      expect(locateOpinion(page('Opinion', ' ', 'Basis for Opinion', 'Opinion', 'y', 'Basis for Opinion'))).toEqual({ status: 'NOT_FOUND', reason: 'MULTIPLE_OPINION_HEADINGS' });
+    });
+
+    it(`offers none past ${MAX_CANDIDATES} reports`, () => {
+      const report = (n: number) => ['Opinion', `report ${n}`, 'Basis for Opinion'];
+      const many = (count: number) => page(...Array.from({ length: count }, (_, i) => report(i + 1)).flat());
+      expect(locateOpinion(many(MAX_CANDIDATES))).toMatchObject({ status: 'CANDIDATES' });
+      expect(locateOpinion(many(MAX_CANDIDATES + 1))).toEqual({ status: 'NOT_FOUND', reason: 'MULTIPLE_OPINION_HEADINGS' });
+    });
   });
 });

@@ -246,6 +246,9 @@ model ReportVersion {
   opinionType             OpinionType?
   /// Sealed: the normalised opinion text the person confirmed.
   confirmedOpinion        Bytes?
+  /// When the PDF holds several auditor's reports (#77): which one, counted
+  /// from 0, the person chose to start from. Null when there was one, or none.
+  opinionCandidate        Int?
   reportDate              DateTime?      @db.Date
   /// Fresh from the CSPRNG per version; unique, so a reused salt is refused.
   opinionSalt             Bytes?         @unique

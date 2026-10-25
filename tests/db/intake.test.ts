@@ -12,6 +12,7 @@ import { open } from '@/lib/sealed';
 import { readStoredFile } from '@/lib/storage';
 import { confirmOpinion, createEngagement, discardDraft, getVersion, IntakeError, readVersionFile, uploadVersion, type NewEngagement } from '@/lib/reports/intake';
 import { REPORTS } from '../fixtures/pdf/reports';
+import { BUNDLE_OPINIONS, twoReportsPdf } from '../helpers/minimal-pdf';
 
 const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: process.env.DATABASE_URL! }) });
 const fixture = (name: string) => fs.readFileSync(path.join(import.meta.dirname, '..', 'fixtures', 'pdf', name));
@@ -208,6 +209,55 @@ describe('confirmation (rule 6)', () => {
     const rowA = await prisma.reportVersion.findUniqueOrThrow({ where: { id: a.id } });
     await prisma.reportVersion.update({ where: { id: b.id }, data: { extraction: rowA.extraction } });
     await expect(getVersion(preparer, b.id)).rejects.toThrow(/AUTH_FAILED/);
+  });
+});
+
+describe('a PDF holding several reports (#77)', () => {
+  async function bundle(tag: string) {
+    const engagement = await createEngagement(preparer, { ...ENGAGEMENT, engagementRef: `ENG-BUNDLE-${tag}` });
+    return uploadVersion(preparer, { engagementId: engagement.id, reasonCode: 'INITIAL', bytes: twoReportsPdf(tag) });
+  }
+
+  it('offers each report, and records the one the person chose with the confirmation', async () => {
+    const uploaded = await bundle('a');
+    expect(uploaded.extraction).toEqual({
+      status: 'CANDIDATES',
+      candidates: [
+        { type: 'DISCLAIMER', language: 'en', heading: 'Disclaimer of Opinion', text: BUNDLE_OPINIONS.council, pageRange: [1, 1] },
+        { type: 'UNMODIFIED', language: 'en', heading: 'Opinion', text: BUNDLE_OPINIONS.pensionFund, pageRange: [1, 1] },
+      ],
+    });
+    await confirmOpinion(preparer, { versionId: uploaded.id, opinionType: 'UNMODIFIED', text: BUNDLE_OPINIONS.pensionFund, reportDate: '2026-03-20', candidate: 1 });
+    const row = await prisma.reportVersion.findUniqueOrThrow({ where: { id: uploaded.id } });
+    expect(row).toMatchObject({ status: 'CONFIRMED', opinionType: 'UNMODIFIED', opinionCandidate: 1 });
+    expect(row.opinionCommitment).toBe(opinionCommitmentOf({ salt: row.opinionSalt!, type: 'UNMODIFIED', text: BUNDLE_OPINIONS.pensionFund }));
+    // The audit log says which report and its pages, and whether the text was changed; never the text.
+    const event = await prisma.auditEvent.findFirstOrThrow({ where: { subjectId: uploaded.id, action: 'version.confirmed' } });
+    expect(event.data).toMatchObject({ candidate: 1, pages: [1, 1], edited: false });
+    expect(JSON.stringify(event.data)).not.toContain('pension fund');
+    expect(await getVersion(preparer, uploaded.id)).toMatchObject({ opinionCandidate: 1 });
+  });
+
+  it('records a choice whose text the person then corrected, and none when they typed it in', async () => {
+    const corrected = await bundle('b');
+    await confirmOpinion(preparer, { versionId: corrected.id, opinionType: 'DISCLAIMER', text: `${BUNDLE_OPINIONS.council} (corrected)`, reportDate: '2026-03-20', candidate: 0 });
+    expect((await prisma.auditEvent.findFirstOrThrow({ where: { subjectId: corrected.id, action: 'version.confirmed' } })).data).toMatchObject({ candidate: 0, edited: true });
+
+    const typed = await bundle('c');
+    await confirmOpinion(preparer, { versionId: typed.id, opinionType: 'UNMODIFIED', text: 'Typed in by hand.', reportDate: '2026-03-20' });
+    expect((await prisma.reportVersion.findUniqueOrThrow({ where: { id: typed.id } })).opinionCandidate).toBeNull();
+  });
+
+  it('refuses a candidate that is not one, or one for a PDF that offered none', async () => {
+    const uploaded = await bundle('d');
+    const confirmation = { versionId: uploaded.id, opinionType: 'UNMODIFIED' as const, text: 'x', reportDate: '2026-03-20' };
+    await expectIntakeError(confirmOpinion(preparer, { ...confirmation, candidate: 2 }), 'INVALID_INPUT', 'candidate');
+    await expectIntakeError(confirmOpinion(preparer, { ...confirmation, candidate: -1 }), 'INVALID_INPUT', 'candidate');
+    await expectIntakeError(confirmOpinion(preparer, { ...confirmation, candidate: 0.5 }), 'INVALID_INPUT', 'candidate');
+    const engagement = await createEngagement(preparer, { ...ENGAGEMENT, engagementRef: 'ENG-SINGLE' });
+    const single = await uploadVersion(preparer, { engagementId: engagement.id, reasonCode: 'INITIAL', bytes: fixture('en-unmodified.pdf') });
+    await expectIntakeError(confirmOpinion(preparer, { ...confirmation, versionId: single.id, candidate: 0 }), 'INVALID_INPUT', 'candidate');
+    expect((await prisma.reportVersion.findUniqueOrThrow({ where: { id: uploaded.id } })).status).toBe('DRAFT');
   });
 });
 

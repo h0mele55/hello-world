@@ -131,7 +131,8 @@ async function decide(view: RegistryView, input: Parameters<typeof verifyFile>[0
 
   // Recommit to the opinion as this file now reads, with the salt the file carries.
   const located = locateOpinion(dropRunningLines(read.doc.pageLines));
-  if (located.status === 'NOT_FOUND') return { kind: 'ALTERED_OPINION_NOT_CHECKABLE', ...resolved, reason: located.reason };
+  // A file holding several reports is not checked against one of them: which one was registered is the person's choice, not the file's (#77).
+  if (located.status !== 'FOUND') return { kind: 'ALTERED_OPINION_NOT_CHECKABLE', ...resolved, reason: located.status === 'NOT_FOUND' ? located.reason : 'MULTIPLE_OPINION_HEADINGS' };
   const commitment = opinionCommitmentOf({ salt: hexToBytes(claim.opinionSalt as Hex), type: located.type, text: located.text });
   return { kind: commitment === original.opinionCommitment ? 'ALTERED_OPINION_APPEARS_UNCHANGED' : 'ALTERED_OPINION_CHANGED', ...resolved };
 }

@@ -7,7 +7,7 @@ import { canonicalFamilyKey, CommitmentInputError, docHashOf, familyIdOf, isIsoD
 import { db } from '@/lib/db';
 import { currentSealingKey, sealingKeys } from '@/lib/keys';
 import { buildManifest, canonicalManifest, manifestHashOf } from '@/lib/manifest';
-import { locateOpinion, type LocateResult } from '@/lib/opinion/locate';
+import { locateOpinion, type LocateResult, type OpinionPassage } from '@/lib/opinion/locate';
 import { dropRunningLines, normaliseText } from '@/lib/opinion/normalise';
 import { parsePdf, type PdfFlags, type PdfRefusal } from '@/lib/pdf/parse';
 import { requireRole } from '@/lib/roles';
@@ -218,6 +218,7 @@ export async function getVersion(user: SessionUser, versionId: string) {
     flags: version.flags as PdfFlags,
     extraction: openJson<LocateResult>(keys, version.extraction, extractionContext(version.docHash)),
     opinionType: version.opinionType,
+    opinionCandidate: version.opinionCandidate,
     confirmedOpinion: version.confirmedOpinion ? new TextDecoder().decode(open(keys, version.confirmedOpinion, opinionContext(version.docHash))) : null,
     reportDate: version.reportDate?.toISOString().slice(0, 10) ?? null,
     opinionCommitment: version.opinionCommitment,
@@ -247,6 +248,8 @@ export interface Confirmation {
   text: string;
   /** The date of the auditor's report, YYYY-MM-DD. */
   reportDate: string;
+  /** When the PDF holds several reports (#77): which candidate the person started from. */
+  candidate?: number;
 }
 
 /**
@@ -262,6 +265,13 @@ export async function confirmOpinion(user: SessionUser, input: Confirmation) {
   const text = normaliseText(input.text);
   if (text === '' || text.length > 8000) throw new IntakeError('INVALID_INPUT', 'text');
   if (!isIsoDate(input.reportDate)) throw new IntakeError('INVALID_INPUT', 'reportDate');
+  // A choice among candidates is recorded only when there were candidates to choose from (#77).
+  let chosen: OpinionPassage | null = null;
+  if (input.candidate !== undefined) {
+    const extraction = openJson<LocateResult>(sealingKeys(), version.extraction, extractionContext(version.docHash));
+    chosen = extraction.status === 'CANDIDATES' && Number.isInteger(input.candidate) ? (extraction.candidates[input.candidate] ?? null) : null;
+    if (!chosen) throw new IntakeError('INVALID_INPUT', 'candidate');
+  }
 
   const opinionSalt = newSalt();
   const manifestSalt = newSalt();
@@ -287,6 +297,7 @@ export async function confirmOpinion(user: SessionUser, input: Confirmation) {
         status: 'CONFIRMED',
         opinionType: input.opinionType,
         confirmedOpinion: seal(key, new TextEncoder().encode(text), opinionContext(version.docHash)),
+        opinionCandidate: chosen ? input.candidate : null,
         reportDate: new Date(`${input.reportDate}T00:00:00Z`),
         opinionSalt,
         opinionCommitment,
@@ -304,7 +315,12 @@ export async function confirmOpinion(user: SessionUser, input: Confirmation) {
       action: 'version.confirmed',
       subjectType: 'ReportVersion',
       subjectId: version.id,
-      data: { opinionCommitment, manifestHash },
+      data: {
+        opinionCommitment,
+        manifestHash,
+        // Which report the person started from, and whether they changed its text: ids and pages, never the text.
+        ...(chosen ? { candidate: input.candidate, pages: chosen.pageRange, edited: text !== chosen.text } : {}),
+      },
     });
     return true;
   });

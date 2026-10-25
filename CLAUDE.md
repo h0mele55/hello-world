@@ -207,6 +207,13 @@ to one inflect-compliance commit.
   `NOT_FOUND` with a reason, and a person types the opinion instead. Do not
   loosen a heading rule to raise the hit rate without a corpus case that shows
   the new rule cannot pick a wrong passage.
+- **Several reports in one PDF are CANDIDATES, never a pick (#77).** Each is
+  offered only when it is a whole passage ending before the next opinion
+  heading; any doubt about one and none is offered. The person chooses on the
+  confirmation form, and `ReportVersion.opinionCandidate` and the
+  `version.confirmed` event record which (index and pages, never the text).
+  The verifier treats candidates as not checkable: which report was
+  registered is the person's choice, not the file's.
 - **Fixtures are synthetic and reproducible.** `tests/fixtures/pdf/reports.ts`
   holds their text; CI regenerates the PDFs and fails on any byte difference.
   Real reports are listed by URL and SHA-256 in

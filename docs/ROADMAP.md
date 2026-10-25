@@ -371,8 +371,11 @@ Postgres, sign-in, upload with encrypted storage and the confirmation screen
   `tests/fixtures/public-corpus.json` by URL and SHA-256): the opinion is
   found in 21, and none is wrong. The gate counts PDFs holding one auditor's
   report (owner decision 2026-10-25): **20 of 21, 95.2%**. The one miss has
-  a misspelled heading ("Квалифицирно"). Two PDFs that bundle two reports are
-  refused as `MULTIPLE_OPINION_HEADINGS`; #77 lets the preparer choose.
+  a misspelled heading ("Квалифицирно"). Two PDFs that bundle two reports
+  were refused as `MULTIPLE_OPINION_HEADINGS`; since #77 each is offered as
+  two candidates (en-01: a disclaimer on the council and an unmodified
+  opinion on its pension fund; en-03: two disclaimers), the preparer chooses,
+  and the choice is recorded with the confirmation.
 - **Normaliser v1** applies NFKC, replaces lone surrogates, drops soft
   hyphens, zero-width and control characters, and collapses whitespace. At a
   line break, a letter, a hyphen and a lower-case continuation re-join into

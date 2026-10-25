@@ -16,3 +16,6 @@ address before it is sent.
 The script never overwrites an existing file: a second registry would split
 every report family's history in two. To rehearse it, run it against Anvil with
 `local`; `deployments/local.json` is git-ignored.
+
+The app and the worker use the deployment named by `ANCHOR_NETWORK`. CI
+deploys a fresh registry to Anvil with `local` for the end-to-end tests.

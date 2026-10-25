@@ -2,6 +2,10 @@ import { defineConfig, devices } from '@playwright/test';
 
 const PORT = 3100;
 
+// The app's server never holds the issuer key: only the worker does
+// (scripts/worker.ts, run by tests/e2e/anchoring.spec.ts as its own process).
+const serverEnv = Object.fromEntries(Object.entries(process.env).filter(([name, value]) => name !== 'ISSUER_PRIVATE_KEY' && value !== undefined)) as Record<string, string>;
+
 export default defineConfig({
   testDir: 'tests/e2e',
   fullyParallel: true,
@@ -21,6 +25,7 @@ export default defineConfig({
     // generate shows up here exactly as it would for a user.
     command: `npx next start -p ${PORT}`,
     url: `http://127.0.0.1:${PORT}`,
+    env: serverEnv,
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,
   },

@@ -16,7 +16,7 @@ jobs:
   checks:
     name: Lint, typecheck, test, build
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 30
     services:
       postgres:
         image: postgres:16.15-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36
@@ -40,6 +40,9 @@ jobs:
       SEED_APPROVER_EMAIL: approver@ci.example
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: foundry-rs/foundry-toolchain@dba66c27052e63476d886f22216e119ba7e615bf # v1.9.2
+        with:
+          version: v1.8.6
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 22
@@ -60,13 +63,37 @@ jobs:
       - run: npm run typecheck
       - name: Unit tests
         run: npm test
-      - name: Migrations apply from scratch; intake against Postgres
+      - name: Migrations apply from scratch; intake and approval against Postgres
         run: npm run test:db
+      - name: Anchoring worker against Postgres and Anvil
+        run: npm run test:anchoring
       - name: Seed the two users
         run: npm run db:seed
+      - name: A local chain for the end-to-end tests
+        run: |
+          nohup anvil --port 8545 --chain-id 31337 --slots-in-an-epoch 1 --silent > "$RUNNER_TEMP/anvil.log" 2>&1 &
+          for i in $(seq 1 50); do cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1 && break; sleep 0.2; done
+          # Fresh keys for this run; Anvil funds them. No key is committed anywhere.
+          deployer="0x$(openssl rand -hex 32)"; echo "::add-mask::$deployer"
+          issuer="0x$(openssl rand -hex 32)"; echo "::add-mask::$issuer"
+          deployer_address=$(cast wallet address --private-key "$deployer")
+          issuer_address=$(cast wallet address --private-key "$issuer")
+          cast rpc --rpc-url http://127.0.0.1:8545 anvil_setBalance "$deployer_address" 0x16345785D8A0000 > /dev/null
+          cast rpc --rpc-url http://127.0.0.1:8545 anvil_setBalance "$issuer_address" 0x8AC7230489E80000 > /dev/null
+          DEPLOYER_PRIVATE_KEY="$deployer" ISSUER_ADDRESS="$issuer_address" ISSUER_ORG_NAME="$SEED_ORG_NAME" \
+            LOCAL_RPC_URL=http://127.0.0.1:8545 npx tsx scripts/deploy-registry.ts local
+          {
+            echo "ANCHOR_NETWORK=local"
+            echo "LOCAL_RPC_URL=http://127.0.0.1:8545"
+            echo "ISSUER_ADDRESS=$issuer_address"
+            echo "ISSUER_PRIVATE_KEY=$issuer"
+          } >> "$GITHUB_ENV"
       - run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: '1'
+      - name: The issuer key is not in the build
+        run: |
+          if grep -rqF "${ISSUER_PRIVATE_KEY#0x}" .next; then echo "The issuer key appears in .next"; exit 1; fi
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
       - name: End-to-end tests

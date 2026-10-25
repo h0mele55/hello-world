@@ -2,6 +2,7 @@ import 'server-only';
 import type { SessionUser } from '@/auth';
 import { Prisma } from '@/generated/prisma/client';
 import type { OpinionType, ReasonCode, ReportType } from '@/generated/prisma/enums';
+import { appendAuditEvent } from '@/lib/audit';
 import { canonicalFamilyKey, CommitmentInputError, docHashOf, familyIdOf, isIsoDate, newSalt, opinionCommitmentOf } from '@/lib/commitments';
 import { db } from '@/lib/db';
 import { currentSealingKey, sealingKeys } from '@/lib/keys';
@@ -17,7 +18,8 @@ import { discardStoredFile, readStoredFile, storeFile } from '@/lib/storage';
  * Taking a report in: an engagement (the report family), an uploaded version,
  * and the opinion a person confirms. Every function checks the caller's role
  * and organisation itself and fails with a named IntakeError (CLAUDE.md
- * rule 7). Nothing here writes to a chain.
+ * rule 7), and records what it changed in the audit log in the same
+ * transaction. Nothing here writes to a chain.
  */
 
 export type IntakeErrorCode =
@@ -78,13 +80,14 @@ export async function createEngagement(user: SessionUser, input: NewEngagement) 
   const familyId = familyIdOf(serverEnv().ISSUER_FAMILY_SECRET, key);
 
   return db().$transaction(async (tx) => {
-    const client = await tx.client.upsert({
-      where: { orgId_country_registrationNumber: { orgId: user.orgId, country, registrationNumber: key.registrationNumber } },
-      create: { orgId: user.orgId, name: clientName, country, registrationNumber: key.registrationNumber },
-      update: {},
-    });
+    // INSERT … ON CONFLICT DO NOTHING, then read: unlike a find-then-create
+    // upsert, two requests creating the same new client cannot both insert.
+    const clientKey = { orgId: user.orgId, country, registrationNumber: key.registrationNumber };
+    await tx.client.createMany({ data: [{ ...clientKey, name: clientName }], skipDuplicates: true });
+    const client = await tx.client.findUniqueOrThrow({ where: { orgId_country_registrationNumber: clientKey } });
+    let engagement;
     try {
-      return await tx.engagement.create({
+      engagement = await tx.engagement.create({
         data: {
           clientId: client.id,
           engagementRef: key.engagementRef,
@@ -98,6 +101,15 @@ export async function createEngagement(user: SessionUser, input: NewEngagement) 
       if (isUniqueViolation(error)) throw new IntakeError('ENGAGEMENT_EXISTS');
       throw error;
     }
+    await appendAuditEvent(tx, {
+      orgId: user.orgId,
+      actorId: user.id,
+      action: 'engagement.created',
+      subjectType: 'Engagement',
+      subjectId: engagement.id,
+      data: { familyId, clientId: client.id, reportType: key.reportType },
+    });
+    return engagement;
   });
 }
 
@@ -138,22 +150,33 @@ export async function uploadVersion(user: SessionUser, input: { engagementId: st
 
   const stored = await storeFile(input.bytes);
   try {
-    const created = await db().reportVersion.create({
-      data: {
-        engagement: { connect: { id: engagement.id } },
-        version,
-        reasonCode: input.reasonCode,
-        docHash,
-        pageCount: parsed.pdf.pageCount,
-        anchorOnly,
-        flags,
-        extraction: sealJson(key, extraction, extractionContext(docHash)),
-        preparedBy: { connect: { id: user.id } },
-        storedFile: {
-          create: { path: stored.path, iv: stored.iv, authTag: stored.authTag, keyVersion: stored.keyVersion, sha256: stored.sha256, size: stored.size },
+    const created = await db().$transaction(async (tx) => {
+      const row = await tx.reportVersion.create({
+        data: {
+          engagement: { connect: { id: engagement.id } },
+          version,
+          reasonCode: input.reasonCode,
+          docHash,
+          pageCount: parsed.pdf.pageCount,
+          anchorOnly,
+          flags,
+          extraction: sealJson(key, extraction, extractionContext(docHash)),
+          preparedBy: { connect: { id: user.id } },
+          storedFile: {
+            create: { path: stored.path, iv: stored.iv, authTag: stored.authTag, keyVersion: stored.keyVersion, sha256: stored.sha256, size: stored.size },
+          },
         },
-      },
-      select: { id: true },
+        select: { id: true },
+      });
+      await appendAuditEvent(tx, {
+        orgId: user.orgId,
+        actorId: user.id,
+        action: 'version.uploaded',
+        subjectType: 'ReportVersion',
+        subjectId: row.id,
+        data: { engagementId: engagement.id, version, reasonCode: input.reasonCode, docHash, pageCount: parsed.pdf.pageCount, anchorOnly },
+      });
+      return row;
     });
     return { id: created.id, version, docHash, anchorOnly, flags, extraction };
   } catch (error) {
@@ -254,24 +277,37 @@ export async function confirmOpinion(user: SessionUser, input: Confirmation) {
   });
   const key = currentSealingKey();
 
-  const updated = await db().reportVersion.updateMany({
-    where: { id: version.id, status: 'DRAFT' },
-    data: {
-      status: 'CONFIRMED',
-      opinionType: input.opinionType,
-      confirmedOpinion: seal(key, new TextEncoder().encode(text), opinionContext(version.docHash)),
-      reportDate: new Date(`${input.reportDate}T00:00:00Z`),
-      opinionSalt,
-      opinionCommitment,
-      manifestSalt,
-      manifest: seal(key, new TextEncoder().encode(canonicalManifest(manifest)), manifestContext(version.docHash)),
-      manifestHash: manifestHashOf(manifest),
-      confirmedById: user.id,
-      confirmedAt: new Date(),
-    },
+  const manifestHash = manifestHashOf(manifest);
+  const confirmed = await db().$transaction(async (tx) => {
+    const updated = await tx.reportVersion.updateMany({
+      where: { id: version.id, status: 'DRAFT' },
+      data: {
+        status: 'CONFIRMED',
+        opinionType: input.opinionType,
+        confirmedOpinion: seal(key, new TextEncoder().encode(text), opinionContext(version.docHash)),
+        reportDate: new Date(`${input.reportDate}T00:00:00Z`),
+        opinionSalt,
+        opinionCommitment,
+        manifestSalt,
+        manifest: seal(key, new TextEncoder().encode(canonicalManifest(manifest)), manifestContext(version.docHash)),
+        manifestHash,
+        confirmedById: user.id,
+        confirmedAt: new Date(),
+      },
+    });
+    if (updated.count !== 1) return false;
+    await appendAuditEvent(tx, {
+      orgId: user.orgId,
+      actorId: user.id,
+      action: 'version.confirmed',
+      subjectType: 'ReportVersion',
+      subjectId: version.id,
+      data: { opinionCommitment, manifestHash },
+    });
+    return true;
   });
-  if (updated.count !== 1) throw new IntakeError('NOT_DRAFT');
-  return { opinionCommitment, manifestHash: manifestHashOf(manifest) };
+  if (!confirmed) throw new IntakeError('NOT_DRAFT');
+  return { opinionCommitment, manifestHash };
 }
 
 /** Deletes a draft and its stored file, so a wrong upload does not block the family. */
@@ -282,6 +318,14 @@ export async function discardDraft(user: SessionUser, versionId: string) {
     const { count } = await tx.reportVersion.deleteMany({ where: { id: version.id, status: 'DRAFT' } });
     if (count !== 1) return false;
     await tx.storedFile.delete({ where: { id: version.storedFileId } });
+    await appendAuditEvent(tx, {
+      orgId: user.orgId,
+      actorId: user.id,
+      action: 'version.discarded',
+      subjectType: 'ReportVersion',
+      subjectId: version.id,
+      data: { engagementId: version.engagementId, version: version.version, docHash: version.docHash },
+    });
     return true;
   });
   if (!deleted) throw new IntakeError('NOT_DRAFT');

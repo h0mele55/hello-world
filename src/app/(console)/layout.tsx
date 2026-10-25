@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { getTranslations } from 'next-intl/server';
+import { getFormatter, getTranslations } from 'next-intl/server';
 import { StatusBadge } from '@inflect/ui/components/ui/status-badge';
 import { getIssuerKeyStatus, resolveAnchorTarget } from '@/lib/anchoring/queries';
 import { latestNightlyCheck } from '@/lib/console/audit-log';
@@ -16,6 +16,7 @@ export const dynamic = 'force-dynamic';
 export default async function ConsoleLayout({ children }: { children: ReactNode }) {
   const user = await requireUser();
   const t = await getTranslations();
+  const format = await getFormatter();
   const [key, nightly, unjournaled] = await Promise.all([getIssuerKeyStatus(resolveAnchorTarget().target), latestNightlyCheck(user), openUnjournaledCount(user)]);
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-section px-default py-page">
@@ -71,6 +72,11 @@ export default async function ConsoleLayout({ children }: { children: ReactNode 
           <Link href="/audit-log" className="underline">
             {t('nav.auditLog')}
           </Link>
+        </p>
+      ) : null}
+      {key?.rpcDisagreedAt ? (
+        <p role="alert" className="text-content-error" data-testid="rpc-disagree">
+          {t('nav.rpcDisagree', { since: format.dateTime(key.rpcDisagreedAt, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }) })}
         </p>
       ) : null}
       {key?.low ? (

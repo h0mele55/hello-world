@@ -7,7 +7,7 @@ on a public testnet; none of this makes its anchors legally binding (rule 9).
 
 | Process | How | Schedule | It alerts by |
 | --- | --- | --- | --- |
-| The anchoring worker | `npm run worker` | continuously, a pass every 15 s | error log lines; the console's low-balance banner |
+| The anchoring worker | `npm run worker` | continuously, a pass every 15 s | error log lines; the console's low-balance and endpoint-disagreement banners |
 | The mailer | `npm run mailer` | continuously, a pass every 30 s (`MAILER_INTERVAL_MS`) | an error line naming notices that failed for good |
 | The audit-chain check | `npm run audit:check` | nightly, e.g. `17 2 * * *` | exit code 1 and an `AUDIT CHAIN BROKEN` error line; the console's banner |
 | The registry watch | `npm run watch:registry` | every ten minutes, e.g. `*/10 * * * *` | exit code 1 while any write the journal did not make is unreviewed, an error line for each new one; the console's banner |
@@ -21,6 +21,10 @@ no key. The backup also needs `FILE_STORAGE_DIR` and `BACKUP_DIR`.
 The watch must run often, not nightly: a revocation it reports takes effect
 after the registry's delay (24 hours by default), and the owner must cancel it
 before then (`docs/runbooks/stolen-issuer-key.md`).
+
+The worker reads two RPC endpoints from different providers,
+`<NETWORK>_RPC_URL` and `<NETWORK>_RPC_URL_2`, and settles a row only on what
+both read (#92); it refuses to start without the second.
 
 Run the worker and the mailer under a supervisor that restarts them (for
 example a systemd unit with `Restart=always`). Each tries a failed pass again

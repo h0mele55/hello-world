@@ -2,7 +2,11 @@
 
 Two parts of the system read the chain through RPC endpoints:
 
-- **The worker** reads and sends through one endpoint (`SEPOLIA_RPC_URL`).
+- **The worker** reads and sends through `SEPOLIA_RPC_URL`, and settles a row
+  (FINAL, linked, failed, revoked, cancelled) only on what that endpoint and a
+  second one, `SEPOLIA_RPC_URL_2` from another provider, both read at one
+  finalized block (#92). It refuses to start without the second, or with one
+  on the same host as the first.
 - **The verifier** reads through two independent endpoints, and refuses to
   give a verdict when they disagree or one cannot be reached (rule 7).
   - `/verify` takes them from `VERIFY_RPC_URL_1` and `VERIFY_RPC_URL_2`.
@@ -30,6 +34,47 @@ Run it under one that restarts it, for example a systemd unit with
    restart the worker. The worker checks the chain id and the registry's
    bytecode before every write, so a wrong endpoint is refused, not used.
 3. Never resend a write by hand.
+
+## The worker's two endpoints disagree
+
+**What you see.** A banner on every console page: "The worker's two RPC
+endpoints have disagreed about the chain since …". The worker logs
+`"the two RPC endpoints disagree; what depends on it waits until they agree"`
+with what they disagree about (a finalized block, a receipt, a record), and
+its pass line carries `"rpcDisagreed": true`.
+
+**What happens meanwhile.** Nothing is settled on one endpoint's word.
+- Every row whose settlement depends on the disputed read stays as it was:
+  a BROADCAST anchor stays BROADCAST, a scheduled revocation stays SCHEDULED.
+  Each pass reads both again.
+- The worker still sends new writes through the first endpoint: what a write
+  sends is checked by the registry itself, and simulated first. Only what the
+  worker concludes from the chain needs two endpoints. A refusal before
+  sending (a record that does not match, a simulation that reverts) rests on
+  the first endpoint alone: it sends nothing and returns the approval, so a
+  lying first endpoint can delay writes but never forge an outcome. If writes
+  fail that way while the banner is up, give the approvals again once the
+  endpoint is replaced.
+- An endpoint that is merely behind is not a disagreement: the worker reads at
+  the lower of the two finalized blocks and waits.
+
+The banner clears after the first pass in which the two agree.
+
+**What to do.**
+1. Find which endpoint is wrong. Ask both, and a public explorer, for the
+   same finalized block, for example `cast block <number> --rpc-url <url>`,
+   and compare the hashes. For a record, `cast call <registry>
+   'getRecord(bytes32)' <recordId> --block <number> --rpc-url <url>`.
+2. Replace the endpoint that differs from the explorer with another
+   independent provider, set `SEPOLIA_RPC_URL` or `SEPOLIA_RPC_URL_2`, and
+   restart the worker.
+3. Never point both variables at the same provider to make the banner go
+   away: the worker refuses the same host, and two URLs of one provider are
+   one witness.
+4. If the first endpoint was the wrong one, treat what it told the worker as
+   suspect: run the registry watch (`npm run watch:registry`) and look for
+   rows that went INDETERMINATE while it was in use
+   ([stuck-writes.md](stuck-writes.md)).
 
 ## The verifier's endpoints
 

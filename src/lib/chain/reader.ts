@@ -47,14 +47,14 @@ export function createRegistryReader(client: PublicClient, deployment: Deploymen
     return decodeRecord(recordId, raw);
   }
 
-  async function findByDocHash(docHash: Hex): Promise<RegistryRecord | null> {
-    const recordId = await client.readContract({ address, abi: registryAbi, functionName: 'recordOfDoc', args: [docHash] });
-    return recordId === ZERO_HASH ? null : getRecord(recordId);
+  async function findByDocHash(docHash: Hex, at: { blockNumber?: bigint } = {}): Promise<RegistryRecord | null> {
+    const recordId = await client.readContract({ address, abi: registryAbi, functionName: 'recordOfDoc', args: [docHash], blockNumber: at.blockNumber });
+    return recordId === ZERO_HASH ? null : getRecord(recordId, at);
   }
 
-  async function latestOf(familyId: Hex): Promise<RegistryRecord | null> {
-    const recordId = await client.readContract({ address, abi: registryAbi, functionName: 'latestOf', args: [familyId] });
-    return recordId === ZERO_HASH ? null : getRecord(recordId);
+  async function latestOf(familyId: Hex, at: { blockNumber?: bigint } = {}): Promise<RegistryRecord | null> {
+    const recordId = await client.readContract({ address, abi: registryAbi, functionName: 'latestOf', args: [familyId], blockNumber: at.blockNumber });
+    return recordId === ZERO_HASH ? null : getRecord(recordId, at);
   }
 
   /**

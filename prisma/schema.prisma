@@ -353,14 +353,17 @@ model AuditEvent {
   @@unique([orgId, seq])
 }
 
-/// The issuer key's last balance check, written by the worker and read by the
-/// low-balance banner. One row per chain and key.
+/// The issuer key's last balance check, and whether its endpoints last
+/// disagreed, written by the worker and read by the console's banners. One row
+/// per chain and key.
 model IssuerKeyStatus {
-  chainId    Int
-  address    String
-  balanceWei String
-  low        Boolean
-  checkedAt  DateTime
+  chainId        Int
+  address        String
+  balanceWei     String
+  low            Boolean
+  checkedAt      DateTime
+  /// Set by a pass in which the worker's two RPC endpoints disagreed (#92), cleared by one in which they did not.
+  rpcDisagreedAt DateTime?
 
   @@id([chainId, address])
 }

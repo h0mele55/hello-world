@@ -13,6 +13,7 @@
  *                       leaves KMS (docs/runbooks/kms-key.md).
  *   ISSUER_ADDRESS      optional; when set, must be the key's address (it is what the web app journals)
  *   <NETWORK>_RPC_URL   e.g. SEPOLIA_RPC_URL, BASE_SEPOLIA_RPC_URL, LOCAL_RPC_URL
+ *   <NETWORK>_RPC_URL_2 the worker's second endpoint, from another provider (#92); a local chain may omit it
  *
  * Run from the app's directory: the PDF parser and deployments/ are found from there.
  */
@@ -21,10 +22,11 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 import { createPublicClient, getAddress, http, isHex, type LocalAccount, type PublicClient } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
+import { ChainError } from '../src/lib/chain/errors';
 import { createKmsAccount, KmsSignerError } from '../src/lib/chain/kms-account';
 import { PrismaClient } from '../src/generated/prisma/client';
 import type { Deployment } from '../src/lib/chain/deployment';
-import { isNetworkName, loadDeployment, loadDeploymentFile, NETWORKS, rpcUrlFor, type NetworkName } from '../src/lib/chain/networks';
+import { isNetworkName, loadDeployment, loadDeploymentFile, NETWORKS, rpcUrlFor, secondRpcUrlFor, type NetworkName } from '../src/lib/chain/networks';
 
 export function refuse(tool: string, message: string): never {
   console.error(JSON.stringify({ level: 'error', message: `${tool} refused to start: ${message}` }));
@@ -73,6 +75,19 @@ export async function issuerEnv(tool: string): Promise<IssuerEnv> {
       await prisma.$disconnect();
     },
   };
+}
+
+/**
+ * The worker's second endpoint (#92): every read that settles a row must agree
+ * on both. A refusal names the variable; never the URL, which may carry a key.
+ */
+export function secondPublicClient(tool: string, network: NetworkName): PublicClient {
+  try {
+    return createPublicClient({ chain: NETWORKS[network], transport: http(secondRpcUrlFor(network)) }) as PublicClient;
+  } catch (error) {
+    if (error instanceof ChainError) refuse(tool, `${error.code}: ${error.message}`);
+    throw error;
+  }
 }
 
 /** The account that signs as the issuer: a raw key from the environment, or a Cloud KMS key version. */

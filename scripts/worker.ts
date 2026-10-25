@@ -9,6 +9,8 @@
  *   FILE_ENCRYPTION_KEY, FILE_ENCRYPTION_KEY_VERSION, FILE_STORAGE_DIR
  *                       the same values as the app's: the worker reads originals and stores copies
  *   APP_PUBLIC_URL      the app's public origin; stamps and certificates point at <origin>/verify
+ *   <NETWORK>_RPC_URL_2 a second endpoint, from another provider: a row is settled only on
+ *                       what both read at one finalized block (#92)
  *
  * Any number of workers may run: an advisory lock lets one work a given
  * issuer key at a time. A pass that fails (an endpoint or the database out)
@@ -18,7 +20,7 @@
 import path from 'node:path';
 import { runWorkerPass } from '../src/lib/anchoring/worker';
 import { createFileStore } from '../src/lib/file-store';
-import { issuerEnv, refuse, requireEnv } from './issuer-env';
+import { issuerEnv, refuse, requireEnv, secondPublicClient } from './issuer-env';
 
 const fail = (message: string): never => refuse('worker', message);
 /** Passes in a row that may fail before the process gives up: about five minutes at the default interval. */
@@ -37,6 +39,7 @@ async function main() {
   if (!/^https?:\/\/[^\s]+$/.test(verifyBaseUrl)) fail('APP_PUBLIC_URL must be an http(s) URL');
 
   const { network, account, deployment, publicClient, prisma, lockClient, close } = await issuerEnv('worker');
+  const checkClient = secondPublicClient('worker', network);
 
   let stopping = false;
   const stop = () => {
@@ -53,7 +56,7 @@ async function main() {
     do {
       let report;
       try {
-        report = await runWorkerPass({ prisma, lockClient, publicClient, account, deployment, files, verifyBaseUrl });
+        report = await runWorkerPass({ prisma, lockClient, publicClient, checkClient, account, deployment, files, verifyBaseUrl });
         failedPasses = 0;
       } catch (error) {
         // An endpoint or the database out for a moment must not stop anchoring:
@@ -76,6 +79,7 @@ async function main() {
             steps: report.steps.length,
             certified: report.certified.length,
             errors: report.errors.length,
+            rpcDisagreed: report.rpcDisagreed,
           }),
         );
       }

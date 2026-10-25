@@ -17,7 +17,7 @@ describe('the signing key boundary', () => {
     expect(mentioning.filter((file) => file.startsWith('src/'))).toEqual([]);
   });
 
-  it('only the worker script reads it', () => {
-    expect(mentioning).toEqual(['scripts/worker.ts']);
+  it('only the scripts acting as the issuer read it, through one module', () => {
+    expect(mentioning).toEqual(['scripts/issuer-env.ts']);
   });
 });

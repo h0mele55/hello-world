@@ -40,6 +40,7 @@ export type AuditAction =
   | 'anchor.final'
   | 'anchor.failed'
   | 'anchor.copy_requeued'
+  | 'anchor.nonce_released'
   | 'version.stamped'
   | 'version.certified';
 

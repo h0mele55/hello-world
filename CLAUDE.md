@@ -183,7 +183,8 @@ to one inflect-compliance commit.
 - **Only the worker signs or sends** (`src/lib/anchoring/worker.ts`, run by
   `scripts/worker.ts`). The app approves, which writes the journal's INTENT
   row in the same transaction as the approval; it never talks to a chain
-  with a key. Only `scripts/worker.ts` reads `ISSUER_PRIVATE_KEY`, and
+  with a key. Only `scripts/issuer-env.ts` (used by the worker and the
+  operator tools) reads `ISSUER_PRIVATE_KEY`, and
   `tests/unit/key-boundary.test.ts` refuses the name anywhere under `src/`.
 - **Journal before the bytes leave.** The worker signs, writes the nonce and
   hash to the row, then sends. Every transition is one transaction,
@@ -191,7 +192,10 @@ to one inflect-compliance commit.
 - **Unknown is INDETERMINATE, and INDETERMINATE is never resent.** It is
   settled only by reading the chain: receipts for every hash, the node's
   pool, the issuer's finalized nonce, the record for the document. While one
-  is unsettled no new LIVE write starts for that issuer key (#78).
+  is unsettled no new LIVE write starts for that issuer key. When it cannot be
+  settled (its transaction unknown, its nonce unused), an approver runs
+  `scripts/settle-write.ts`, which uses the nonce with a no-op transfer; the
+  worker then reads the outcome.
 - **A row holds its nonce only while its transaction may land or once its own
   transaction used it**; otherwise clear the nonce. A partial unique index
   allows one row per (chain, issuer, nonce).

@@ -512,8 +512,10 @@ Departures from the prompt below, and decisions it left open:
   the row's, the record for its document (FINAL, linked) or `NONCE_CONSUMED`
   (FAILED). A row whose transaction is unknown and whose nonce is unused
   cannot be settled, and nothing guesses: it holds the issuer key, so no new
-  LIVE write starts until an operator uses that nonce with a no-op
-  transaction, after which the worker reads the outcome (#78).
+  LIVE write starts until an approver runs `scripts/settle-write.ts`, which
+  uses that nonce with a zero-value transfer to the issuer, recorded in the
+  audit log under their name before it is sent; the worker then reads the
+  outcome (#78).
 - **One worker per issuer key** holds a session advisory lock on a dedicated
   connection for its pass. A partial unique index on (chain, issuer, nonce)
   backs it: a second writer that picked the same nonce cannot journal it, so
@@ -563,7 +565,7 @@ Departures from the prompt below, and decisions it left open:
   transaction-scoped advisory lock. A trigger refuses UPDATE and DELETE.
   Events carry ids, hashes, statuses and reason codes; never a client name,
   an opinion or a manifest.
-- **The key boundary.** Only `scripts/worker.ts` reads `ISSUER_PRIVATE_KEY`;
+- **The key boundary.** Only `scripts/issuer-env.ts` (the worker and the operator tools) reads `ISSUER_PRIVATE_KEY`;
   the app reads `ANCHOR_NETWORK` and `ISSUER_ADDRESS`. A unit test refuses
   the name anywhere under `src/`, the end-to-end server is started without
   it, and CI greps the build for the key.

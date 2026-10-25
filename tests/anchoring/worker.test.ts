@@ -25,6 +25,7 @@ import { foundry } from 'viem/chains';
 import type { SessionUser } from '@/auth';
 import { PrismaClient } from '@/generated/prisma/client';
 import { approveVersion, requeueCopy, setChainWriteMode } from '@/lib/anchoring/approve';
+import { releaseStuckNonce } from '@/lib/anchoring/settle';
 import { AnchoringError } from '@/lib/anchoring/errors';
 import type { AnchorTarget } from '@/lib/anchoring/target';
 import { runWorkerPass, type WorkerDeps } from '@/lib/anchoring/worker';
@@ -425,9 +426,24 @@ describe('a worker that dies, and writes whose outcome is unknown', () => {
     await pass();
     expect(await writeOf(next)).toMatchObject({ status: 'INTENT', error: 'ISSUER_BLOCKED', txHash: null });
 
-    // The operator uses nonce 0 with a no-op transaction; the worker reads the outcome.
-    const noop = await issuerWallet().sendTransaction({ to: issuer.address, value: 0n, nonce: 0 });
-    await publicClient.waitForTransactionReceipt({ hash: noop });
+    // An approver releases nonce 0 with a no-op transfer (#78); the worker reads the outcome.
+    const settleDeps = { prisma, lockClient, publicClient, account: issuer, deployment };
+    const refusal = (promise: Promise<unknown>) => promise.then(() => null, (e: { code?: string }) => e.code);
+    expect(await refusal(releaseStuckNonce(settleDeps, { chainWriteId: lost, operatorEmail: preparer.email }))).toBe('OPERATOR_NOT_APPROVER');
+    expect(await refusal(releaseStuckNonce(settleDeps, { chainWriteId: next, operatorEmail: approver.email }))).toBe('NOT_INDETERMINATE');
+    const other = new pg.Client({ connectionString: process.env.DATABASE_URL });
+    await other.connect();
+    try {
+      await other.query('SELECT pg_advisory_lock(2, hashtext($1))', [`31337:${issuer.address.toLowerCase()}`]);
+      expect(await refusal(releaseStuckNonce(settleDeps, { chainWriteId: lost, operatorEmail: approver.email }))).toBe('ISSUER_LOCKED');
+    } finally {
+      await other.end();
+    }
+    const released = await releaseStuckNonce(settleDeps, { chainWriteId: lost, operatorEmail: approver.email });
+    expect(released.nonce).toBe(0);
+    await publicClient.waitForTransactionReceipt({ hash: released.txHash });
+    expect(await prisma.auditEvent.findFirstOrThrow({ where: { action: 'anchor.nonce_released' } })).toMatchObject({ actorId: approver.id, subjectId: lost });
+    expect(await refusal(releaseStuckNonce(settleDeps, { chainWriteId: lost, operatorEmail: approver.email }))).toBe('NONCE_NOT_NEXT');
     await mine();
     const settled = await pass();
     expect(settled.steps.map((s) => [s.writeId, s.to])).toEqual([
@@ -549,13 +565,13 @@ describe('the worker process', () => {
   const ROOT = path.resolve(import.meta.dirname, '..', '..');
   const run = promisify(execFile);
 
-  /** Runs scripts/worker.ts --once from the app's directory, with a deployment record for this Anvil. */
-  async function runScript(env: Record<string, string>) {
+  /** Runs a script (by default the worker, once) from the app's directory, with a deployment record for this Anvil. */
+  async function runScript(env: Record<string, string>, script: string[] = ['worker.ts', '--once']) {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-worker-'));
     const { chainId, address, runtimeBytecodeHash } = deployment;
     fs.writeFileSync(path.join(dir, 'local.json'), JSON.stringify({ chainId, address, runtimeBytecodeHash }));
     try {
-      return await run(path.join(ROOT, 'node_modules', '.bin', 'tsx'), [path.join(ROOT, 'scripts', 'worker.ts'), '--once'], {
+      return await run(path.join(ROOT, 'node_modules', '.bin', 'tsx'), [path.join(ROOT, 'scripts', script[0]), ...script.slice(1)], {
         cwd: ROOT,
         encoding: 'utf8',
         env: {
@@ -591,6 +607,15 @@ describe('the worker process', () => {
     await mine();
     await runScript({});
     expect((await versionOf(versionId)).status).toBe('COMPLETE');
+  });
+
+  it('settle-write refuses, by name, a write that is not there', async () => {
+    const failed = await runScript({}, ['settle-write.ts', 'no-such-write', '--operator', approver.email]).then(
+      () => null,
+      (e: { code: number; stderr: string }) => e,
+    );
+    expect(failed?.code).toBe(1);
+    expect(failed?.stderr).toContain('"code":"NOT_FOUND"');
   });
 
   it('refuses to start when ISSUER_ADDRESS is not its key', async () => {

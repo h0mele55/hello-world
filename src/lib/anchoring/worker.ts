@@ -729,6 +729,8 @@ async function stampCopy(ctx: Context, write: Write): Promise<{ ok: true; docHas
 /**
  * Anchor-only versions (signed or edit-protected) are never rewritten: once
  * their ANCHOR is final they get a verification certificate and are COMPLETE.
+ * Whichever key anchored it: a certificate signs nothing, and a version
+ * anchored by a key since rotated away still needs one (docs/runbooks).
  */
 async function certifyAnchorOnly(ctx: Context, report: PassReport) {
   const versions = await ctx.prisma.reportVersion.findMany({
@@ -736,7 +738,7 @@ async function certifyAnchorOnly(ctx: Context, report: PassReport) {
       status: 'ANCHORED',
       anchorOnly: true,
       certificateStoredFileId: null,
-      chainWrites: { some: { kind: 'ANCHOR', status: 'FINAL', chainId: ctx.chainId, registry: ctx.registry, issuer: ctx.issuer } },
+      chainWrites: { some: { kind: 'ANCHOR', status: 'FINAL', chainId: ctx.chainId, registry: ctx.registry } },
     },
     include: { engagement: { include: { client: { select: { orgId: true } } } } },
     orderBy: { createdAt: 'asc' },

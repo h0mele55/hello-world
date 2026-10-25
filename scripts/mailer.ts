@@ -22,6 +22,8 @@ const refuse = (message: string): never => {
   process.exit(2);
 };
 const env = (name: string) => process.env[name] || refuse(`${name} is not set`);
+/** Passes in a row that may fail before the process gives up, for its supervisor to restart. */
+const MAX_FAILED_PASSES = 20;
 
 async function main() {
   const once = process.argv.includes('--once');
@@ -40,10 +42,19 @@ async function main() {
   process.once('SIGINT', () => (stopping = true));
   const intervalMs = Number(process.env.MAILER_INTERVAL_MS || 30_000);
   if (!Number.isInteger(intervalMs) || intervalMs < 1_000) refuse('MAILER_INTERVAL_MS must be a whole number of milliseconds, at least 1000');
+  let failedPasses = 0;
   try {
     do {
-      const report = await deliverNotifications({ prisma, transport, appUrl });
-      console.log(JSON.stringify({ level: report.failed.length ? 'error' : 'info', message: 'mail pass', sent: report.sent.length, retrying: report.retrying.length, failed: report.failed, cancelled: report.cancelled.length }));
+      try {
+        const report = await deliverNotifications({ prisma, transport, appUrl });
+        failedPasses = 0;
+        console.log(JSON.stringify({ level: report.failed.length ? 'error' : 'info', message: 'mail pass', sent: report.sent.length, retrying: report.retrying.length, failed: report.failed, cancelled: report.cancelled.length }));
+      } catch (error) {
+        // The database out for a moment must not stop the mail: what is unsent stays queued.
+        failedPasses += 1;
+        if (once || failedPasses >= MAX_FAILED_PASSES) throw error;
+        console.error(JSON.stringify({ level: 'error', message: 'mail pass failed; trying again after the interval', error: error instanceof Error ? error.name : typeof error, failedPasses }));
+      }
       if (!once && !stopping) await new Promise((resolve) => setTimeout(resolve, intervalMs));
     } while (!once && !stopping);
   } finally {

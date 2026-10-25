@@ -26,7 +26,10 @@ Sepolia run waits on #4 too. Phase 5, the issuer console, is done on Anvil:
 roles, two-step sign-in and rate limits (5a), the client list, version
 timeline and dashboard (5b), revocation (5c), the audit-log viewer, nightly
 chain check and backups (5d), and recipients with the two-person exit gate
-(5e). `docs/operations.md` says what runs besides the app.
+(5e). `docs/operations.md` says what runs besides the app. Phase 6 is under
+way: `docs/threat-model.md` names each threat with the test that proves its
+mitigation, or the issue that tracks it, and `docs/runbooks/` says what to do
+when a key, an owner, an endpoint or the database must change.
 
 ## Rules every phase keeps
 
@@ -74,6 +77,7 @@ node scripts/sync-inflect-ui.mjs --check   # re-derive the vendored tree from up
 npm run contracts:artifact     # regenerate src/lib/chain/registry-artifact.ts after a contract change
 npm run test:integration       # chain adapter and verifier against throwaway Anvil nodes
 npx tsx scripts/deploy-registry.ts <sepolia|local>       # deploy; reads keys from env only
+npx tsx scripts/owner-call.ts <sepolia|local> <add-issuer|remove-issuer|transfer-owner|accept-owner> [address]   # prints the owner's transaction; sends nothing
 
 # Database (Postgres 16: `docker compose up -d`, or any local server; Prisma 7 does not read .env)
 npm run db:migrate             # create and apply a migration in development
@@ -251,6 +255,17 @@ to one inflect-compliance commit.
   chain says whether the record it names is this file.
 - **The worker runs from the app's directory** (the PDF parser is found from
   there) and needs `FILE_*` and `APP_PUBLIC_URL` besides its chain settings.
+  A failed pass (an endpoint or the database out) is tried again after the
+  interval; after 20 in a row the process exits 1 for its supervisor to
+  restart. The mailer does the same.
+- **Rows belong to the key that was current when they were approved**, so a
+  rotation drains the old key before switching (`docs/runbooks/key-rotation.md`,
+  rehearsed in `tests/anchoring/worker.test.ts`). Certificates are made for an
+  anchor-only version whichever key anchored it: a certificate signs nothing.
+- **The owner's acts go through `scripts/owner-call.ts`**, which checks the
+  chain and the registry, simulates, and prints the transaction for the owner
+  (the deployer key, later a Safe) to execute. It sends only an issuer change,
+  only with `--send` and `OWNER_PRIVATE_KEY`, and never an ownership move.
 
 ## The verifier
 

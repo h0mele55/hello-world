@@ -84,6 +84,18 @@ export async function fromOwnAddress(page: Page, person = '') {
   state.current = address;
 }
 
+/**
+ * Collects every Content Security Policy violation the page reports (#84).
+ * Chromium logs each one as a console error; read the list at the end.
+ */
+export function watchCsp(page: Page): string[] {
+  const seen: string[] = [];
+  page.on('console', (message) => {
+    if (message.type() === 'error' && /Content Security Policy/i.test(message.text())) seen.push(`${page.url()}: ${message.text()}`);
+  });
+  return seen;
+}
+
 export async function signIn(page: Page, user: TestUser) {
   await fromOwnAddress(page, user.email);
   await page.goto('/login');

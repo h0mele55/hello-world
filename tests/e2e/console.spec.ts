@@ -2,7 +2,7 @@ import AxeBuilder from '@axe-core/playwright';
 import pg from 'pg';
 import { expect, test, type Page } from '@playwright/test';
 import { THEME_COOKIE } from '../../src/lib/preferences';
-import { createEngagement, preparer, runTag, signIn, uploadAndConfirm } from './helpers';
+import { createEngagement, preparer, runTag, signIn, uploadAndConfirm, watchCsp } from './helpers';
 
 /**
  * The issuer console (Phase 5, #53 #54): the client list, a client, an
@@ -159,7 +159,8 @@ test('the audit log lists the firm’s events and re-derives its chain on every 
   expect(seqs).toEqual([...seqs].sort((a, b) => b - a));
 });
 
-test('the console pages pass WCAG 2.2 AA in both themes', async ({ page }) => {
+test('the console pages pass WCAG 2.2 AA in both themes, with no CSP violation', async ({ page }) => {
+  const csp = watchCsp(page);
   const tag = runTag();
   await signIn(page, preparer);
   await createEngagement(page, tag);
@@ -178,4 +179,5 @@ test('the console pages pass WCAG 2.2 AA in both themes', async ({ page }) => {
       expect(await violations(page), `${url} (${theme})`).toEqual([]);
     }
   }
+  expect(csp).toEqual([]);
 });

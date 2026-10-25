@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Browser, type Page } from '@playwright/test';
-import { admin, approver, createEngagement, preparer, runTag, signIn, uniquePdf, uploadAndConfirm, type TestUser } from './helpers';
+import { admin, approver, createEngagement, preparer, runTag, signIn, uniquePdf, uploadAndConfirm, watchCsp, type TestUser } from './helpers';
 
 /**
  * Phase 3 end to end, on a local Anvil chain: an approver widens the write
@@ -93,6 +93,10 @@ async function approve(page: Page, label: string) {
   await expect(page.getByTestId('anchor-queued')).toBeVisible();
 }
 
+/** What every person's page reported against the Content Security Policy (#84). */
+const cspSeen: string[][] = [];
+const cspViolations = () => cspSeen.flat();
+
 /**
  * A browser of their own for each person, signed in once, as they would be:
  * the approver and the admin sign in with a code, and a code's time step is
@@ -101,6 +105,7 @@ async function approve(page: Page, label: string) {
 async function personPage(browser: Browser, user?: TestUser): Promise<Page> {
   const context = await browser.newContext({ baseURL: test.info().project.use.baseURL });
   const page = await context.newPage();
+  cspSeen.push(watchCsp(page));
   if (user) await signIn(page, user);
   return page;
 }
@@ -113,6 +118,7 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
   let copy: Buffer = Buffer.alloc(0);
   // The preparer works in the test's own page; the others in their own browsers.
   const prepared = page;
+  cspSeen.push(watchCsp(prepared));
   let approving: Page;
   const visitor = await personPage(browser);
 
@@ -160,6 +166,8 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     await expect(approving.getByTestId('anchored')).toBeVisible();
     await expect(approving.getByTestId('anchor-record-id')).toHaveText(/^0x[0-9a-f]{64}$/);
     await expect(approving.getByTestId('copy-pending')).toBeVisible();
+    // Uploading, confirming beside the PDF viewer and approving ran under the app's CSP (#84).
+    expect(cspViolations()).toEqual([]);
   });
 
   await test.step('the distribution copy is stamped and anchored; the version is complete', async () => {
@@ -412,4 +420,6 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     await visitor.getByTestId('verify-file').setInputFiles({ name: 'report.pdf', mimeType: 'application/pdf', buffer: uniquePdf('en-qualified.pdf', tag) });
     await expect(visitor.getByTestId('verdict')).toHaveAttribute('data-kind', 'AUTHENTIC_LATEST', { timeout: 30_000 });
   });
+
+  expect(cspViolations()).toEqual([]);
 });

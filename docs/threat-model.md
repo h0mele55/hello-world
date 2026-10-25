@@ -131,7 +131,7 @@ log.
 | T-A8 | Information disclosure | Stored PDFs, opinions, salts, manifests, notes or TOTP secrets are read from the database or the disk. | AES-256-GCM with a context naming the row and field, so a sealed value copied elsewhere does not open; PDFs encrypted at rest and checked against their SHA-256 on every read; the key is never in a backup. | `sealed.test.ts` › "refuses another context, a changed byte, an unknown key version and the wrong key"; `tests/db/intake.test.ts` › "a sealed field copied into another row does not open there", "stores the file encrypted, finds the opinion, and opens a draft"; `test:backup` (CI) | Mitigated. Client names, user and recipient emails are stored plain (docs/operations.md) |
 | T-A9 | Information disclosure | The audit log or the logs carry confidential data. | Audit events hold ids, hashes and codes only; errors are logged by name, never by message. | `anchoring.test.ts` › "never holds an opinion, a client name or a manifest" | Mitigated |
 | T-A10 | Denial of service | One user floods the app with writes. | 60 writes a minute per user. | `route-roles.test.ts` › "refuses a user their 61st write in a minute, says when to come back, and leaves reads and other users alone" | Mitigated |
-| T-A11 | Tampering | A script injected into a signed-in page acts as the user. | React escapes text; there is no HTML from users. The signed-in pages have no CSP yet. | — | **Open** (#84) |
+| T-A11 | Tampering | A script injected into a signed-in page acts as the user. | React escapes text; there is no HTML from users. Every page carries a per-request nonce CSP: scripts by nonce only, connections to the origin only, no framing (#84). | `tests/e2e/csp.spec.ts` › "every page is served with a CSP, and each of its scripts carries that response’s nonce"; `anchoring.spec.ts` (no CSP violation through upload, confirm and approve); `tests/unit/rate-limit.test.ts` › "runs scripts only by nonce, connects to its own origin only, and is framed by nothing" | Mitigated |
 
 ## The PDF pipeline
 
@@ -173,7 +173,6 @@ log.
 | #66 | A second, independent timestamp on Bitcoin. |
 | #67 | Contract ownership in a Safe: the proposal script exists; the owner executes it. |
 | #69 | `/verify` at 50 requests a second. |
-| #84 | A CSP for the signed-in pages. |
 | #85 | Publishing `verifier.html` with its hash, and naming the two public RPC providers. |
 | #92 | The worker reads two endpoints, as the verifier does. |
 | #94 | Keeping the audit log's head outside the database. |

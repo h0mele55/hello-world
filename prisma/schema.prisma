@@ -119,6 +119,16 @@ enum NotificationStatus {
   CANCELLED
 }
 
+/// Where a version's OpenTimestamps proof stands (#66).
+enum OtsStatus {
+  /// Calendars hold the digest; Bitcoin has not confirmed it yet.
+  PENDING
+  /// A Bitcoin attestation in the proof was checked against two explorers.
+  COMPLETE
+  /// The proof leads to something no block holds: a person looks at it.
+  BROKEN
+}
+
 enum ReasonCode {
   INITIAL
   CORRECTION
@@ -287,6 +297,7 @@ model ReportVersion {
   chainWrites             ChainWrite[]
   revocations             Revocation[]
   notifications           Notification[]
+  otsProof                OtsProof?
   createdAt               DateTime       @default(now())
 
   @@unique([engagementId, version])
@@ -565,4 +576,34 @@ model UnjournaledWrite {
   @@unique([chainId, registry, txHash, recordId, kind])
   @@index([orgId, reviewedAt])
   @@index([reviewedById])
+}
+
+/// A second, independent timestamp of a version's manifest hash, on Bitcoin
+/// through OpenTimestamps (#66): the detached proof, as the reference client
+/// writes it, kept by `npm run ots` (src/lib/ots/job.ts). Nothing in it is
+/// confidential: the manifest hash is on chain already, and the rest is a
+/// nonce and hashes.
+model OtsProof {
+  id               String        @id @default(cuid())
+  reportVersionId  String        @unique
+  reportVersion    ReportVersion @relation(fields: [reportVersionId], references: [id])
+  /// The manifest hash timestamped, 0x hex.
+  digest           String        @unique
+  /// The .ots file.
+  proof            Bytes
+  status           OtsStatus     @default(PENDING)
+  /// The calendars that took the digest; at least two (a CHECK).
+  calendars        String[]
+  submittedAt      DateTime
+  /// When a pass last asked the calendars or checked Bitcoin.
+  checkedAt        DateTime?
+  /// A name for why the last pass did not finish it, never a message.
+  lastError        String?
+  // Set together, with COMPLETE (a CHECK): the earliest block the proof reaches.
+  bitcoinHeight    Int?
+  bitcoinBlockHash String?
+  bitcoinTime      DateTime?
+  completedAt      DateTime?
+
+  @@index([status, checkedAt])
 }

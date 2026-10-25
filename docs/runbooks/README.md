@@ -16,6 +16,7 @@ never to do. `docs/operations.md` says what runs day to day, and
 | [restore.md](restore.md) | The database or the file store is lost or damaged |
 | [audit-head-missing.md](audit-head-missing.md) | The nightly check finds a head of the audit log on chain that the log no longer holds (#94) |
 | [mail.md](mail.md) | Recipients are not getting their email |
+| [opentimestamps.md](opentimestamps.md) | A version has no Bitcoin timestamp, one waits too long, or a proof turned out wrong (#66) |
 | [sepolia-sunset.md](sepolia-sunset.md) | Sepolia is being shut down |
 
 Two rules hold in every runbook:

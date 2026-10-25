@@ -36,8 +36,9 @@ delayed so the owner can cancel a stolen key's (6d, #95), the registry
 watch reports any write by the firm's keys that the journal did not make (6e,
 #93), recipients are told of a withdrawal (6f, #96), the worker settles a
 row only on what two endpoints agree on (6g, #92), the audit log's head is
-written on chain each night (6h, #94), and `npm run monitor` says what needs a
-person (6i, #68).
+written on chain each night (6h, #94), `npm run monitor` says what needs a
+person (6i, #68), and each manifest hash is also timestamped on Bitcoin through
+OpenTimestamps (#66; the verifier showing it is still to do).
 
 ## Rules every phase keeps
 
@@ -99,6 +100,7 @@ npm run audit:check            # the nightly audit-chain check, held to its head
 npm run watch:registry         # every 10 min: report chain writes by the firm's keys the journal did not make; exit 1 while one is unreviewed
 npm run monitor                # every 10 min: one ALERT line per thing that needs a person; exit 1 while any (docs/operations.md)
 npm run mailer                 # sends the recipients' notices; add `-- --once` for one pass (SMTP_URL, MAIL_FROM)
+npm run ots                    # every 5 min: submits final versions' manifest hashes to OpenTimestamps, upgrades and checks them against Bitcoin; `-- --once`
 scripts/backup.sh              # database dump + encrypted store copy (docs/operations.md)
 npm run test:backup            # back up, restore into <db>_restore_test, check the copy
 
@@ -469,6 +471,30 @@ to one inflect-compliance commit.
 - **`SMTP_URL` can hold credentials** and is never logged. Development and CI
   send to Mailpit (`docker-compose.yml`; a service container in CI), and the
   end-to-end test reads what was sent through Mailpit's API.
+
+## OpenTimestamps (#66)
+
+- **`src/lib/ots/` reads and checks proofs without Node**: `format.ts` (the
+  `.ots` format) and `bitcoin.ts` (the Bitcoin check) import only `viem`, so
+  the browser verifier can share them. `calendar.ts` talks to the calendars
+  and `job.ts` (run by `scripts/ots.ts`) keeps the proofs in `OtsProof`.
+- **A proof is written as the reference client writes it**, byte for byte
+  (`tests/unit/ots.test.ts` round-trips the reference example), and anything
+  the reader does not know is a named `OtsError`, never skipped.
+- **Only the calendars in `OTS_CALENDARS` are ever asked anything.** A
+  pending attestation naming another URL stays in the proof and is never
+  fetched: a calendar's answer must not choose where the server connects.
+  The digest goes out only behind a nonce.
+- **COMPLETE only on the Bitcoin check**: the path reaches the Merkle root of
+  a header that both explorers (`BITCOIN_EXPLORERS`) return byte for byte,
+  that hashes to the block each named and carries the proof of work Bitcoin's
+  do. An explorer out or two that disagree leave the proof PENDING with a
+  reason; a path to the wrong root is BROKEN and never touched again. Never
+  set COMPLETE or a block another way: CHECKs hold COMPLETE to its block.
+- **Tests never reach a real calendar or explorer.** The unit tests use the
+  reference client's example proof and block 358391's header, recorded in
+  `tests/fixtures/ots/` and the test; the job's tests use fake calendars and a
+  stubbed check. Do not add a test that sends anything to a public calendar.
 
 ## The audit log and backups
 

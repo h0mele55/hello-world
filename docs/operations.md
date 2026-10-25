@@ -9,6 +9,7 @@ on a public testnet; none of this makes its anchors legally binding (rule 9).
 | --- | --- | --- | --- |
 | The anchoring worker | `npm run worker` | continuously, a pass every 15 s | error log lines; the console's low-balance and endpoint-disagreement banners |
 | The mailer | `npm run mailer` | continuously, a pass every 30 s (`MAILER_INTERVAL_MS`) | an error line naming notices that failed for good |
+| The OpenTimestamps job | `npm run ots` | continuously, a pass every 5 min (`OTS_INTERVAL_MS`) | an error line naming a proof that turned out wrong; the monitor's `OTS_*` alerts |
 | The audit-chain check | `npm run audit:check` | nightly, e.g. `17 2 * * *` | exit code 1 and an `AUDIT CHAIN BROKEN` error line, naming any head on chain the log lacks; the console's banner |
 | The registry watch | `npm run watch:registry` | every ten minutes, e.g. `*/10 * * * *` | exit code 1 while any write the journal did not make is unreviewed, an error line for each new one; the console's banner |
 | The backup | `scripts/backup.sh` | nightly, after the check, e.g. `37 2 * * *` | a non-zero exit code |
@@ -28,7 +29,7 @@ The worker reads two RPC endpoints from different providers,
 `<NETWORK>_RPC_URL` and `<NETWORK>_RPC_URL_2`, and settles a row only on what
 both read (#92); it refuses to start without the second.
 
-Run the worker and the mailer under a supervisor that restarts them (for
+Run the worker, the mailer and the OpenTimestamps job under a supervisor that restarts them (for
 example a systemd unit with `Restart=always`). Each tries a failed pass again
 after its interval, logging `pass failed` with a count; after 20 failures in a
 row it exits 1, so the supervisor restarts it with fresh connections. When
@@ -71,11 +72,48 @@ for each of these, with ids, codes and times, never a client or a file:
 | `AUDIT_CHECK_BROKEN` / `AUDIT_CHECK_STALE` | the nightly check found a break, or has not run for 36 hours | [audit-head-missing.md](runbooks/audit-head-missing.md) for a missing head |
 | `WATCH_STALE` / `UNJOURNALED_OPEN` | the registry watch has not run for two hours, or found a write nobody has reviewed | [stolen-issuer-key.md](runbooks/stolen-issuer-key.md) |
 | `NOTICE_FAILED` | the mailer gave up on a notice in the last day | [mail.md](runbooks/mail.md) |
+| `OTS_NOT_SUBMITTED` | a version approved more than a day ago is final on chain and has no OpenTimestamps proof | [opentimestamps.md](runbooks/opentimestamps.md) |
+| `OTS_PENDING_LONG` | a proof has waited more than two days for Bitcoin | [opentimestamps.md](runbooks/opentimestamps.md) |
+| `OTS_BROKEN` | a proof turned out not to lead to the block it names, in the last day | [opentimestamps.md](runbooks/opentimestamps.md) |
 
 A failure stays reported for a day. A key with no work waiting is not
 watched, so a retired key's stopped worker raises nothing. The verifier runs
 in visitors' browsers and reports nothing home, so its errors are seen only by
 the visitor ("cannot verify right now").
+
+## The OpenTimestamps job
+
+Each version's manifest hash also gets a second, independent timestamp, on
+Bitcoin through [OpenTimestamps](https://opentimestamps.org) (#66). It rests
+neither on the firm's registry nor on the chain the report is anchored on: a
+proof shows that the manifest hash existed by the time of a Bitcoin block.
+`npm run ots` (`src/lib/ots/job.ts`) keeps them. It needs `DATABASE_URL`
+only, holds no key and writes no chain. Each pass:
+
+- **submits** the manifest hash of every version whose anchor is final
+  (ANCHORED, COMPLETE or REVOKED) to the four calendars the reference client
+  uses (`OTS_CALENDARS` in `src/lib/ots/calendar.ts`). A random nonce is
+  appended and the result hashed first, so the calendars see neither the
+  manifest hash nor anything else. The proof is kept only once two calendars
+  took it (`ots.submitted` in the audit log); otherwise the next pass tries
+  again.
+- **upgrades** each pending proof every 30 minutes: it asks each calendar a
+  pending attestation names, if it is one of those four and only then,
+  whether Bitcoin has confirmed its batch, and merges the path it answers.
+- **checks** every Bitcoin attestation the proof then holds. It reads the
+  block's 80-byte header from two explorers, blockstream.info and
+  mempool.space (`BITCOIN_EXPLORERS` in `src/lib/ots/bitcoin.ts`). Both must
+  return the same bytes, and those bytes must hash to the block each named.
+  They must also meet the header's own proof-of-work target, at least as hard
+  as Bitcoin's in 2015. The message the proof leads to must be the block's
+  Merkle root. Only then is the proof COMPLETE, with the block's height, hash
+  and time (`ots.complete`). A proof that leads elsewhere is BROKEN
+  (`ots.broken`). An explorer that cannot be read, or two that disagree, leave
+  the proof pending with a name for why, and the next pass tries again.
+
+The version's page shows where its proof stands and offers the `.ots` file,
+which the reference client (`ots verify`) checks without this app. Bitcoin's
+block time is the miner's clock, within about two hours of the truth.
 
 ## The audit-chain check
 

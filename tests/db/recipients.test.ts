@@ -6,7 +6,7 @@ import type { SessionUser } from '@/auth';
 import { PrismaClient } from '@/generated/prisma/client';
 import { verifyAuditChain } from '@/lib/audit';
 import { deliverNotifications, type MailMessage, type MailTransport } from '@/lib/notifications/mailer';
-import { queueSupersededNotices } from '@/lib/notifications/queue';
+import { queueRevokedNotices, queueSupersededNotices } from '@/lib/notifications/queue';
 import { confirmOpinion, createEngagement, IntakeError, uploadVersion } from '@/lib/reports/intake';
 import { addRecipient, listRecipients, MAX_RECIPIENTS, removeRecipient } from '@/lib/reports/recipients';
 import { AccessError } from '@/lib/roles';
@@ -220,6 +220,49 @@ describe('the mailer', () => {
     const again = fakeTransport();
     expect((await deliver(again.transport)).sent).toEqual([]);
     expect(again.sent).toEqual([]);
+    expect(await verifyAuditChain(prisma, admin.orgId)).toMatchObject({ ok: true });
+  });
+
+  it('sends a REVOKED notice with the revocation’s reason, never its note, and fails one with no revocation in effect (#96)', async () => {
+    const e = await engagement();
+    const v1 = await confirmedVersion(e.id, 'en-unmodified.pdf', 'INITIAL');
+    const v2 = await confirmedVersion(e.id, 'en-qualified.pdf', 'CORRECTION');
+    await addRecipient(preparer, { engagementId: e.id, name: 'Maria Petrova', email: 'maria@lender.example', locale: 'en' });
+    const NOTE = 'Issued against the wrong period: do not tell the recipient this.';
+    // Version 1's revocation is in effect, as the worker leaves it.
+    await prisma.revocation.create({
+      data: {
+        reportVersionId: v1.id,
+        reason: 'ISSUED_IN_ERROR',
+        note: Buffer.from(NOTE),
+        status: 'REVOKED',
+        requestedById: admin.id,
+        approvedById: approver.id,
+        approvedAt: clock,
+        effectiveAt: clock,
+        revokedAt: clock,
+      },
+    });
+    const queueRevoked = (version: { id: string; engagementId: string }) => prisma.$transaction((tx) => queueRevokedNotices(tx, version, admin.orgId, clock));
+    expect(await queueRevoked(v1)).toBe(1);
+    expect(await queueRevoked(v1)).toBe(0);
+    // A superseded notice about the same version is another notice, not a duplicate.
+    expect(await queue(v2)).toBe(1);
+    // A REVOKED notice about a version with no revocation in effect is a broken row.
+    expect(await queueRevoked(v2)).toBe(1);
+    expect(await prisma.auditEvent.findFirstOrThrow({ where: { action: 'notification.queued', subjectId: v1.id } })).toMatchObject({ data: { count: 1, kind: 'REVOKED' } });
+
+    const { transport, sent } = fakeTransport();
+    const report = await deliver(transport);
+    expect(report.sent).toHaveLength(2);
+    expect(report.failed).toHaveLength(1);
+    const withdrawn = sent.find((m) => m.subject.includes('withdrawn'))!;
+    expect(withdrawn.subject).toContain('version 1');
+    expect(withdrawn.text).toContain('Reason given: Issued in error.');
+    expect(withdrawn.text).not.toContain(NOTE);
+    expect(withdrawn.text).not.toContain(OPINION);
+    expect(sent.find((m) => !m.subject.includes('withdrawn'))!.subject).toContain('newer version');
+    expect(await prisma.notification.findFirstOrThrow({ where: { reportVersionId: v2.id, kind: 'REVOKED' } })).toMatchObject({ status: 'FAILED', lastError: 'NO_REVOCATION' });
     expect(await verifyAuditChain(prisma, admin.orgId)).toMatchObject({ ok: true });
   });
 

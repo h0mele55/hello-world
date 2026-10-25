@@ -99,6 +99,14 @@ enum RevocationStatus {
   CANCELLED
 }
 
+/// What a notice tells its recipient (#96).
+enum NotificationKind {
+  /// A newer version supersedes the one they hold; the notice's version is the newer one.
+  SUPERSEDED
+  /// A version of the report is revoked; the notice's version is the revoked one.
+  REVOKED
+}
+
 enum NotificationStatus {
   PENDING
   SENT
@@ -465,16 +473,18 @@ model Recipient {
   @@index([removedById])
 }
 
-/// One email to one recipient about one superseding version. Queued in the
-/// transaction that makes the version COMPLETE; sent by the mailer
-/// (scripts/mailer.ts), at least once.
+/// One email to one recipient about one version: a newer version that
+/// supersedes theirs, queued in the transaction that makes it COMPLETE, or a
+/// version that is revoked, queued in the transaction that makes it REVOKED.
+/// Sent by the mailer (scripts/mailer.ts), at least once.
 model Notification {
   id              String             @id @default(cuid())
   recipientId     String
   recipient       Recipient          @relation(fields: [recipientId], references: [id])
-  /// The version that supersedes theirs.
+  /// The version that supersedes theirs (SUPERSEDED), or the revoked one (REVOKED).
   reportVersionId String
   reportVersion   ReportVersion      @relation(fields: [reportVersionId], references: [id])
+  kind            NotificationKind   @default(SUPERSEDED)
   status          NotificationStatus @default(PENDING)
   attempts        Int                @default(0)
   /// A name for the last failure, never its message.
@@ -483,7 +493,7 @@ model Notification {
   createdAt       DateTime           @default(now())
   sentAt          DateTime?
 
-  @@unique([recipientId, reportVersionId])
+  @@unique([recipientId, reportVersionId, kind])
   @@index([reportVersionId])
   @@index([status, leaseUntil])
 }

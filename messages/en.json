@@ -745,6 +745,17 @@
       "ask": "For the report itself, ask {firm}.",
       "noReport": "This message carries no report, no opinion and no figures.",
       "prototype": "Prototype: records on a public test network are prototype evidence, not a legally binding record."
+    },
+    "revoked": {
+      "subject": "{firm}: version {version} of the audit report for {client} is withdrawn",
+      "greeting": "Dear {name},",
+      "body": "{firm} has withdrawn version {version} of the audit report for {client} (period ending {periodEnd}, engagement {engagementRef}). Do not rely on any copy of that version.",
+      "reason": "Reason given: {reason}.",
+      "latest": "The report’s latest record, read from the public chain: {latestUrl}",
+      "verify": "To check a copy you hold, open {verifyUrl} and choose the file. It is checked in your browser and never uploaded.",
+      "ask": "For the report itself, ask {firm}.",
+      "noReport": "This message carries no report, no opinion and no figures.",
+      "prototype": "Prototype: records on a public test network are prototype evidence, not a legally binding record."
     }
   },
   "recipients": {
@@ -768,6 +779,12 @@
       "SENT": "Version {version}: sent {when}",
       "FAILED": "Version {version}: could not be sent",
       "CANCELLED": "Version {version}: cancelled"
+    },
+    "lastRevoked": {
+      "PENDING": "Withdrawal of version {version}: waiting to be sent",
+      "SENT": "Withdrawal of version {version}: sent {when}",
+      "FAILED": "Withdrawal of version {version}: could not be sent",
+      "CANCELLED": "Withdrawal of version {version}: cancelled"
     }
   }
 }

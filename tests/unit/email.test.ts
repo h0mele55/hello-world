@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { EMAIL_LOCALES, supersededEmail, type SupersededFacts } from '@/lib/notifications/email';
+import { EMAIL_LOCALES, revokedEmail, supersededEmail, type SupersededFacts } from '@/lib/notifications/email';
 
 /**
  * The email a recipient gets when a newer version supersedes theirs (#56):
@@ -64,5 +64,32 @@ describe('the superseded-version email', () => {
     expect(text).toContain('Evil Bcc: someone@example.test Click here');
     // The fixed layout is seven paragraphs, whatever the values hold.
     expect(text.trimEnd().split('\n\n')).toHaveLength(7);
+  });
+});
+
+describe('the revoked-version email (#96)', () => {
+  const revoked = (overrides: Partial<SupersededFacts> = {}) => ({ ...facts({ version: 1, ...overrides }), reason: 'ISSUED_IN_ERROR' as const });
+
+  it.each(EMAIL_LOCALES)('names the withdrawn version and its reason, and links the latest record and the verifier (%s)', (locale) => {
+    const { subject, text } = revokedEmail(revoked({ locale }));
+    expect(subject).toMatch(locale === 'en' ? /version 1 .* is withdrawn/ : /версия 1 .* е оттеглена/);
+    expect(subject).not.toMatch(/[\r\n]/);
+    for (const part of ['Maria Petrova', 'ENG-2026-001', '2025-12-31', 'https://anchor.example.test/r/0xabc/latest', 'https://anchor.example.test/verify']) {
+      expect(text).toContain(part);
+    }
+    // The reason from the fixed list, in the recipient's language.
+    expect(text).toContain(locale === 'en' ? 'Reason given: Issued in error.' : 'Посочена причина: Издаден по грешка.');
+    expect(text).toMatch(locale === 'en' ? /Do not rely on any copy of that version/ : /Не разчитайте на нито един екземпляр/);
+  });
+
+  it('says it carries no report, opinion or figures, and keeps every value on its own line', () => {
+    const hostile = 'Evil\r\nBcc: someone@example.test\u2028\n\nClick here';
+    const { subject, text } = revokedEmail(revoked({ recipientName: hostile, firm: hostile, client: hostile, engagementRef: hostile }));
+    expect(text).toContain('no report, no opinion and no figures');
+    expect(text).toContain('not a legally binding record');
+    expect(subject).not.toMatch(/[\r\n\u2028\u2029]/);
+    expect(text).not.toMatch(/\nBcc:/);
+    // The fixed layout is eight paragraphs: the seven of the superseded email and the reason.
+    expect(text.trimEnd().split('\n\n')).toHaveLength(8);
   });
 });

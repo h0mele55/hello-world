@@ -1082,7 +1082,7 @@ script (#61, #67, #68):
     (#94);
   - one stolen key can revoke every record for good, a decision before
     production (#95, since built as delayed revocation, 6d);
-  - recipients are not told of a revocation (#96).
+  - recipients are not told of a revocation (#96, since built, 6f).
 
   It also found cross-site write refusal untested, which now has a test over
   every route.
@@ -1211,6 +1211,22 @@ that issue: one issuer key may no longer withdraw a firm's records at once.
   found".
 - **CI runs it after the end-to-end tests**, which must leave nothing to
   report: every write they made went through the journal.
+
+6f tells recipients when a version is withdrawn (#96):
+
+- **When a revocation takes effect**, the worker queues a REVOKED notice per
+  live recipient in the transaction that makes the version REVOKED. It queues
+  nothing while the revocation is scheduled, nor when the owner cancels it:
+  a recipient told of a withdrawal that never happened is misled.
+- **The email** names the withdrawn version, the reason's fixed label (never
+  the admin's sealed note), and the links to the latest record and to the
+  verifier, in the recipient's language. No PDF, opinion or figure (#8).
+- **`Notification.kind`** tells the two notices apart, so a recipient can be
+  told both that version 2 supersedes theirs and that version 1 is withdrawn,
+  each once. The recipients card says which was last sent.
+- **Tested** by a worker test (scheduled, then cancelled, then in effect), a
+  mailer test, email unit tests, and the end-to-end flow, which reads the
+  withdrawal from Mailpit.
 
 **Prompt**
 

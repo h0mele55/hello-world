@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { secp256k1 } from '@noble/curves/secp256k1';
 import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -43,8 +44,10 @@ import { registryAbi } from '@/lib/chain/registry-artifact';
 import { confirmOpinion, createEngagement, uploadVersion } from '@/lib/reports/intake';
 import { addRecipient, removeRecipient } from '@/lib/reports/recipients';
 import { openRegistryView, verifyFile, type VerifierConfig } from '@/lib/verify-core';
+import { createKmsAccount } from '@/lib/chain/kms-account';
 import { startAnvil, type AnvilHandle } from '../integration/anvil';
 import { readPdf } from '../integration/registry-harness';
+import { fakeKms, KEY_NAME } from '../helpers/fake-kms';
 
 /**
  * The anchoring worker against a real Postgres and a throwaway Anvil chain.
@@ -633,7 +636,19 @@ describe('the worker process', () => {
       (e: { code: number; stderr: string }) => e,
     );
     expect(failed?.code).toBe(1);
-    expect(failed?.stderr).toContain('ISSUER_ADDRESS is not the address of ISSUER_PRIVATE_KEY');
+    expect(failed?.stderr).toContain('ISSUER_ADDRESS is not the address of the issuer key');
+  });
+
+  it('signs with KMS only when told to, and never with a raw key left beside it', async () => {
+    const refused = (env: Record<string, string>) =>
+      runScript(env).then(
+        () => null,
+        (e: { code: number; stderr: string }) => e,
+      );
+    expect((await refused({ SIGNER: 'hsm' }))?.stderr).toContain('SIGNER must be env or kms');
+    expect((await refused({ SIGNER: 'kms', KMS_KEY_NAME: KEY_NAME }))?.stderr).toContain('ISSUER_PRIVATE_KEY is set, but SIGNER=kms');
+    const badName = await refused({ SIGNER: 'kms', ISSUER_PRIVATE_KEY: '', KMS_KEY_NAME: 'projects/p/cryptoKeys/k' });
+    expect(badName).toMatchObject({ code: 1, stderr: expect.stringContaining('KEY_NAME_INVALID') });
   });
 });
 
@@ -884,5 +899,55 @@ describe('rotating the issuer key (docs/runbooks/key-rotation.md)', () => {
     expect((await versionOf(v1)).status).toBe('REVOKED');
     expect(await verify(new Uint8Array(fixture('en-unmodified.pdf')))).toMatchObject({ kind: 'REVOKED' });
     expect(await verifyAuditChain(prisma, admin.orgId)).toMatchObject({ ok: true });
+  });
+});
+
+describe('an issuer key in Cloud KMS (#62)', () => {
+  it('anchors, copies and completes a version with a key that never leaves KMS', async () => {
+    // KMS here is a stand-in that returns the high-s form of every signature, as the real one may.
+    const kms = fakeKms(secp256k1.utils.randomPrivateKey(), { highS: true });
+    const account = await createKmsAccount({ client: kms, keyName: KEY_NAME });
+    await testClient.setBalance({ address: account.address, value: parseEther('10') });
+    const ownerWallet = createWalletClient({ chain: foundry, transport: http(anvil.url), account: owner });
+    const hash = await ownerWallet.writeContract({ address: deployment.address, abi: registryAbi, functionName: 'setIssuer', args: [account.address, orgIdFor('Example Audit OOD'), true] });
+    await publicClient.waitForTransactionReceipt({ hash });
+
+    await goLive();
+    const versionId = await confirmedVersion((await engagement()).id, 'en-unmodified.pdf');
+    const { chainWriteId } = await approveVersion(approver, versionId, { ...target, issuer: account.address });
+    await pass({ account });
+    await mine();
+    await pass({ account });
+    await mine();
+    await pass({ account });
+    const version = await versionOf(versionId);
+    expect(version.status).toBe('COMPLETE');
+    expect(await writeOf(chainWriteId)).toMatchObject({ status: 'FINAL', issuer: account.address });
+    expect((await reader.getRecord(version.recordId as Hex))?.issuer).toBe(account.address);
+    expect((await reader.getRecord(version.copyRecordId as Hex))?.issuer).toBe(account.address);
+    // Two transactions, each signed once: KMS signed nothing else.
+    expect(kms.signed).toBe(2);
+  });
+
+  it('sends nothing on a KMS answer that fails its check, and sends the write once KMS answers well', async () => {
+    const key = secp256k1.utils.randomPrivateKey();
+    const corrupted = await createKmsAccount({ client: fakeKms(key, { tamper: 'signatureCrc' }), keyName: KEY_NAME });
+    const sound = await createKmsAccount({ client: fakeKms(key), keyName: KEY_NAME });
+    await testClient.setBalance({ address: sound.address, value: parseEther('10') });
+    const ownerWallet = createWalletClient({ chain: foundry, transport: http(anvil.url), account: owner });
+    const hash = await ownerWallet.writeContract({ address: deployment.address, abi: registryAbi, functionName: 'setIssuer', args: [sound.address, orgIdFor('Example Audit OOD'), true] });
+    await publicClient.waitForTransactionReceipt({ hash });
+
+    await goLive();
+    const versionId = await confirmedVersion((await engagement()).id, 'en-unmodified.pdf');
+    const { chainWriteId } = await approveVersion(approver, versionId, { ...target, issuer: sound.address });
+    const report = await pass({ account: corrupted });
+    expect(report.errors).toEqual([{ writeId: chainWriteId, error: 'KmsSignerError' }]);
+    expect(await writeOf(chainWriteId)).toMatchObject({ status: 'INTENT', txHash: null, nonce: null });
+    expect(await publicClient.getTransactionCount({ address: sound.address, blockTag: 'pending' })).toBe(0);
+
+    advance(120_001);
+    await pass({ account: sound });
+    expect(await writeOf(chainWriteId)).toMatchObject({ status: 'BROADCAST', nonce: 0 });
   });
 });

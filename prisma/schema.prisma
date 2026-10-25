@@ -32,6 +32,38 @@ enum OpinionType {
 enum VersionStatus {
   DRAFT
   CONFIRMED
+  /// A second person approved it; its anchor is queued (CLAUDE.md rule 6).
+  APPROVED
+  /// The original's anchor is final.
+  ANCHORED
+  /// The stamped copy's anchor is final too (Phase 3b).
+  COMPLETE
+}
+
+/// Inflect's write ladder, one rung at a time.
+enum ChainWriteMode {
+  DISABLED
+  DRY_RUN
+  LIVE
+}
+
+enum ChainWriteKind {
+  ANCHOR
+  ANCHOR_COPY
+  REVOKE
+}
+
+enum ChainWriteStatus {
+  /// Written before any network call (CLAUDE.md rule 3).
+  INTENT
+  /// DRY_RUN only: simulated, never broadcast.
+  SIMULATED
+  /// Signed and sent; waiting for the block to be finalized.
+  BROADCAST
+  FINAL
+  FAILED
+  /// The outcome is unknown; settled only by reading the chain, never by resending.
+  INDETERMINATE
 }
 
 enum ReasonCode {
@@ -44,11 +76,13 @@ enum ReasonCode {
 /// The audit firm. One for the prototype (#5); everything hangs off it so a
 /// second firm needs no schema change.
 model IssuerOrg {
-  id        String   @id @default(cuid())
-  name      String
-  createdAt DateTime @default(now())
-  users     User[]
-  clients   Client[]
+  id             String         @id @default(cuid())
+  name           String
+  chainWriteMode ChainWriteMode @default(DISABLED)
+  createdAt      DateTime       @default(now())
+  users          User[]
+  clients        Client[]
+  auditEvents    AuditEvent[]
 }
 
 model User {
@@ -63,6 +97,7 @@ model User {
   engagements  Engagement[]
   prepared     ReportVersion[] @relation("preparedBy")
   confirmed    ReportVersion[] @relation("confirmedBy")
+  approved     ReportVersion[] @relation("approvedBy")
 
   @@index([orgId])
 }
@@ -136,11 +171,96 @@ model ReportVersion {
   confirmedById      String?
   confirmedBy        User?         @relation("confirmedBy", fields: [confirmedById], references: [id])
   confirmedAt        DateTime?
+  /// Never the preparer or the confirmer: a CHECK in the migration enforces it.
+  approvedById       String?
+  approvedBy         User?         @relation("approvedBy", fields: [approvedById], references: [id])
+  approvedAt         DateTime?
+  /// The original's record id on chain, once its anchor is final.
+  recordId           String?       @unique
+  anchorTxHash       String?
+  anchorBlock        BigInt?
+  chainWrites        ChainWrite[]
   createdAt          DateTime      @default(now())
 
   @@unique([engagementId, version])
   @@index([preparedById])
   @@index([confirmedById])
+  @@index([approvedById])
+}
+
+/// The journal of every chain write. A row exists before anything is sent.
+/// Partial unique indexes in the migration allow at most one live (neither
+/// FAILED nor SIMULATED) row per version and kind, and one row per nonce of an
+/// issuer key, so two workers can never journal the same nonce.
+model ChainWrite {
+  id                   String           @id @default(cuid())
+  reportVersionId      String
+  reportVersion        ReportVersion    @relation(fields: [reportVersionId], references: [id])
+  kind                 ChainWriteKind
+  status               ChainWriteStatus @default(INTENT)
+  /// The org's mode when the row was written: a DRY_RUN row is never broadcast.
+  mode                 ChainWriteMode
+  chainId              Int
+  registry             String
+  issuer               String
+  /// ANCHOR: the family's latest record, read when the transaction was built.
+  parentId             String?
+  recordId             String?
+  nonce                Int?
+  txHash               String?
+  /// Hashes this write had before being replaced at the same nonce with a higher fee.
+  replacedTxHashes     String[]         @default([])
+  /// Kept so a replacement signs exactly the same call with the same gas.
+  gasLimit             String?
+  maxFeePerGas         String?
+  maxPriorityFeePerGas String?
+  blockNumber          BigInt?
+  /// A named reason: the contract's error name, or the worker's.
+  error                String?
+  attempts             Int              @default(0)
+  broadcastAt          DateTime?
+  /// The worker holding this row; another may take it once this passes.
+  leaseUntil           DateTime?
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
+
+  @@index([status, leaseUntil])
+  @@index([reportVersionId])
+  @@index([chainId, issuer])
+}
+
+/// Append-only, hash-chained per organisation: each row's hash is
+/// SHA-256(prevHash || canonical JSON of the event). A trigger in the
+/// migration refuses UPDATE and DELETE.
+model AuditEvent {
+  id          BigInt    @id @default(autoincrement())
+  orgId       String
+  org         IssuerOrg @relation(fields: [orgId], references: [id])
+  seq         Int
+  /// ISO timestamp, set by the writer so the hash can cover it.
+  at          String
+  /// The user, or null for the worker.
+  actorId     String?
+  action      String
+  subjectType String
+  subjectId   String
+  data        Json
+  prevHash    String
+  hash        String    @unique
+
+  @@unique([orgId, seq])
+}
+
+/// The issuer key's last balance check, written by the worker and read by the
+/// low-balance banner. One row per chain and key.
+model IssuerKeyStatus {
+  chainId    Int
+  address    String
+  balanceWei String
+  low        Boolean
+  checkedAt  DateTime
+
+  @@id([chainId, address])
 }
 
 /// An uploaded PDF, encrypted at rest under FILE_ENCRYPTION_KEY.

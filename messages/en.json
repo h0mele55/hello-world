@@ -62,7 +62,9 @@
     "roles": {
       "PREPARER": "Preparer",
       "APPROVER": "Approver"
-    }
+    },
+    "settings": "Settings",
+    "lowBalance": "The issuer key's balance is below 0.02 ETH. Anchors will fail once it runs out: top it up."
   },
   "login": {
     "title": "Sign in",
@@ -88,7 +90,10 @@
     },
     "status": {
       "DRAFT": "Draft: opinion not confirmed",
-      "CONFIRMED": "Opinion confirmed"
+      "CONFIRMED": "Opinion confirmed",
+      "APPROVED": "Approved: anchor queued",
+      "ANCHORED": "Anchored",
+      "COMPLETE": "Complete"
     }
   },
   "engagement": {
@@ -132,6 +137,14 @@
     "DRAFT_PENDING": "A draft version is already waiting for confirmation.",
     "VERSION_CONFLICT": "Someone uploaded a version at the same time. Reload and try again.",
     "NOT_DRAFT": "This version is no longer a draft.",
+    "NOT_CONFIRMED": "This version's opinion is not confirmed, or it has already been approved.",
+    "FOUR_EYES": "You prepared or confirmed this version, so someone else must approve it.",
+    "CHAIN_WRITES_DISABLED": "Chain writes are disabled for your firm. Change the write mode in Settings first.",
+    "CHAIN_NOT_CONFIGURED": "Anchoring is not configured on this server.",
+    "PREDECESSOR_NOT_ANCHORED": "The previous version must be anchored before this one can be approved.",
+    "ALREADY_QUEUED": "An anchor for this version is already queued.",
+    "MODE_UNCHANGED": "The write mode is already set to that.",
+    "MODE_SKIPS_RUNG": "The write mode widens one step at a time: Disabled, then Dry run, then Live.",
     "INTERNAL": "Something went wrong. Nothing was changed.",
     "refusals": {
       "NOT_A_PDF": "This file is not a PDF.",
@@ -207,5 +220,102 @@
     "docHash": "Document hash",
     "opinionCommitment": "Opinion commitment",
     "manifestHash": "Manifest hash"
+  },
+  "anchoring": {
+    "title": "Anchoring",
+    "prototypeEvidence": "Anchors are recorded on a public test network. They are prototype evidence, not a legally binding record.",
+    "anchored": "Anchored: the record's block {block} is finalized.",
+    "recordId": "Record id",
+    "txHash": "Transaction",
+    "block": "Block",
+    "nonce": "Nonce",
+    "notConfigured": "Anchoring is not configured on this server.",
+    "disabled": "Chain writes are disabled for your firm.",
+    "settingsLink": "Change the write mode in Settings.",
+    "dryRunHint": "Dry run: approving simulates the anchor against the registry and records the result. Nothing is sent.",
+    "liveHint": "Approving queues the anchor. The worker sends it from the issuer key and marks it final once its block is finalized.",
+    "approve": "Approve anchor",
+    "approveDryRun": "Approve dry run",
+    "approveTitle": "Approve this anchor?",
+    "approveBody": "You confirm that you have checked the confirmed opinion against the report. The version's commitments will be sent to the registry; once a block holds them they cannot be withdrawn, only revoked.",
+    "approveBodyDryRun": "You confirm that you have checked the confirmed opinion against the report. In dry run the anchor is only simulated and recorded; nothing is sent.",
+    "approveConfirm": "Approve",
+    "waitingApprover": "Waiting for an approver. Someone other than the preparer approves the anchor.",
+    "queued": "Approved by {approver}. The anchor is queued for the worker.",
+    "journal": "Chain writes",
+    "noWrites": "Nothing has been sent or simulated for this version.",
+    "wouldSucceed": "The simulation succeeded: a live anchor would be accepted.",
+    "reasonUnknown": "Reason:",
+    "replaced": "Replaced {count, plural, one {once} other {# times}} at the same nonce with a higher fee.",
+    "modes": {
+      "DISABLED": "Disabled",
+      "DRY_RUN": "Dry run",
+      "LIVE": "Live"
+    },
+    "status": {
+      "INTENT": "Queued",
+      "SIMULATED": "Simulated",
+      "BROADCAST": "Sent, waiting for finality",
+      "FINAL": "Final",
+      "FAILED": "Failed",
+      "INDETERMINATE": "Outcome unknown, being read from the chain"
+    },
+    "reasons": {
+      "StaleParent": "Another version became the family's latest after this one was prepared. Start again from the new latest.",
+      "FAMILY_LATEST_MISMATCH": "The family's latest record on chain is not the version before this one, so the parent cannot be determined.",
+      "PREDECESSOR_NOT_ANCHORED": "The previous version is not anchored.",
+      "DOC_ANCHORED_ELSEWHERE": "This exact file is already anchored, as a different record.",
+      "DocAlreadyAnchored": "This exact file is already anchored.",
+      "MODE_NARROWED": "The write mode was narrowed before this anchor was sent, so it was not sent.",
+      "VERSION_NOT_APPROVED": "The version was no longer approved.",
+      "NONCE_CONSUMED": "Another transaction used this write's slot, so it can never be mined. Approve again to retry.",
+      "TX_REVERTED": "The transaction was mined but the registry refused it.",
+      "SEND_REJECTED": "The node refused the transaction before sending it; nothing was broadcast.",
+      "REPLACEMENT_REJECTED": "A higher-fee replacement was refused; the original transaction is still pending.",
+      "ISSUER_BLOCKED": "Waiting: an earlier write with an unknown outcome must be settled first.",
+      "SEND_OUTCOME_UNKNOWN": "The worker stopped while sending. The outcome is being read from the chain; nothing is resent.",
+      "TX_NOT_FOUND": "The node no longer knows the transaction. The outcome is being read from the chain; nothing is resent.",
+      "NO_RPC_ANSWER": "The node did not answer the send. The outcome is being read from the chain; nothing is resent.",
+      "NONCE_TOO_LOW": "The node says this slot is already used. The outcome is being read from the chain.",
+      "RPC_ERROR": "The node answered with an unexpected error. The outcome is being read from the chain; nothing is resent.",
+      "RECORD_MISMATCH": "The record on chain does not match what was sent. A person must look at this.",
+      "CANNOT_REPLACE": "The pending transaction could not be replaced.",
+      "NotIssuer": "The issuer key is not registered with the registry."
+    }
+  },
+  "settings": {
+    "title": "Settings",
+    "modeTitle": "Chain write mode",
+    "modeIntro": "How far approved anchors go. Widening moves one step at a time; narrowing takes effect at once and stops anything not yet sent.",
+    "modeDescriptions": {
+      "DISABLED": "nothing can be approved for anchoring",
+      "DRY_RUN": "an approval simulates the anchor and records the outcome; nothing is sent",
+      "LIVE": "an approval sends the anchor from the issuer key"
+    },
+    "currentMode": "Current mode:",
+    "modeLabel": "New mode",
+    "changeMode": "Change mode",
+    "changeTitle": "Change the write mode to {mode}?",
+    "changeBody": {
+      "DISABLED": "Approvals stop. Anchors not yet sent will not be sent.",
+      "DRY_RUN": "Approvals will only simulate anchors. Live anchors not yet sent will not be sent.",
+      "LIVE": "Approvals will send transactions from the issuer key, paid from its balance. A sent anchor cannot be withdrawn."
+    },
+    "changeConfirm": "Change mode",
+    "approverOnly": "Only an approver can change the write mode.",
+    "modes": {
+      "DISABLED": "Disabled",
+      "DRY_RUN": "Dry run",
+      "LIVE": "Live"
+    },
+    "chainTitle": "Chain",
+    "network": "Network",
+    "chainId": "chain id",
+    "registry": "Registry contract",
+    "issuer": "Issuer key",
+    "balance": "Issuer balance",
+    "checkedAt": "checked {at}",
+    "balanceUnknown": "The worker has not checked the issuer balance yet.",
+    "notConfigured": "Anchoring is not configured on this server: set ANCHOR_NETWORK and ISSUER_ADDRESS, and deploy the registry."
   }
 }

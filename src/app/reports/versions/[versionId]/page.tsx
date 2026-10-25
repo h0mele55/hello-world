@@ -6,6 +6,7 @@ import { CopyButton } from '@inflect/ui/components/ui/copy-button';
 import { StatusBadge } from '@inflect/ui/components/ui/status-badge';
 import { Heading } from '@inflect/ui/components/ui/typography';
 import { requireUser } from '@/lib/page-auth';
+import { AnchoringPanel } from '@/components/reports/anchoring-panel';
 import { ConfirmOpinionForm } from '@/components/reports/confirm-opinion-form';
 import { PdfViewer } from '@/components/reports/pdf-viewer';
 import { VersionStatusBadge } from '@/components/reports/version-status-badge';
@@ -95,6 +96,7 @@ export default async function VersionPage({ params }: { params: Promise<{ versio
           )}
         </Card>
       </div>
+      {version.status !== 'DRAFT' ? <AnchoringPanel user={user} versionId={version.id} status={version.status} /> : null}
     </main>
   );
 }

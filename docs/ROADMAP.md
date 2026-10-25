@@ -480,13 +480,101 @@ to the true state.
 
 **Hardening**
 
-- [ ] Idempotent: the same file twice returns the existing record and sends no transaction (database unique key plus `recordOfDoc` check)
-- [ ] One writer per issuer key under an advisory lock; a stuck transaction is replaced at the same nonce with a higher fee, never a new nonce
-- [ ] INDETERMINATE is never resent automatically; it settles from chain state
-- [ ] The stamped PDF is re-parsed and re-hashed before its anchor, and its XMP block and transaction must equal the final record
-- [ ] The testnet signing key lives in env on the server only and never reaches the browser
-- [ ] A hash-chained internal audit log covers upload, confirm, approve, anchor, stamp and revoke
-- [ ] An alert fires when the issuer balance drops below 0.02 Sepolia ETH
+- [x] Idempotent: the same file twice returns the existing record and sends no transaction (database unique key plus `recordOfDoc` check)
+- [x] One writer per issuer key under an advisory lock; a stuck transaction is replaced at the same nonce with a higher fee, never a new nonce
+- [x] INDETERMINATE is never resent automatically; it settles from chain state
+- [ ] The stamped PDF is re-parsed and re-hashed before its anchor, and its XMP block and transaction must equal the final record (3b)
+- [x] The testnet signing key lives in env on the server only and never reaches the browser
+- [ ] A hash-chained internal audit log covers upload, confirm, approve, anchor, stamp and revoke (3a covers all but stamp and revoke, which arrive with 3b and Phase 5)
+- [x] An alert fires when the issuer balance drops below 0.02 Sepolia ETH
+
+**As built: Phase 3 ships in two pull requests.** 3a is approval, the write
+ladder, the journal, the worker, new versions, the audit log and the balance
+alert (#34, #35, #36, #37, #40, #41, #42, and the Anvil half of #43). 3b is
+stamping, the distribution copy and the certificate for anchor-only PDFs
+(#38, #39). The Sepolia run of the exit gate waits on funded keys (#4).
+Departures from the prompt below, and decisions it left open:
+
+- **The worker signs locally, then journals, then sends.** It builds the
+  transaction, signs it with the issuer key, and writes the nonce, the hash,
+  the gas limit and both fee caps to the INTENT row before
+  `eth_sendRawTransaction`. A worker that dies after that write leaves a row
+  holding a hash whose fate nobody saw; once its lease runs out the next pass
+  marks it INDETERMINATE (`SEND_OUTCOME_UNKNOWN`).
+- **A send has three outcomes.** The node took the bytes (or already had
+  them): BROADCAST. The node refused them before they reached its pool
+  (insufficient funds, underpriced, fee below the base fee, intrinsic gas):
+  FAILED, and the nonce is given back. Anything else, a timeout or a dropped
+  connection included: INDETERMINATE.
+- **INDETERMINATE is settled from the chain alone**, in this order: a receipt
+  for any hash the row ever had, or the node still holding one in its pool
+  (back to BROADCAST); else, once the issuer's *finalized* nonce has passed
+  the row's, the record for its document (FINAL, linked) or `NONCE_CONSUMED`
+  (FAILED). A row whose transaction is unknown and whose nonce is unused
+  cannot be settled, and nothing guesses: it holds the issuer key, so no new
+  LIVE write starts until an operator uses that nonce with a no-op
+  transaction, after which the worker reads the outcome (#78).
+- **One worker per issuer key** holds a session advisory lock on a dedicated
+  connection for its pass. A partial unique index on (chain, issuer, nonce)
+  backs it: a second writer that picked the same nonce cannot journal it, so
+  never signs or sends it.
+- **A row keeps its nonce only while its transaction may land, or once its own
+  transaction used it.** A refused send, a nonce used by another transaction,
+  and a link to a record someone else anchored clear it, so it can be
+  assigned again. The next nonce is the larger of the node's pending count and
+  one past the highest nonce of a live row.
+- **Replacement** re-signs the same call with the same gas at the same nonce,
+  both fee caps raised by at least 20% (or to the current estimate, if
+  higher), after 10 minutes pending. A replacement the node refuses leaves the
+  original live and waits another window.
+- **FINAL means the block is finalized and the record matches.** After
+  `finalized` passes the receipt's block the receipt is read again (the same
+  block hash), then the record: family, version, document, manifest, opinion
+  commitment, parent, issuer and block must all equal what was sent. A
+  mismatch is INDETERMINATE (`RECORD_MISMATCH`) and held for a person.
+- **Idempotency**: before building, the worker reads `recordOfDoc`. A record
+  that is this version (same family, version, manifest and opinion
+  commitment) is linked once final, with its transaction found by the
+  `Anchored` event; anything else is `DOC_ANCHORED_ELSEWHERE`. Nothing is
+  sent either way.
+- **Parent = latest, checked against our own records.** Version n > 1 can be
+  approved only once version n − 1 is ANCHORED. The worker reads
+  `latestOf(familyId)` just before simulating and refuses
+  (`FAMILY_LATEST_MISMATCH`) unless it is version n − 1's record: a family
+  whose latest is not the one we know is refused, not guessed (rule 7). A
+  version 2 that lands between that read and our simulation fails by the
+  contract's name, `StaleParent`, with nothing sent.
+- **The ladder.** Widening moves one rung at a time; narrowing may jump
+  straight to DISABLED and stops every write not yet sent (`MODE_NARROWED`).
+  The mode is read when the row is written and again before it is sent. A
+  DRY_RUN approval simulates, records SIMULATED with the outcome (the
+  contract's error name, or none), and returns the version to CONFIRMED: a
+  live anchor needs its own approval.
+- **Every failure returns the version to CONFIRMED with the approval
+  cleared**, so another attempt needs another approval. The database holds
+  four-eyes (approver ≠ preparer and ≠ confirmer) and "APPROVED or beyond
+  has an approver" as CHECK constraints, and at most one live write per
+  version and kind as a partial unique index.
+- **Reason codes stay as Phase 2 built them** (`CORRECTION`,
+  `SUBSEQUENT_EVENT`, `OTHER`); the prompt's numeric codes and `REISSUE` were
+  not adopted.
+- **The audit log** chains `SHA-256(prevHash ‖ canonical JSON of the event)`
+  per firm, appended in the same transaction as the change it records under a
+  transaction-scoped advisory lock. A trigger refuses UPDATE and DELETE.
+  Events carry ids, hashes, statuses and reason codes; never a client name,
+  an opinion or a manifest.
+- **The key boundary.** Only `scripts/worker.ts` reads `ISSUER_PRIVATE_KEY`;
+  the app reads `ANCHOR_NETWORK` and `ISSUER_ADDRESS`. A unit test refuses
+  the name anywhere under `src/`, the end-to-end server is started without
+  it, and CI greps the build for the key.
+- **Tested on Anvil and Postgres**: v1 to FINAL, v2 chained to v1, StaleParent
+  with nothing sent, a document already on chain linked with nothing sent, a
+  worker killed after sending settling to FINAL, bytes that never left
+  holding the key until their nonce is used, a stuck transaction replaced,
+  DRY_RUN leaving the nonce unchanged, a narrowed mode, a refused send, a low
+  balance, a second worker locked out, and the worker script itself. The
+  end-to-end test drives the UI through a dry run and a live anchor to FINAL
+  on Anvil.
 
 **Prompt**
 

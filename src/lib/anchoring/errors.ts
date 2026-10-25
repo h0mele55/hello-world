@@ -1,0 +1,22 @@
+/** Named refusals of the anchoring use cases (CLAUDE.md rule 7). */
+export type AnchoringErrorCode =
+  | 'FORBIDDEN'
+  | 'NOT_FOUND'
+  | 'NOT_CONFIRMED'
+  | 'FOUR_EYES'
+  | 'CHAIN_WRITES_DISABLED'
+  | 'CHAIN_NOT_CONFIGURED'
+  | 'PREDECESSOR_NOT_ANCHORED'
+  | 'ALREADY_QUEUED'
+  | 'MODE_UNCHANGED'
+  | 'MODE_SKIPS_RUNG';
+
+export class AnchoringError extends Error {
+  constructor(
+    readonly code: AnchoringErrorCode,
+    readonly detail?: string,
+  ) {
+    super(detail ? `${code}: ${detail}` : code);
+    this.name = 'AnchoringError';
+  }
+}

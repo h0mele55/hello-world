@@ -15,8 +15,10 @@ Phase 0 (the Next.js scaffold rendering Inflect's UI primitives in its own
 theme) and Phase 1 (the `AuditReportRegistry` contract and the viem chain
 adapter, tested on Anvil) are done. The Sepolia deployment waits on funded keys
 (#4). Phase 2 (PDF parsing, the opinion locator, the commitments, encrypted
-storage, sign-in and the confirmation screen) is done. Nothing touches a chain
-from the app yet; that is Phase 3.
+storage, sign-in and the confirmation screen) is done. Phase 3a (the write
+ladder, four-eyes approval, the ChainWrite journal and its worker, new
+versions, the audit log, the balance alert) is done, tested on Anvil; 3b adds
+stamping and the distribution copy.
 
 ## Rules every phase keeps
 
@@ -68,7 +70,9 @@ npx tsx scripts/deploy-registry.ts <sepolia|local>       # deploy; reads keys fr
 # Database (Postgres 16: `docker compose up -d`, or any local server; Prisma 7 does not read .env)
 npm run db:migrate             # create and apply a migration in development
 npm run db:seed                # the firm and two users, from SEED_* in the environment
-npm run test:db                # intake use cases against TEST_DATABASE_URL (name must end in _test)
+npm run test:db                # intake and approval use cases against TEST_DATABASE_URL (name must end in _test)
+npm run test:anchoring         # the worker against TEST_DATABASE_URL and a throwaway Anvil node
+npm run worker                 # the anchoring worker; add `-- --once` for one pass
 
 # PDFs
 npm run test:pdf               # parser, golden hashes, fuzzing (forks the real parser)
@@ -172,6 +176,34 @@ to one inflect-compliance commit.
   manifest.
 - **Never run `prisma migrate reset` or anything that drops data** without the
   owner's explicit consent. Tests use `migrate deploy` on a `_test` database.
+
+## Anchoring: the journal and the worker
+
+- **Only the worker signs or sends** (`src/lib/anchoring/worker.ts`, run by
+  `scripts/worker.ts`). The app approves, which writes the journal's INTENT
+  row in the same transaction as the approval; it never talks to a chain
+  with a key. Only `scripts/worker.ts` reads `ISSUER_PRIVATE_KEY`, and
+  `tests/unit/key-boundary.test.ts` refuses the name anywhere under `src/`.
+- **Journal before the bytes leave.** The worker signs, writes the nonce and
+  hash to the row, then sends. Every transition is one transaction,
+  conditional on the row being as it was read, and writes its audit event.
+- **Unknown is INDETERMINATE, and INDETERMINATE is never resent.** It is
+  settled only by reading the chain: receipts for every hash, the node's
+  pool, the issuer's finalized nonce, the record for the document. While one
+  is unsettled no new LIVE write starts for that issuer key (#78).
+- **A row holds its nonce only while its transaction may land or once its own
+  transaction used it**; otherwise clear the nonce. A partial unique index
+  allows one row per (chain, issuer, nonce).
+- **Do not add a path to APPROVED, ANCHORED or FINAL** other than
+  `approveVersion` and the worker's transitions. CHECK constraints hold
+  four-eyes and "approved means an approver is recorded"; a partial unique
+  index allows one live write per version and kind.
+- **The audit log is append-only**: write through `appendAuditEvent` inside
+  the transaction that makes the change, with ids, hashes and codes only.
+  `verifyAuditChain` re-derives every hash.
+- **Worker tests use fault seams** (`faults.afterBuild`, `beforeSend`,
+  `afterSend`) and an injected clock. A throw from a seam is a crash: the row
+  keeps its lease until it runs out.
 
 ## Conventions
 

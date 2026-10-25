@@ -1,6 +1,7 @@
 import 'server-only';
 import { NextResponse, type NextRequest } from 'next/server';
 import { currentUser, type SessionUser } from '@/auth';
+import { AnchoringError, type AnchoringErrorCode } from '@/lib/anchoring/errors';
 import { IntakeError, type IntakeErrorCode } from '@/lib/reports/intake';
 
 /**
@@ -9,7 +10,7 @@ import { IntakeError, type IntakeErrorCode } from '@/lib/reports/intake';
  * code the UI translates, never a stack, a file byte or an opinion.
  */
 
-const STATUS: Record<IntakeErrorCode | 'UNAUTHENTICATED' | 'CROSS_ORIGIN' | 'TOO_LARGE' | 'UNSUPPORTED_MEDIA_TYPE' | 'INTERNAL', number> = {
+const STATUS: Record<IntakeErrorCode | AnchoringErrorCode | 'UNAUTHENTICATED' | 'CROSS_ORIGIN' | 'TOO_LARGE' | 'UNSUPPORTED_MEDIA_TYPE' | 'INTERNAL', number> = {
   UNAUTHENTICATED: 401,
   FORBIDDEN: 403,
   CROSS_ORIGIN: 403,
@@ -23,6 +24,14 @@ const STATUS: Record<IntakeErrorCode | 'UNAUTHENTICATED' | 'CROSS_ORIGIN' | 'TOO
   DRAFT_PENDING: 409,
   VERSION_CONFLICT: 409,
   NOT_DRAFT: 409,
+  NOT_CONFIRMED: 409,
+  FOUR_EYES: 403,
+  CHAIN_WRITES_DISABLED: 409,
+  CHAIN_NOT_CONFIGURED: 503,
+  PREDECESSOR_NOT_ANCHORED: 409,
+  ALREADY_QUEUED: 409,
+  MODE_UNCHANGED: 409,
+  MODE_SKIPS_RUNG: 409,
   INTERNAL: 500,
 };
 
@@ -53,7 +62,7 @@ export function handler<Ctx>(fn: (req: NextRequest, user: SessionUser, ctx: Ctx)
     try {
       return await fn(req, user, ctx);
     } catch (error) {
-      if (error instanceof IntakeError) return errorResponse(error.code, error.detail);
+      if (error instanceof IntakeError || error instanceof AnchoringError) return errorResponse(error.code, error.detail);
       // The name only: a message could carry user data.
       console.error(`Unhandled ${error instanceof Error ? error.name : typeof error} in ${req.method} ${req.nextUrl.pathname}`);
       return errorResponse('INTERNAL');

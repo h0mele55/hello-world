@@ -8,6 +8,7 @@ import { EmptyState } from '@inflect/ui/components/ui/empty-state';
 import { CloudUpload } from '@inflect/ui/components/ui/icons/nucleo/cloud-upload';
 import { openRegistryView, readDocument, verifyFile, type PdfjsLike } from '@/lib/verify-core';
 import type { VerifierSetup } from '@/lib/verify-setup';
+import { BitcoinTimestampView } from './bitcoin-timestamp-view';
 import { VerdictView, type ShownVerdict } from './verdict-view';
 
 type State = { step: 'idle' } | { step: 'checking'; name: string } | { step: 'done'; name: string; verdict: ShownVerdict };
@@ -27,7 +28,9 @@ function loadPdfjs(): Promise<PdfjsLike> {
  * The verifier, entirely in the browser (rule 5): the file is read from disk
  * into memory, hashed, parsed by pdf.js and compared with what two RPC
  * endpoints say the registry holds. It is never sent anywhere, and nothing
- * here calls the app's own API.
+ * here calls the app's own API. Once a file matches a record, the page asks
+ * this site's public /ots route for that report's Bitcoin timestamp by its
+ * manifest hash (#66), which only adds to the verdict.
  */
 export function VerifyClient({ setup }: { setup: VerifierSetup }) {
   const t = useTranslations('verify');
@@ -99,6 +102,7 @@ export function VerifyClient({ setup }: { setup: VerifierSetup }) {
         <>
           <p className="break-all text-sm text-content-muted">{state.name}</p>
           <VerdictView verdict={state.verdict} chainId={setup.chainId} issuers={setup.issuers} />
+          {'matched' in state.verdict ? <BitcoinTimestampView key={state.verdict.matched.manifestHash} manifestHash={state.verdict.matched.manifestHash} /> : null}
           <div>
             <Button
               type="button"

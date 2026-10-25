@@ -115,6 +115,15 @@ The version's page shows where its proof stands and offers the `.ots` file,
 which the reference client (`ots verify`) checks without this app. Bitcoin's
 block time is the miner's clock, within about two hours of the truth.
 
+Every verifier shows the time beside an exact match's verdict. It asks the
+public route `/ots/<manifestHash>` for the proof (readable from any origin,
+rate-limited with the lookup page), checks it against the two explorers
+itself, and never lets it change the verdict. So the app's server learns which
+report a visitor checks, by its manifest hash, though never the file; with the
+server down the verifier still decides and says the timestamp could not be
+checked. `dist/verifier.html` and the CLI ask the origin in `APP_PUBLIC_URL`
+at build time (or the CLI's `--app-url`).
+
 ## The audit-chain check
 
 Each night `npm run audit:check` re-derives every firm's chain. It also holds

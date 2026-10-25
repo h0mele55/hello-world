@@ -29,6 +29,8 @@ test('the single-file verifier works from disk, connects only to its endpoints a
   const csp = await page.locator('meta[http-equiv="Content-Security-Policy"]').getAttribute('content');
   expect(csp).toContain("default-src 'none'");
   expect(csp).toContain(`connect-src ${new URL(RPC_URL).origin}`);
+  // Built with the issuer's origin (APP_PUBLIC_URL), it may also ask that origin for a matched report's Bitcoin timestamp and read the two explorers (#66).
+  if (process.env.APP_PUBLIC_URL) expect(csp).toContain(`${new URL(process.env.APP_PUBLIC_URL).origin} https://blockstream.info https://mempool.space`);
   expect(csp).not.toContain('unsafe-inline');
 
   const file = uniquePdf('en-adverse.pdf', runTag());

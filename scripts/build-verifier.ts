@@ -10,11 +10,15 @@
  * The registry settings come from the same environment as /verify
  * (VERIFY_NETWORK or ANCHOR_NETWORK, VERIFY_RPC_URL_1/2, the deployment
  * record) and are baked into both outputs. They are public by definition.
+ * APP_PUBLIC_URL, when set, is the issuer's origin: both outputs ask its /ots
+ * route for a matched report's Bitcoin timestamp (#66), and the HTML file's
+ * CSP then allows it and the two Bitcoin explorers too.
  */
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { build } from 'esbuild';
+import { EXPLORER_ORIGINS } from '../src/lib/ots/explorers';
 import { verifierSetupFromEnv } from '../src/lib/verify-setup';
 import type { StandaloneSetup } from '../standalone/config';
 
@@ -26,6 +30,11 @@ const read = (...parts: string[]) => fs.readFileSync(path.join(ROOT, ...parts), 
 const sha256 = (text: string) => `'sha256-${createHash('sha256').update(text, 'utf8').digest('base64')}'`;
 
 async function main() {
+  const appUrl = process.env.APP_PUBLIC_URL ? process.env.APP_PUBLIC_URL.replace(/\/+$/, '') : null;
+  if (appUrl && !/^https?:\/\/[^\s/]+$/.test(appUrl)) {
+    console.error('Refused: APP_PUBLIC_URL must be an http(s) origin, with no path.');
+    process.exit(1);
+  }
   const result = verifierSetupFromEnv();
   const setup: StandaloneSetup | null = result.ok
     ? {
@@ -34,6 +43,7 @@ async function main() {
         runtimeBytecodeHash: result.setup.runtimeBytecodeHash,
         rpcUrls: [...result.setup.rpcUrls],
         issuers: result.setup.issuers,
+        appUrl,
       }
     : null;
   if (!setup && !cliOnly) {
@@ -77,7 +87,7 @@ async function main() {
   // Inline in a <script>: no sequence in the code may close the element.
   const script = bundled.outputFiles[0].text.replace(/<\/(script)/gi, '<\\/$1');
   const style = read('standalone', 'style.css');
-  const origins = [...new Set(setup.rpcUrls.map((url) => new URL(url).origin))].join(' ');
+  const origins = [...new Set([...setup.rpcUrls.map((url) => new URL(url).origin), ...(setup.appUrl ? [setup.appUrl, ...EXPLORER_ORIGINS] : [])])].join(' ');
   const csp = [
     "default-src 'none'",
     // blob: is the pdf.js worker, which the page builds from its own inlined copy.

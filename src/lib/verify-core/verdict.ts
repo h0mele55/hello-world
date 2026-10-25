@@ -31,6 +31,8 @@ export interface RecordSummary {
   familyId: Hex;
   version: number;
   docHash: Hex;
+  /** The original's manifest hash; a copy's record carries its original's. */
+  manifestHash: Hex;
   blockNumber: number;
   /** Unix seconds. */
   blockTime: number;
@@ -147,6 +149,7 @@ export async function summariseRecord(view: RegistryView, record: RegistryRecord
     familyId: record.familyId,
     version: record.version,
     docHash: record.docHash,
+    manifestHash: record.manifestHash,
     blockNumber: record.blockNumber,
     blockTime,
     txHash,

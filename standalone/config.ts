@@ -13,6 +13,8 @@ export const StandaloneSetupSchema = z.object({
   runtimeBytecodeHash: z.string().regex(/^0x[0-9a-f]{64}$/).transform((value) => value as Hex),
   rpcUrls: z.tuple([z.string().url(), z.string().url()]),
   issuers: z.record(z.string(), z.string()),
+  /** The issuer's public origin, whose /ots route gives a matched report's Bitcoin timestamp (#66); null for none. */
+  appUrl: z.string().regex(/^https?:\/\/[^\s/]+$/).nullable().default(null),
 });
 
 export type StandaloneSetup = z.infer<typeof StandaloneSetupSchema>;
@@ -25,7 +27,7 @@ const DeploymentFileSchema = z.object({
   issuer: z.object({ orgId: z.string(), orgName: z.string() }).optional(),
 });
 
-export function setupFromDeployment(json: unknown, rpcUrls: [string, string]): StandaloneSetup {
+export function setupFromDeployment(json: unknown, rpcUrls: [string, string], appUrl: string | null = null): StandaloneSetup {
   const d = DeploymentFileSchema.parse(json);
   return StandaloneSetupSchema.parse({
     chainId: d.chainId,
@@ -33,6 +35,7 @@ export function setupFromDeployment(json: unknown, rpcUrls: [string, string]): S
     runtimeBytecodeHash: d.runtimeBytecodeHash,
     rpcUrls,
     issuers: d.issuer ? { [d.issuer.orgId.toLowerCase()]: d.issuer.orgName } : {},
+    appUrl,
   });
 }
 

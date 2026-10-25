@@ -4,6 +4,7 @@ import { bytesToHex, hexToBytes, sha256 } from 'viem';
 import { describe, expect, it, vi } from 'vitest';
 import { agreedHeader, BitcoinError, bitcoinTimeOf, checkBitcoinAttestation, esploraSource, hasProofOfWork, readHeader, targetOf, type HeaderSource } from '@/lib/ots/bitcoin';
 import { submitDigest, upgradeProof } from '@/lib/ots/calendar';
+import { bitcoinTimestampFor, issuerProofFetcher } from '@/lib/verify-core';
 import { applyOp, attestationsOf, OtsError, OTS_MAGIC, parseProof, parseTimestamp, serializeProof, serializeTimestamp, type Proof, type Timestamp } from '@/lib/ots/format';
 
 /**
@@ -299,5 +300,57 @@ describe('the calendar client', () => {
 
   it('refuses to timestamp anything but a 32-byte digest', async () => {
     await expect(submitDigest(new Uint8Array(20), { calendars: [], fetch: fakeCalendars({}).fetch })).rejects.toThrow(OtsError);
+  });
+});
+
+describe('the verifier’s Bitcoin timestamp', () => {
+  const MANIFEST = sha256(FILE);
+  const from = (bytes: Uint8Array | null | Error) => ({
+    fetchProof: async () => {
+      if (bytes instanceof Error) throw bytes;
+      return bytes;
+    },
+    explorers: explorers(),
+  });
+
+  it('is CONFIRMED when the issuer’s proof of the manifest reaches a block both explorers give', async () => {
+    expect(await bitcoinTimestampFor(MANIFEST, from(PROOF))).toEqual({ status: 'CONFIRMED', height: HEIGHT, blockHash: BLOCK_HASH, time: BLOCK_TIME });
+  });
+
+  it('says what it could not show, and never throws for the issuer or the explorers', async () => {
+    expect(await bitcoinTimestampFor(MANIFEST, from(null))).toEqual({ status: 'NONE' });
+    expect(await bitcoinTimestampFor(MANIFEST, from(new Error('connection refused')))).toEqual({ status: 'UNAVAILABLE', reason: 'ISSUER_UNREACHABLE' });
+    expect(await bitcoinTimestampFor(MANIFEST, from(serializeProof(cutExample(3).pending)))).toEqual({ status: 'PENDING' });
+    const disagreeing = { fetchProof: async () => PROOF, explorers: [source('https://one.example'), source('https://two.example', { [HEIGHT]: GENESIS })] as const };
+    expect(await bitcoinTimestampFor(MANIFEST, disagreeing)).toEqual({ status: 'UNAVAILABLE', reason: 'EXPLORERS_DISAGREE' });
+    const down = { fetchProof: async () => PROOF, explorers: [source('https://one.example'), source('https://two.example', {})] as const };
+    expect(await bitcoinTimestampFor(MANIFEST, down)).toEqual({ status: 'UNAVAILABLE', reason: 'EXPLORERS_UNREADABLE' });
+  });
+
+  it('is INVALID for a proof of another manifest, an unreadable one, or one that misses the block', async () => {
+    expect(await bitcoinTimestampFor(sha256(new TextEncoder().encode('another report')), from(PROOF))).toEqual({ status: 'INVALID', reason: 'NOT_THIS_MANIFEST' });
+    expect(await bitcoinTimestampFor(MANIFEST, from(PROOF.slice(0, 100)))).toEqual({ status: 'INVALID', reason: 'PROOF_UNREADABLE' });
+    // One more hash before the attestation: the path no longer ends at the block's Merkle root.
+    const proof = parseProof(PROOF);
+    let node = proof.timestamp;
+    while (node.attestations.length === 0) node = node.ops[0].next;
+    const bitcoin = node.attestations;
+    (node as { attestations: Timestamp['attestations'] }).attestations = [];
+    (node as { ops: Timestamp['ops'] }).ops = [{ op: { op: 'sha256' }, next: { attestations: bitcoin, ops: [] } }];
+    expect(await bitcoinTimestampFor(MANIFEST, from(serializeProof(proof)))).toEqual({ status: 'INVALID', reason: 'NOT_IN_BLOCK' });
+  });
+
+  it('asks the issuer’s public route by the manifest hash, and reads a 404 as no proof', async () => {
+    const asked: string[] = [];
+    const fake = (status: number, body: Uint8Array<ArrayBuffer> | string = '') =>
+      (async (url: string | URL | Request) => {
+        asked.push(String(url));
+        return new Response(body, { status });
+      }) as unknown as typeof fetch;
+    expect(await issuerProofFetcher('https://issuer.example/', fake(200, PROOF))(MANIFEST)).toEqual(PROOF);
+    expect(asked).toEqual([`https://issuer.example/ots/${MANIFEST}`]);
+    expect(await issuerProofFetcher('https://issuer.example', fake(404))(MANIFEST)).toBeNull();
+    await expect(issuerProofFetcher('https://issuer.example', fake(503))(MANIFEST)).rejects.toThrow('503');
+    expect(await bitcoinTimestampFor(MANIFEST, { fetchProof: issuerProofFetcher('https://issuer.example', fake(200, new Uint8Array(70_000))), explorers: explorers() })).toEqual({ status: 'INVALID', reason: 'PROOF_UNREADABLE' });
   });
 });

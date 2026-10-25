@@ -42,7 +42,9 @@ import { recordIdFor, ZERO_HASH } from '@/lib/chain/records';
 import { registryAbi } from '@/lib/chain/registry-artifact';
 import { confirmOpinion, createEngagement, uploadVersion } from '@/lib/reports/intake';
 import { addRecipient, removeRecipient } from '@/lib/reports/recipients';
+import { openRegistryView, verifyFile, type VerifierConfig } from '@/lib/verify-core';
 import { startAnvil, type AnvilHandle } from '../integration/anvil';
+import { readPdf } from '../integration/registry-harness';
 
 /**
  * The anchoring worker against a real Postgres and a throwaway Anvil chain.
@@ -60,6 +62,8 @@ let testClient: TestClient;
 let issuerKey: Hex;
 let issuer: PrivateKeyAccount;
 let deployment: Deployment;
+/** The registry's owner: an account Anvil unlocks, standing in for the Safe. */
+let owner: Address;
 let reader: RegistryReader;
 let target: AnchorTarget;
 let lockClient: pg.Client;
@@ -147,6 +151,7 @@ beforeAll(async () => {
   issuer = privateKeyToAccount(issuerKey);
   await testClient.setBalance({ address: issuer.address, value: parseEther('10') });
   const [deployer] = await createWalletClient({ chain: foundry, transport }).getAddresses();
+  owner = getAddress(deployer);
   deployment = await deployRegistry({
     publicClient,
     walletClient: createWalletClient({ chain: foundry, transport, account: getAddress(deployer) }),
@@ -798,5 +803,86 @@ describe('telling recipients about a newer version', () => {
     await anchorThrough(v2);
     expect((await versionOf(v2)).status).toBe('COMPLETE');
     expect(await prisma.notification.findMany({ select: { recipientId: true, reportVersionId: true } })).toEqual([{ recipientId, reportVersionId: v2 }]);
+  });
+});
+
+describe('rotating the issuer key (docs/runbooks/key-rotation.md)', () => {
+  it('a new key continues the firm’s families, the old key writes nothing more, and everything it anchored still verifies', async () => {
+    await goLive();
+    const e = await engagement();
+    // Under the old key: version 1, complete with its copy, and a signed report anchored but not yet certified.
+    const v1 = await confirmedVersion(e.id, 'en-unmodified.pdf');
+    await anchorThrough(v1);
+    await mine();
+    await pass();
+    const v1Done = await versionOf(v1);
+    expect(v1Done.status).toBe('COMPLETE');
+    const signed = await confirmedVersion((await engagement()).id, 'en-signed.pdf');
+    const full: FileStore = {
+      ...files,
+      store: async () => {
+        throw new Error('disk full');
+      },
+    };
+    const { chainWriteId: signedWrite } = await approveVersion(approver, signed, target);
+    await pass({ files: full });
+    await mine();
+    await pass({ files: full });
+    expect(await writeOf(signedWrite)).toMatchObject({ status: 'FINAL' });
+    expect((await versionOf(signed)).status).toBe('ANCHORED');
+
+    // The owner registers the new key, then retires the old one (what scripts/owner-call.ts sends).
+    const next = privateKeyToAccount(generatePrivateKey());
+    await testClient.setBalance({ address: next.address, value: parseEther('10') });
+    const ownerWallet = createWalletClient({ chain: foundry, transport: http(anvil.url), account: owner });
+    const orgId = orgIdFor('Example Audit OOD');
+    for (const [key, active] of [
+      [next.address, true],
+      [issuer.address, false],
+    ] as const) {
+      const hash = await ownerWallet.writeContract({ address: deployment.address, abi: registryAbi, functionName: 'setIssuer', args: [key, orgId, active] });
+      await publicClient.waitForTransactionReceipt({ hash });
+    }
+    await mine();
+    const nextTarget: AnchorTarget = { ...target, issuer: next.address };
+    const passNext = () => pass({ account: next });
+
+    // The old key can write nothing more, and its worker sends nothing.
+    await expect(publicClient.simulateContract({ address: deployment.address, abi: registryAbi, functionName: 'revoke', args: [v1Done.recordId as Hex, 1], account: issuer })).rejects.toThrow(/NotIssuer/);
+
+    // The new key's worker makes the certificate the old one could not: a certificate signs nothing.
+    expect((await passNext()).certified).toEqual([signed]);
+    expect((await versionOf(signed)).status).toBe('COMPLETE');
+
+    // It continues the family: version 2's parent is version 1, which the old key anchored.
+    const v2 = await confirmedVersion(e.id, 'en-qualified.pdf', 'CORRECTION');
+    const { chainWriteId } = await approveVersion(approver, v2, nextTarget);
+    await passNext();
+    await mine();
+    await passNext();
+    await mine();
+    await passNext();
+    expect(await writeOf(chainWriteId)).toMatchObject({ status: 'FINAL', issuer: next.address, parentId: v1Done.recordId });
+    expect((await versionOf(v2)).status).toBe('COMPLETE');
+
+    // Everything the old key anchored still verifies, under the firm's name.
+    const config: VerifierConfig = { chainId: 31337, registry: deployment.address, runtimeBytecodeHash: deployment.runtimeBytecodeHash, rpcUrls: [anvil.url, anvil.url] };
+    const verify = (bytes: Uint8Array) => verifyFile({ bytes, config, openView: () => openRegistryView(config), readPdf });
+    const v1Copy = await files.read(await prisma.storedFile.findUniqueOrThrow({ where: { id: v1Done.copyStoredFileId! } }));
+    for (const bytes of [new Uint8Array(fixture('en-unmodified.pdf')), v1Copy]) {
+      expect(await verify(bytes)).toMatchObject({ kind: 'AUTHENTIC_SUPERSEDED', original: { recordId: v1Done.recordId, issuer: issuer.address, orgId } });
+    }
+    expect(await verify(new Uint8Array(fixture('en-signed.pdf')))).toMatchObject({ kind: 'AUTHENTIC_LATEST', matched: { issuer: issuer.address, orgId } });
+    expect(await verify(new Uint8Array(fixture('en-qualified.pdf')))).toMatchObject({ kind: 'AUTHENTIC_LATEST', matched: { issuer: next.address, orgId } });
+
+    // And the new key can withdraw what the old one anchored.
+    const { revocationId } = await requestRevocation(admin, { versionId: v1, reason: 'ISSUED_IN_ERROR', note: 'Rotation rehearsal.', confirmation: e.engagementRef });
+    await approveRevocation(approver, revocationId, nextTarget);
+    await passNext();
+    await mine();
+    await passNext();
+    expect((await versionOf(v1)).status).toBe('REVOKED');
+    expect(await verify(new Uint8Array(fixture('en-unmodified.pdf')))).toMatchObject({ kind: 'REVOKED' });
+    expect(await verifyAuditChain(prisma, admin.orgId)).toMatchObject({ ok: true });
   });
 });

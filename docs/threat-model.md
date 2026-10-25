@@ -1,0 +1,178 @@
+# Threat model
+
+STRIDE over the five parts of the prototype: the registry contract, the worker
+and its issuer key, the verifier, the issuer console, and the PDF pipeline,
+plus the mailer and the supply chain. Each threat names its mitigation and the
+test that proves it, or says it is open and links the issue that tracks it.
+
+The prototype anchors on a public testnet. Its anchors are prototype evidence,
+not a legally binding record (rule 9), and some threats below matter only once
+a production chain is chosen (#63). Those threats are marked so.
+
+**How to read a row.** *Proof* names a test as `file › "test title"`. CI runs
+every one of them; the contract tests run in the "Contracts and chain adapter"
+job, the rest in "Lint, typecheck, test, build" or "PDF parsing". *Status* is:
+
+- **Mitigated**: the mitigation exists and a test fails if it is removed.
+- **Partly**: something stands in the way, but a real gap remains, named in
+  the row.
+- **Open**: nothing stands in the way yet; the issue says what will.
+
+## What is worth protecting
+
+1. **The truth of a verdict.** What a lender, a regulator or a court concludes
+   about a file they hold. Everything else exists to protect this.
+2. **The issuer key.** Whoever holds it anchors and revokes in the firm's name.
+3. **The registry's ownership.** Whoever holds it decides which keys are the
+   firm's.
+4. **The firm's confidential data.** Reports, opinions, manifests, salts, client
+   names, revocation notes, recipients' addresses.
+5. **The audit log.** Who did what, and in what order.
+6. **Verification staying available**, to anyone, without the firm's servers.
+
+## Trust boundaries
+
+```text
+ Visitor's browser ──(two public RPC endpoints)──▶ chain ◀──(one RPC endpoint)── worker ─▶ issuer key
+   /verify, verifier.html, CLI                      ▲                                │
+   decides on its own; uploads nothing              │ owner key / Safe              ▼
+                                                  owner                         Postgres ◀── app server ◀── console users
+                                                                                   │            │
+                                                                       mailer ◀────┘     encrypted file store
+                                                                         │
+                                                                     SMTP server ─▶ recipients
+```
+
+- The **verifier** trusts the deployment record it was built with (registry
+  address and bytecode hash, issuer names by org id) and two endpoints that
+  must agree. It trusts neither the app's server nor the file's own claims.
+- The **app server** never holds the issuer key. It approves, which writes a
+  journal row; it never signs.
+- The **worker** holds the key and reads one endpoint (see T-W5).
+- The **database** is trusted by the app and the worker. Its owner is the
+  insider with the most power short of the key.
+
+## The threats the roadmap names
+
+| Threat | Where | Status |
+| --- | --- | --- |
+| A forged issuer | T-C1, T-V3 | Mitigated |
+| Issuer key theft | T-W1, T-W2 | Partly: no detection yet (#93), and a stolen key can revoke for good (#95) |
+| A lying or compromised RPC endpoint | T-V1 (verifier), T-W5 (worker) | Mitigated for the verifier; open for the worker (#92) |
+| A chain reorg | T-V2, T-W4 | Mitigated |
+| The Sepolia sunset | T-O1 | Open (#63, #65, #66) |
+| PDF parser exploits | T-P1 to T-P3 | Mitigated |
+| An insider reissuing or revoking | T-A1 to T-A4 | Partly: a database owner can rewrite the log (#94) |
+| A recipient tricked by an ALTERED verdict | T-V4, T-V5 | Partly: a look-alike verifier site (#85) |
+
+## The registry contract
+
+`contracts/src/AuditReportRegistry.sol`, immutable once deployed.
+
+| Id | STRIDE | Threat | Mitigation | Proof | Status |
+| --- | --- | --- | --- | --- | --- |
+| T-C1 | Spoofing | Someone writes records in the firm's name. | Only keys the owner registered as issuers write; a key's firm never changes; a family belongs to the firm that anchored its version 1, and another firm's key cannot extend it, copy it or revoke it. | `AuditReportRegistry.t.sol` › `test_anchor_refusesNonIssuer`, `test_setIssuer_keyCannotChangeOrg`, `test_anchor_refusesOtherOrgExtendingFamily`, `test_copy_refusesOtherOrg_andNonIssuer`; `AuditReportRegistry.invariant.t.sol` › `invariant_nonIssuerNeverWrites`; fuzz › `testFuzz_nonIssuerNeverWrites` | Mitigated |
+| T-C2 | Elevation | Someone takes over ownership and registers their own key. | Ownership moves in two steps (offer, then accept), never to zero. Production ownership moves to a Safe (`scripts/owner-call.ts`, #67), which the owner executes. | `AuditReportRegistry.t.sol` › `test_ownership_isTwoStep`, `test_transferOwnership_onlyOwner_andNotZero`, `test_setIssuer_onlyOwner`; `tests/integration/owner-call.test.ts` › "prints the ownership move for the owner to execute, and never sends it" | Partly: the owner is still a single deployer key until the Safe (#67) |
+| T-C3 | Tampering | A record is changed after the fact, or a second version 1 or a skipped version forks a family. | Records are written once; a document hash maps to one record; versions are contiguous with one latest; a stale parent is refused (the fork race). | `invariant_docHashMapsToOneRecord`, `invariant_versionsContiguousWithOneLatest`, `invariant_staleParentNeverAccepted`; `test_anchor_refusesStaleParent_theForkRace`, `test_anchor_refusesSecondV1`, `test_anchor_refusesSkippedVersion`; `testFuzz_anchor_onlyTheExactNextVersionOnTheLatestSucceeds` | Mitigated |
+| T-C4 | Tampering | A revoked record is quietly un-revoked. | Revocation is terminal. | `invariant_revokedIsTerminal`, `test_revoke_isTerminal` | Mitigated |
+| T-C5 | Tampering | A record from another deployment or chain is replayed as this one's. | The record id binds the chain id and the contract address. | `test_recordId_bindsChainAndContract`; `tests/integration/chain-adapter.test.ts` › "computes the same record ids as the contract" | Mitigated |
+| T-C6 | Information disclosure | Confidential data ends up on chain (rule 1). | The contract stores only 32-byte commitments, a pseudonymous family id (HMAC of the canonical key under a secret), version numbers and codes. The opinion commitment is salted. | `tests/unit/commitments.test.ts` › "is HMAC-SHA256 over the versioned canonical family key", "is SHA-256(salt \|\| type \|\| 0x1F \|\| text)", "changes with the type, the text or the salt" | Mitigated |
+| T-C7 | Denial of service | Gas costs grow until anchoring stops being affordable. | Each write has a gas ceiling, and the exact figures are pinned. | `AuditReportRegistry.gas.t.sol` › `test_gas_writes`, with `contracts/snapshots/` checked in CI | Mitigated |
+| T-C8 | Denial of service | A stolen issuer key revokes every record the firm anchored; since revocation is terminal and a document hash cannot be anchored again, every copy then verifies as REVOKED for good. | None in the contract today. Prevention is key custody (#62) and detection (#93). | — | **Open**: a decision before the production deployment (#95) |
+
+## The worker and the issuer key
+
+`src/lib/anchoring/worker.ts`, run by `scripts/worker.ts`.
+
+| Id | STRIDE | Threat | Mitigation | Proof | Status |
+| --- | --- | --- | --- | --- | --- |
+| T-W1 | Information disclosure | The issuer key leaks from the app server or its build. | Only `scripts/issuer-env.ts` reads `ISSUER_PRIVATE_KEY`; nothing under `src/` names it; the web server is started without it; CI greps the build for it. | `tests/unit/key-boundary.test.ts` › "no file under src/ names ISSUER_PRIVATE_KEY", "only the scripts acting as the issuer read it, through one module"; CI step "The issuer key is not in the build"; `playwright.config.ts` strips it from the server | Mitigated for the app; the worker host still holds a raw key until KMS (#62) |
+| T-W2 | Spoofing | A stolen key writes outside the journal: a forged version 2, a copy, a revocation. | The owner retires the key and registers a new one (`docs/runbooks/key-rotation.md`). What the old key anchored keeps verifying under the firm's name. Nothing detects the writes yet. | `tests/anchoring/worker.test.ts` › "a new key continues the firm’s families, the old key writes nothing more, and everything it anchored still verifies"; `AuditReportRegistry.t.sol` › `test_setIssuer_deactivatedKeyCannotWrite`, `test_familyOrg_survivesKeyDeactivation` | Partly: detection is #93; containment of revocations is #95 |
+| T-W3 | Tampering / repudiation | A write is sent twice, or a nonce is reused, so the chain and the journal disagree. | The journal row exists before the bytes leave (rule 3); an unknown outcome is INDETERMINATE and settled only from chain state, never resent; one row per nonce and one live write per version and kind (database indexes); one worker per key (advisory lock). | `worker.test.ts` › "a worker killed after sending leaves an INDETERMINATE write that settles to FINAL from chain state", "holds a write whose bytes never left, blocks the key, and settles it once its nonce is used", "links a document that is already on chain and sends nothing (idempotent)", "lets one worker at a time work an issuer key"; `tests/db/anchoring.test.ts` › "journals at most one live anchor per version", "journals at most one write per nonce of an issuer key" | Mitigated |
+| T-W4 | Tampering | A reorg removes a block after the console called its write done. | A write is FINAL only once its block is at or below `finalized` (rule 2); the version is ANCHORED, COMPLETE or REVOKED only then. | `worker.test.ts` › "anchors version 1: INTENT, BROADCAST, then FINAL once its block is finalized", "revokes the original with the approved reason, and calls the version REVOKED only once that block is final"; `chain-adapter.test.ts` › "reports NOT_FINAL when the block never reaches finality" | Mitigated |
+| T-W5 | Spoofing | A lying RPC endpoint tells the worker a write is final, or that a record already exists, so the console shows anchored what is not. | The worker checks the chain id and the registry's bytecode, and simulates before every write. It reads one endpoint, so a lie about receipts, finality or records is believed. The public verifier, which reads two, still says the truth. | `worker.test.ts` › "refuses to work against a chain that does not hold the expected registry"; `chain-adapter.test.ts` › "refuses to write to the wrong chain or the wrong contract, and sends nothing" | **Open** (#92) |
+| T-W6 | Denial of service | The key runs out of funds, or a transaction is stuck, and anchoring stops unseen. | A low balance raises an error and a banner on every console page; a transaction stuck for 10 minutes is replaced at the same nonce with higher fees. | `worker.test.ts` › "reports a low balance, and gives the nonce back when the node refuses the bytes", "replaces a transaction stuck for 10 minutes at the same nonce with higher fees" | Mitigated |
+| T-W7 | Elevation | A write starts in a mode wider than the firm now allows, or a dry run broadcasts. | The write mode is a ladder (DISABLED, DRY_RUN, LIVE); a write approved under a wider mode fails once the mode is narrowed; DRY_RUN only simulates. | `worker.test.ts` › "DRY_RUN simulates and records, and never broadcasts", "a write approved under LIVE does not start once the mode is narrowed"; `anchoring.test.ts` › "starts DISABLED, widens one rung at a time, narrows at once, and is audited" | Mitigated |
+| T-W8 | Tampering | The worker stamps or anchors a copy of the wrong file. | The copy is checked against the original's final record before it is stored or sent. | `worker.test.ts` › "never stamps a file that is not the anchored original, and lets an approver retry the copy"; `tests/pdf/stamp.test.ts` › "fails the check when the stamp names another record, or the pages changed after stamping" | Mitigated |
+
+## The verifier
+
+`src/lib/verify-core/` behind `/verify`, `/r/<familyId>/latest`,
+`dist/verifier.html` and the CLI.
+
+| Id | STRIDE | Threat | Mitigation | Proof | Status |
+| --- | --- | --- | --- | --- | --- |
+| T-V1 | Spoofing / tampering | A lying or compromised RPC endpoint makes a forged or revoked file read as authentic. | Two independent endpoints; chain id and bytecode checked on both; both read at one finalized block; any disagreement or failure is CANNOT_VERIFY, never a verdict. Two https endpoints from a known deployment are required. | `tests/integration/verifier.test.ts` › "turns two endpoints that answer differently into CANNOT_VERIFY, not a verdict", "refuses an endpoint on another chain, even when the other is right", "refuses a registry address or bytecode that is not the deployment", "refuses when an endpoint cannot be reached"; `tests/unit/verify-setup.test.ts` › "refuses, by name, anything short of two independent public https endpoints on a known deployment"; `tests/e2e/verify.spec.ts` › "an endpoint on the wrong chain, or two that disagree, give no verdict" | Mitigated. Residual: two endpoints colluding, or both run by one provider; #85 names the providers |
+| T-V2 | Tampering | A reorg removes a record a verdict relied on. | The verifier reads at the finalized block only. | `verifier.test.ts` › "does not count an anchor until its block is finalized" | Mitigated |
+| T-V3 | Spoofing | A forged issuer: a file stamped to point at another registry, a fake record, or a registry deployed with a convincing name. | The verifier knows one registry, by address and bytecode, and the firm names by org id from the deployment record. A stamp naming another chain or contract is UNKNOWN_REGISTRY; one naming a record that is not this file's is not the registered file. | `tests/unit/verdict.test.ts` › "is UNKNOWN_REGISTRY when the stamp names another chain or contract", "never calls a stamped file with a well-formed but foreign opinion salt authentic"; `tests/tamper/tamper.test.ts` › "a forged reference to another record, to no record, or in the XMP alone" | Mitigated |
+| T-V4 | Spoofing | A recipient is tricked by an ALTERED verdict into trusting an altered file. | Only an exact-file match is "Authentic" (rule 4). Every ALTERED verdict says, in both languages, that this is not the file the issuer anchored, and what it does and does not prove. The tamper suite holds each kind of edit to its verdict. | `tests/unit/verify-wording.test.ts` › "says \"authentic\" only for an exact-file match", "says plainly that an altered file is not the registered file"; `verdict.test.ts` › "is ALTERED_OPINION_APPEARS_UNCHANGED when its opinion recommits to the anchored one, never AUTHENTIC"; `tamper.test.ts` (every case) | Mitigated |
+| T-V5 | Spoofing | A look-alike verifier site, or a tampered copy of `verifier.html`, shows a fake verdict. | The firm's emails link only its own `/verify`. `verifier.html` carries its own CSP and connects only to its endpoints. Nothing yet lets a visitor check that the file they run is the published one. | `tests/e2e/standalone.spec.ts` › "the single-file verifier works from disk, connects only to its endpoints and uploads nothing" | **Open**: publishing with a hash (#85) |
+| T-V6 | Information disclosure | The verifier uploads the PDF, or tells a server what was checked (rule 5). | It decides in the browser; the page never calls the app's API; `/verify` lookups are not counted. | `verify.spec.ts` › "an unregistered report is checked in the browser, with no upload and no app API"; `standalone.spec.ts` (above) | Mitigated |
+| T-V7 | Tampering | A script injected into the verifier page changes the verdict. | A per-request nonce CSP: scripts by nonce only, connections to the origin and the two endpoints, no framing. Only text is written into the page. | `tests/unit/rate-limit.test.ts` › "runs scripts only by nonce, and never inline or eval in a build", "connects only to its own origin and the two RPC endpoints, and frames nothing"; `verify.spec.ts` › "the verifier is served with a strict CSP, and verifies under it" | Mitigated |
+| T-V8 | Denial of service | The lookup page is flooded, or a huge file stalls the browser. | 60 lookups a minute per address and 600 in all; a file over the size limit is refused before hashing. Verification does not depend on the app's server at all. | `rate-limit.test.ts` › "holds every address to 60 a minute and all of them together to 600"; `verify.spec.ts` › "the lookup page refuses a client its 61st request in a minute"; `verdict.test.ts` › "refuses a file over the size limit before hashing or reading the chain" | Mitigated. Load at 50 rps is untested (#69) |
+
+## The issuer console
+
+The Next.js app: sign-in, intake, approval, revocation, recipients, the audit
+log.
+
+| Id | STRIDE | Threat | Mitigation | Proof | Status |
+| --- | --- | --- | --- | --- | --- |
+| T-A1 | Elevation | An insider reissues a report alone: a preparer approves their own version 2. | Four eyes in the use case and in the database: the approver is never the person who confirmed the opinion. A version 2 is held until version 1 is anchored. A supersession is public, and recipients are emailed. | `tests/db/anchoring.test.ts` › "holds four-eyes in the database, whatever the code does", "refuses the approver when they confirmed the opinion themselves", "holds version 2 until version 1 is anchored"; `tests/db/recipients.test.ts` › "queues nothing for version 1, and one notice per live recipient when version 2 completes" | Mitigated. Residual: a preparer and an approver who collude; the audit log names both |
+| T-A2 | Elevation | An insider revokes a report alone. | An ADMIN asks, typing the engagement's reference, and a different APPROVER approves; a CHECK holds it in the database. The reason goes on chain from a fixed list. | `tests/db/revocation.test.ts` › "is for an admin who types the engagement’s reference, and only for an anchored version", "holds four eyes in the database too: whoever asked never approves" | Mitigated. Recipients are not told of a revocation yet (#96) |
+| T-A3 | Repudiation | Someone denies an act, or edits or deletes its record. | A hash-chained audit log, written in the transaction that makes the change; UPDATE and DELETE refused by trigger; re-derived on every view and nightly, and held to the last intact check (TRUNCATED, REWRITTEN). | `anchoring.test.ts` › "records every intake step, hash-chained, and verifies", "refuses UPDATE and DELETE", "finds a forged, an edited and a missing event"; `tests/db/audit-check.test.ts` › "finds a tail cut off after an intact check, though what is left verifies", "finds history rewritten and re-hashed after an intact check, and keeps finding it" | Partly: see T-A4 |
+| T-A4 | Tampering | A database owner rewrites the audit log and the record of the last intact check together. | Backups keep older copies. Nothing outside the database holds the head. | — | **Open** (#94) |
+| T-A5 | Spoofing | Someone signs in as an approver or admin. | bcrypt passwords; TOTP for APPROVER and ADMIN with each time step accepted once and recovery codes stored hashed; 10 attempts a minute per address, lockout after 5 failures per email or 10 per address in 15 minutes. | `tests/db/mfa.test.ts` › "accepts a code once, never the same time step again, and a later one after it", "lets only one of two sign-ins racing with the same code through", "holds the secret sealed until a code confirms it, then turns it on with recovery codes stored as hashes only"; `tests/unit/sealed.test.ts` › "refuses an email after five failures, whatever the address, until a success", "locks an address out after ten failures across emails, for fifteen minutes"; `tests/e2e/mfa.spec.ts` › "an admin sets up two-step sign-in before anything else, then signs in with a code or a recovery code" | Mitigated |
+| T-A6 | Elevation | A user acts beyond their role, or on another firm's records. | One table of acts (`CAN`); every mutating route refuses a role that may not, before any work; use cases scope every query to the caller's firm and answer another firm's record as NOT_FOUND. | `tests/unit/route-roles.test.ts` › "%s refuses a VIEWER with 403" (every route, found through git); `tests/db/console.test.ts` › "reads another firm’s client as absent, and lists a client’s engagements with their latest version"; `recipients.test.ts` › "is for a preparer or an admin, within their own firm" | Mitigated |
+| T-A7 | Spoofing | Cross-site request forgery: another site makes a signed-in user's browser write. | Every write must come from this site (Origin, or `Sec-Fetch-Site` when there is none); the session cookie is SameSite. | `route-roles.test.ts` › "%s refuses a write from another site, whoever is signed in" | Mitigated |
+| T-A8 | Information disclosure | Stored PDFs, opinions, salts, manifests, notes or TOTP secrets are read from the database or the disk. | AES-256-GCM with a context naming the row and field, so a sealed value copied elsewhere does not open; PDFs encrypted at rest and checked against their SHA-256 on every read; the key is never in a backup. | `sealed.test.ts` › "refuses another context, a changed byte, an unknown key version and the wrong key"; `tests/db/intake.test.ts` › "a sealed field copied into another row does not open there", "stores the file encrypted, finds the opinion, and opens a draft"; `test:backup` (CI) | Mitigated. Client names, user and recipient emails are stored plain (docs/operations.md) |
+| T-A9 | Information disclosure | The audit log or the logs carry confidential data. | Audit events hold ids, hashes and codes only; errors are logged by name, never by message. | `anchoring.test.ts` › "never holds an opinion, a client name or a manifest" | Mitigated |
+| T-A10 | Denial of service | One user floods the app with writes. | 60 writes a minute per user. | `route-roles.test.ts` › "refuses a user their 61st write in a minute, says when to come back, and leaves reads and other users alone" | Mitigated |
+| T-A11 | Tampering | A script injected into a signed-in page acts as the user. | React escapes text; there is no HTML from users. The signed-in pages have no CSP yet. | — | **Open** (#84) |
+
+## The PDF pipeline
+
+`src/lib/pdf/`: every untrusted PDF is parsed in a forked child process.
+
+| Id | STRIDE | Threat | Mitigation | Proof | Status |
+| --- | --- | --- | --- | --- | --- |
+| T-P1 | Elevation / DoS | A crafted PDF exploits the parser or exhausts the server. | Parsing runs in a child process with a heap cap and a time limit; files over 25 MB or 500 pages are refused before parsing; the text is capped. | `tests/pdf/parse.test.ts` › "kills the parser at the time limit", "reports a parser that runs out of memory as RESOURCE_LIMIT", "refuses a file over 25 MB before starting the parser", "refuses more than 500 pages", "refuses a file with more text than the limit" | Mitigated |
+| T-P2 | DoS | Malformed structures (loops, deep nesting, decompression bombs) hang or crash the parser. | The same isolation; each case is a fuzz fixture. | `tests/pdf/fuzz.test.ts` › "a cross-reference chain that loops back on itself", "a page tree that contains itself", "objects nested a hundred thousand levels deep", "a stream that inflates to 1 GB is cut off, and the server parses the next file normally" | Mitigated |
+| T-P3 | Tampering | Hidden text, JavaScript or an embedded file makes the confirmed opinion differ from what a reader sees. | The text is normalised (invisible and control characters dropped, NFKC) before it is committed; JavaScript and embedded files are flagged; a person confirms the opinion (rule 6); white text is read and caught. | `tests/unit/opinion.test.ts` › "applies NFKC, drops invisible and control characters, and collapses whitespace"; `parse.test.ts` › "flags JavaScript and embedded files"; `tamper.test.ts` › "white text hidden in the opinion is read, and caught" | Mitigated |
+| T-P4 | Tampering | The locator picks a wrong passage as the opinion. | It answers FOUND only when sure; every doubt is NOT_FOUND with a reason, and a person types the opinion. | `opinion.test.ts` › "answers NOT_FOUND, with a reason, whenever it would have to guess", "still refuses near misses of those wordings" | Mitigated |
+
+## The mailer and recipients
+
+| Id | STRIDE | Threat | Mitigation | Proof | Status |
+| --- | --- | --- | --- | --- | --- |
+| T-M1 | Information disclosure | A notification email carries the report, the opinion or a figure. | The email is built from names, the engagement's reference, the period end, the version and two links; plain text, no attachment (decision #8). | `tests/unit/email.test.ts` › "carries only what it is given: the facts hold no opinion or figure, so neither can the email"; `recipients.test.ts` › "sends each notice once, in the recipient’s language, with links and no report, opinion or figure"; `tests/e2e/anchoring.spec.ts` (the exit gate reads Mailpit) | Mitigated |
+| T-M2 | Tampering | A client name or engagement reference injects a header or a paragraph. | Every value from the database is kept on one line. | `email.test.ts` › "keeps every value from the database on its own line, so none can start a header or a paragraph" | Mitigated |
+| T-M3 | Spoofing | Someone sends recipients a look-alike email with a link to a fake verifier. | Outside the app: SPF, DKIM and DMARC on the sending domain, and the email tells recipients to check a copy at the firm's `/verify`. | — | Partly: a deployment concern, in `docs/runbooks/` |
+| T-M4 | Information disclosure | The SMTP server's reply or credentials reach the logs. | Only a name for an error is kept; `SMTP_URL` is never logged. | `recipients.test.ts` › "retries a failure, keeps a name for it rather than what the server said, and gives up after five attempts" | Mitigated |
+
+## Supply chain and operations
+
+| Id | STRIDE | Threat | Mitigation | Proof | Status |
+| --- | --- | --- | --- | --- | --- |
+| T-S1 | Tampering | A dependency or the vendored UI code is altered. | Exact versions; `npm audit` on production dependencies; the vendored tree hashed against its manifest and re-derived from upstream at a pinned commit; Actions and images pinned by digest; gitleaks over the history. | `tests/unit/vendor.test.ts` › "matches its manifest", "reports a file edited by hand"; CI jobs "Vendored code reproduces from upstream", "npm audit (production dependencies)", "Secret scan (gitleaks)" | Mitigated |
+| T-O1 | Denial of service | Sepolia is shut down, and every prototype anchor with it. | Re-anchor every Sepolia record under one Merkle root on the production chain, and timestamp each manifest on Bitcoin. | — | **Open** (#63, #65, #66) |
+| T-O2 | Denial of service | The database or the file store is lost. | Nightly backups with checksums; a restore goes only into an empty target and is checked against the source; CI runs the round trip. | `npm run test:backup` (CI step "Back up, restore into a fresh database, and check the copy") | Mitigated. Re-deriving every verdict from the chain after a restore is Phase 6 hardening |
+| T-O3 | Repudiation | Nobody notices a failing worker, a lagging finality, or two endpoints that disagree. | The low-balance and broken-audit-chain banners; error log lines. No alerting on failed writes, finality lag or RPC disagreement yet. | — | **Open** (#92, #93; Phase 6 monitoring) |
+
+## Open items
+
+| Issue | What it closes |
+| --- | --- |
+| #62 | The issuer key leaves the worker host's environment (KMS). |
+| #63 | The production chain, after which Sepolia's sunset no longer matters. |
+| #65 | Re-anchoring Sepolia records on the production chain. |
+| #66 | A second, independent timestamp on Bitcoin. |
+| #67 | Contract ownership in a Safe: the proposal script exists; the owner executes it. |
+| #69 | `/verify` at 50 requests a second. |
+| #84 | A CSP for the signed-in pages. |
+| #85 | Publishing `verifier.html` with its hash, and naming the two public RPC providers. |
+| #92 | The worker reads two endpoints, as the verifier does. |
+| #93 | Detecting chain writes the journal did not make. |
+| #94 | Keeping the audit log's head outside the database. |
+| #95 | Whether one issuer key may revoke for good (a decision before production). |
+| #96 | Telling recipients when a version they hold is revoked. |

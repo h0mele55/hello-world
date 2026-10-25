@@ -7,8 +7,9 @@ import type { SessionUser } from '@/auth';
 /**
  * Phase 5 hardening (#52): every mutating route checks the caller's role on
  * the server. Each route is called as a signed-in VIEWER and must answer 403
- * FORBIDDEN before doing anything; the routes are found from git, so a new
- * one is held to this without anyone remembering to add it.
+ * FORBIDDEN before doing anything, and refuses a write from another site
+ * (CSRF) whoever is signed in; the routes are found from git, so a new one is
+ * held to this without anyone remembering to add it.
  */
 
 vi.mock('server-only', () => ({}));
@@ -55,6 +56,19 @@ describe('the role check on every mutating route', () => {
     for (const { method, call: fn } of writes) {
       session.user = user('VIEWER');
       expect(await call(file, method, fn), `${method} ${file}`).toEqual({ status: 403, body: { error: 'FORBIDDEN' } });
+    }
+  });
+
+  it.each(routeFiles.filter((file) => !EXEMPT[file]))('%s refuses a write from another site, whoever is signed in', async (file) => {
+    const writes = await writesOf(file);
+    session.user = user('ADMIN', 'VERIFIED');
+    for (const { method, call: fn } of writes) {
+      const foreign: Record<string, string>[] = [{ origin: 'https://evil.example', host: 'app.test' }, { 'sec-fetch-site': 'cross-site', host: 'app.test' }, { origin: 'null', host: 'app.test' }];
+      for (const headers of foreign) {
+        const req = new NextRequest(`http://app.test/${file}`, { method, headers: { 'content-type': 'application/json', ...headers }, body: '{}' });
+        const response = await fn(req, ctx);
+        expect({ status: response.status, body: await response.json() }, `${method} ${file} ${JSON.stringify(headers)}`).toEqual({ status: 403, body: { error: 'CROSS_ORIGIN' } });
+      }
     }
   });
 

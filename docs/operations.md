@@ -16,6 +16,12 @@ Run the check and the backup from the app's directory with the app's
 environment. The check reads `DATABASE_URL` only. The backup also needs
 `FILE_STORAGE_DIR` and `BACKUP_DIR`.
 
+Run the worker and the mailer under a supervisor that restarts them (for
+example a systemd unit with `Restart=always`). Each tries a failed pass again
+after its interval, logging `pass failed` with a count; after 20 failures in a
+row it exits 1, so the supervisor restarts it with fresh connections. When
+something goes wrong, `docs/runbooks/` says what to do.
+
 ## The mailer
 
 When a newer version of a report is complete, everyone listed as holding the

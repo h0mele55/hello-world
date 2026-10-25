@@ -1061,12 +1061,52 @@ external review findings are closed; re-anchoring has been rehearsed on a copy.
 
 **Hardening**
 
-- [ ] The threat model covers a forged issuer, key theft, a lying RPC endpoint, a chain reorg or sunset, PDF parser exploits and an insider reissuing a report
+- [x] The threat model covers a forged issuer, key theft, a lying RPC endpoint, a chain reorg or sunset, PDF parser exploits and an insider reissuing a report
 - [ ] Key ceremony and rotation runbook rehearsed; old records still verify after a rotation
 - [ ] Monitoring and on-call for failed writes, finality lag, RPC disagreement, low balance and verifier errors
 - [ ] `/verify` load-tested at 50 requests per second
 - [ ] Disaster recovery restores the database and re-derives every verdict from the chain
 - [ ] The re-anchoring proof verifies every Sepolia record against the production root
+
+**As built so far.** 6a is the threat model, the runbooks and the owner's
+script (#61, #67, #68):
+
+- **`docs/threat-model.md`** goes through STRIDE for the contract, the worker
+  and its key, the verifier, the console, the PDF pipeline, the mailer and the
+  supply chain. Each threat names its mitigation and the test that proves it,
+  or the issue that tracks it. Writing it found five gaps, filed as issues:
+  - the worker trusts one RPC endpoint (#92);
+  - nothing detects writes the journal did not make (#93);
+  - a database owner can rewrite the audit log and its last check together
+    (#94);
+  - one stolen key can revoke every record for good, a decision before
+    production (#95);
+  - recipients are not told of a revocation (#96).
+
+  It also found cross-site write refusal untested, which now has a test over
+  every route.
+- **`docs/runbooks/`**: key rotation, the Safe, stuck writes, an RPC outage, a
+  restore, mail, and the Sepolia sunset.
+- **Key rotation is rehearsed on Anvil** by a worker test:
+  - a new key continues the firm's families and the old key writes nothing
+    more;
+  - everything the old key anchored still verifies under the firm's name;
+  - the new key revokes what the old one anchored.
+
+  The rehearsal found that certificates were made only for versions the
+  current key had anchored. Now any key's anchor-only version gets one. The
+  hardening box stays open for the key ceremony, which arrives with KMS (#62).
+- **`scripts/owner-call.ts`** prepares the owner's acts:
+  - registering and retiring issuer keys;
+  - offering ownership to a Safe;
+  - the Safe's acceptance.
+
+  It checks the registry, simulates, and prints the transaction. It never
+  sends an ownership move.
+- **The worker and the mailer ride out an outage.** A failed pass used to end
+  the process: a minute of RPC trouble stopped anchoring until someone
+  restarted it. Now a failed pass is tried again after the interval, and after
+  20 in a row the process exits for its supervisor to restart.
 
 **Prompt**
 

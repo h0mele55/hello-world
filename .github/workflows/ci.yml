@@ -31,9 +31,11 @@ jobs:
           --health-timeout 5s
           --health-retries 12
     env:
-      # A throwaway database in a service container that lives for this job.
+      # Throwaway databases in a service container that lives for this job: the
+      # database tests truncate theirs and leave rows whose files live in their
+      # own temporary directory, so the app the end-to-end tests run gets its own.
       TEST_DATABASE_URL: postgresql://anchor:anchor@127.0.0.1:5432/anchor_test
-      DATABASE_URL: postgresql://anchor:anchor@127.0.0.1:5432/anchor_test
+      DATABASE_URL: postgresql://anchor:anchor@127.0.0.1:5432/anchor_e2e
       NEXTAUTH_URL: http://127.0.0.1:3100
       # Stamps and certificates point at <APP_PUBLIC_URL>/verify.
       APP_PUBLIC_URL: http://127.0.0.1:3100
@@ -75,7 +77,11 @@ jobs:
         run: npm run test:db
       - name: Anchoring worker against Postgres and Anvil
         run: npm run test:anchoring
-      - name: Seed the two users
+      - name: The end-to-end database, migrated from scratch
+        run: |
+          psql "$TEST_DATABASE_URL" -qc 'CREATE DATABASE anchor_e2e'
+          npx prisma migrate deploy
+      - name: Seed the firm's users
         run: npm run db:seed
       - name: A local chain for the end-to-end tests
         run: |

@@ -4,6 +4,7 @@ import { AnchoringError } from '@/lib/anchoring/errors';
 import { appendAuditEvent } from '@/lib/audit';
 import { db } from '@/lib/db';
 import { requireRole } from '@/lib/roles';
+import { WATCH_STALE_MS } from '@/lib/staleness';
 
 /**
  * The registry watch as the console shows it (#93): how far it has read the
@@ -13,7 +14,7 @@ import { requireRole } from '@/lib/roles';
  */
 
 /** The watch runs every ten minutes; one older than this means it has stopped. */
-export const WATCH_STALE_MS = 2 * 60 * 60 * 1000;
+export { WATCH_STALE_MS };
 /** Open findings shown at once; more are counted, never hidden. */
 export const OPEN_FINDINGS_SHOWN = 50;
 

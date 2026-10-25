@@ -41,6 +41,7 @@ import { createRegistryReader, type RegistryReader } from '@/lib/chain/reader';
 import { recordIdFor, ZERO_HASH } from '@/lib/chain/records';
 import { registryAbi } from '@/lib/chain/registry-artifact';
 import { confirmOpinion, createEngagement, uploadVersion } from '@/lib/reports/intake';
+import { addRecipient, removeRecipient } from '@/lib/reports/recipients';
 import { startAnvil, type AnvilHandle } from '../integration/anvil';
 
 /**
@@ -749,5 +750,53 @@ describe('revocation', () => {
     await mine();
     await pass();
     await approveRevocation(approver, revocationId, target);
+  });
+});
+
+describe('telling recipients about a newer version', () => {
+  async function withRecipients(engagementId: string) {
+    const kept = await addRecipient(preparer, { engagementId, name: 'Maria Petrova', email: 'maria@lender.example', locale: 'bg' });
+    const gone = await addRecipient(preparer, { engagementId, name: 'Georgi Ivanov', email: 'georgi@regulator.example', locale: 'en' });
+    await removeRecipient(preparer, gone.id);
+    return kept.id;
+  }
+
+  it('queues nothing for version 1, and a notice to each live recipient once version 2 is COMPLETE', async () => {
+    await goLive();
+    const e = await engagement();
+    const recipientId = await withRecipients(e.id);
+    const v1 = await confirmedVersion(e.id, 'en-unmodified.pdf');
+    await anchorThrough(v1);
+    await mine();
+    await pass();
+    expect((await versionOf(v1)).status).toBe('COMPLETE');
+    expect(await prisma.notification.count()).toBe(0);
+
+    const v2 = await confirmedVersion(e.id, 'en-qualified.pdf', 'CORRECTION');
+    await anchorThrough(v2);
+    // ANCHORED, its copy not final yet: nobody is told about a version that is not complete.
+    expect((await versionOf(v2)).status).toBe('ANCHORED');
+    expect(await prisma.notification.count()).toBe(0);
+    await mine();
+    await pass();
+    expect((await versionOf(v2)).status).toBe('COMPLETE');
+    expect(await prisma.notification.findMany({ select: { recipientId: true, reportVersionId: true, status: true } })).toEqual([{ recipientId, reportVersionId: v2, status: 'PENDING' }]);
+    expect(await prisma.auditEvent.findFirstOrThrow({ where: { action: 'notification.queued' } })).toMatchObject({ subjectId: v2, actorId: null, data: { count: 1 } });
+    expect(await verifyAuditChain(prisma, admin.orgId)).toMatchObject({ ok: true });
+  });
+
+  it('queues them for an anchor-only version 2 when its certificate is made', async () => {
+    await goLive();
+    const e = await engagement();
+    const recipientId = await withRecipients(e.id);
+    const v1 = await confirmedVersion(e.id, 'en-unmodified.pdf');
+    await anchorThrough(v1);
+    await mine();
+    await pass();
+    const v2 = await confirmedVersion(e.id, 'en-signed.pdf', 'CORRECTION');
+    expect((await versionOf(v2)).anchorOnly).toBe(true);
+    await anchorThrough(v2);
+    expect((await versionOf(v2)).status).toBe('COMPLETE');
+    expect(await prisma.notification.findMany({ select: { recipientId: true, reportVersionId: true } })).toEqual([{ recipientId, reportVersionId: v2 }]);
   });
 });

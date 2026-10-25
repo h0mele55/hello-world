@@ -485,7 +485,7 @@ to the true state.
 - [x] INDETERMINATE is never resent automatically; it settles from chain state
 - [x] The stamped PDF is re-parsed and re-hashed before its anchor, and its XMP block and transaction must equal the final record
 - [x] The testnet signing key lives in env on the server only and never reaches the browser
-- [ ] A hash-chained internal audit log covers upload, confirm, approve, anchor, stamp and revoke (all but revoke, which arrives with the revocation flow in Phase 5, #55)
+- [x] A hash-chained internal audit log covers upload, confirm, approve, anchor, stamp and revoke (revoke arrived with the revocation flow in Phase 5c, #55)
 - [x] An alert fires when the issuer balance drops below 0.02 Sepolia ETH
 
 **As built: Phase 3 ships in two pull requests.** 3a is approval, the write
@@ -856,11 +856,11 @@ revocation shows as Revoked in the verifier.
 - [x] Every mutating route checks role on the server; preparer ≠ approver is also a database constraint
 - [x] Multi-factor sign-in is required for APPROVER and ADMIN
 - [x] Sign-in and mutations are rate-limited, with lockout after repeated failures
-- [ ] Notification emails carry no PDF, no opinion text and no figures
+- [x] Notification emails carry no PDF, no opinion text and no figures
 - [x] The nightly audit-chain check alerts on any break
 - [x] Database and encrypted file store are backed up, and one restore has been tested
 
-**As built: Phase 5 ships in three pull requests.** 5a is roles, two-step
+**As built: Phase 5 ships in five pull requests.** 5a is roles, two-step
 sign-in and the rate limits (#52, #58). Departures from the prompt below, and
 decisions it left open:
 
@@ -965,6 +965,43 @@ decisions it left open:
   every stored file decrypted against its SHA-256. CI runs the round trip,
   and the two refusals, after the end-to-end tests: that is the tested
   restore.
+
+5e is recipients and the exit gate (#56, #60):
+
+- **Recipients belong to the engagement**, not to a version: the prompt's
+  "recipients of earlier versions" is everyone listed when a newer version
+  becomes COMPLETE (a version 2 or later; an anchor-only version when its
+  certificate is made). Someone added after that hears about the next one. A
+  preparer or admin keeps the list, one live entry per address; removing
+  someone keeps their row, so who was told what stays readable, and cancels
+  anything not yet sent to them. Each recipient has a language, EN or BG.
+- **What they are sent follows decision #8** (details only): the firm, the
+  client, the engagement's reference, the period end, the new version's
+  number, the link to `/r/<familyId>/latest` and the link to `/verify`. Plain
+  text, no attachment: never the PDF, the opinion or a figure, and it says so.
+  Every value from the database is kept on one line, so none can start a
+  header or a paragraph.
+- **An outbox, not a send in the transaction.** Completing a version queues
+  a `Notification` per recipient in the same transaction, so a complete
+  version and its notices exist together or not at all. The mailer
+  (`npm run mailer`, its own process, holding no issuer key) sends at least
+  once: it claims a notice under a lease, so one whose mailer died is sent
+  again later; a duplicate notice is harmless and a lost one is not. After
+  five failed attempts a notice is FAILED for a person to look at, and only a
+  name for the error is kept, never what the server said, which can echo
+  addresses.
+- **The exit gate is the end-to-end flow**: a preparer issues version 1, a
+  different approver approves it, version 2 supersedes it, both recipients
+  (one EN, one BG) get one email each in Mailpit with no attachment and no
+  opinion, the email's link shows version 2, an admin asks for version 1 to
+  be revoked, an approver approves, and the verifier reports version 1's
+  original and copy as REVOKED and version 2 as the latest. CI runs Mailpit
+  as a service container.
+- **Found on the way**: the version page said "Nothing has been anchored yet"
+  under the commitments of a version long anchored; it now says what is on
+  chain. And one test signing in as four people from one address tripped the
+  sign-in limit, so each person in a test now signs in from an address of
+  their own.
 
 **Prompt**
 

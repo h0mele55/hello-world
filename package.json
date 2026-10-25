@@ -27,6 +27,7 @@
     "test:anchoring": "vitest run --config vitest.anchoring.config.mts",
     "worker": "tsx scripts/worker.ts",
     "audit:check": "tsx scripts/check-audit-chain.ts",
+    "mailer": "tsx scripts/mailer.ts",
     "test:backup": "scripts/test-backup-restore.sh",
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed",
@@ -67,6 +68,7 @@
     "next": "16.4.2",
     "next-auth": "4.24.15",
     "next-intl": "4.14.9",
+    "nodemailer": "10.2.1",
     "otplib": "13.5.0",
     "pdfjs-dist": "6.4.299",
     "pg": "8.23.1",
@@ -101,5 +103,8 @@
     "tsx": "4.23.15",
     "typescript": "5.9.3",
     "vitest": "5.0.5"
+  },
+  "overrides": {
+    "nodemailer": "$nodemailer"
   }
 }

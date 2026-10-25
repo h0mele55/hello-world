@@ -94,6 +94,15 @@ enum RevocationStatus {
   WITHDRAWN
 }
 
+enum NotificationStatus {
+  PENDING
+  SENT
+  /// Gave up after the last attempt; a person looks at it.
+  FAILED
+  /// The recipient was removed before it was sent.
+  CANCELLED
+}
+
 enum ReasonCode {
   INITIAL
   CORRECTION
@@ -131,6 +140,8 @@ model User {
   revocationsRequested Revocation[]    @relation("revocationRequestedBy")
   revocationsApproved  Revocation[]    @relation("revocationApprovedBy")
   revocationsClosed    Revocation[]    @relation("revocationClosedBy")
+  recipientsAdded      Recipient[]     @relation("recipientAddedBy")
+  recipientsRemoved    Recipient[]     @relation("recipientRemovedBy")
 
   /// The TOTP secret, sealed (context `User:<id>:totpSecret`); null until set up.
   totpSecret        Bytes?
@@ -188,70 +199,72 @@ model Engagement {
   createdBy     User            @relation(fields: [createdById], references: [id])
   createdAt     DateTime        @default(now())
   versions      ReportVersion[]
+  recipients    Recipient[]
 
   @@unique([clientId, engagementRef, periodEnd, reportType])
 }
 
 model ReportVersion {
-  id                      String        @id @default(cuid())
+  id                      String         @id @default(cuid())
   engagementId            String
-  engagement              Engagement    @relation(fields: [engagementId], references: [id])
+  engagement              Engagement     @relation(fields: [engagementId], references: [id])
   version                 Int
   reasonCode              ReasonCode
-  status                  VersionStatus @default(DRAFT)
+  status                  VersionStatus  @default(DRAFT)
   /// SHA-256 of the exact file; one file is one version, ever.
-  docHash                 String        @unique
+  docHash                 String         @unique
   pageCount               Int
   /// Signed or edit-protected: anchored as is, never rewritten (#74).
   anchorOnly              Boolean
   /// Parser flags: signed, javascript, embeddedFiles, xfa, editProtected.
   flags                   Json
-  storedFileId            String        @unique
-  storedFile              StoredFile    @relation("originalFile", fields: [storedFileId], references: [id])
+  storedFileId            String         @unique
+  storedFile              StoredFile     @relation("originalFile", fields: [storedFileId], references: [id])
   /// Sealed JSON: what the opinion locator found, or why it found nothing.
   extraction              Bytes
   // Set together, only when a person confirms (CLAUDE.md rule 6).
   opinionType             OpinionType?
   /// Sealed: the normalised opinion text the person confirmed.
   confirmedOpinion        Bytes?
-  reportDate              DateTime?     @db.Date
+  reportDate              DateTime?      @db.Date
   /// Fresh from the CSPRNG per version; unique, so a reused salt is refused.
-  opinionSalt             Bytes?        @unique
+  opinionSalt             Bytes?         @unique
   opinionCommitment       String?
-  manifestSalt            Bytes?        @unique
+  manifestSalt            Bytes?         @unique
   /// Sealed canonical JSON of manifest v1.
   manifest                Bytes?
-  manifestHash            String?       @unique
+  manifestHash            String?        @unique
   preparedById            String
-  preparedBy              User          @relation("preparedBy", fields: [preparedById], references: [id])
+  preparedBy              User           @relation("preparedBy", fields: [preparedById], references: [id])
   confirmedById           String?
-  confirmedBy             User?         @relation("confirmedBy", fields: [confirmedById], references: [id])
+  confirmedBy             User?          @relation("confirmedBy", fields: [confirmedById], references: [id])
   confirmedAt             DateTime?
   /// Never the preparer or the confirmer: a CHECK in the migration enforces it.
   approvedById            String?
-  approvedBy              User?         @relation("approvedBy", fields: [approvedById], references: [id])
+  approvedBy              User?          @relation("approvedBy", fields: [approvedById], references: [id])
   approvedAt              DateTime?
   /// The original's record id on chain, once its anchor is final.
-  recordId                String?       @unique
+  recordId                String?        @unique
   anchorTxHash            String?
   anchorBlock             BigInt?
   // The distribution copy: the original with its anchor written into its
   // metadata as an incremental update (src/lib/stamp.ts). Never for anchorOnly.
-  copyDocHash             String?       @unique
-  copyStoredFileId        String?       @unique
-  copyStoredFile          StoredFile?   @relation("copyFile", fields: [copyStoredFileId], references: [id], onDelete: Restrict)
-  copyRecordId            String?       @unique
+  copyDocHash             String?        @unique
+  copyStoredFileId        String?        @unique
+  copyStoredFile          StoredFile?    @relation("copyFile", fields: [copyStoredFileId], references: [id], onDelete: Restrict)
+  copyRecordId            String?        @unique
   copyTxHash              String?
   copyBlock               BigInt?
   /// anchorOnly versions get a verification certificate instead of a copy.
-  certificateStoredFileId String?       @unique
-  certificateStoredFile   StoredFile?   @relation("certificateFile", fields: [certificateStoredFileId], references: [id], onDelete: Restrict)
+  certificateStoredFileId String?        @unique
+  certificateStoredFile   StoredFile?    @relation("certificateFile", fields: [certificateStoredFileId], references: [id], onDelete: Restrict)
   completedAt             DateTime?
   /// Set with REVOKED, when the revocation's block is final.
   revokedAt               DateTime?
   chainWrites             ChainWrite[]
   revocations             Revocation[]
-  createdAt               DateTime      @default(now())
+  notifications           Notification[]
+  createdAt               DateTime       @default(now())
 
   @@unique([engagementId, version])
   @@index([preparedById])
@@ -411,4 +424,53 @@ model AuditChainCheck {
   reason    String?
 
   @@index([orgId, checkedAt])
+}
+
+/// Someone who holds a copy of an engagement's report (a lender, a
+/// regulator, a shareholder) and is told when a newer version supersedes it.
+/// They get a link to the latest version's record, never the report (#8).
+model Recipient {
+  id            String         @id @default(cuid())
+  engagementId  String
+  engagement    Engagement     @relation(fields: [engagementId], references: [id])
+  name          String
+  /// Lower-cased; one live recipient per address and engagement (a partial unique index).
+  email         String
+  /// en or bg: the language of what they are sent.
+  locale        String
+  addedById     String
+  addedBy       User           @relation("recipientAddedBy", fields: [addedById], references: [id])
+  addedAt       DateTime       @default(now())
+  /// Removed recipients stay, so who was told what can still be read.
+  removedAt     DateTime?
+  removedById   String?
+  removedBy     User?          @relation("recipientRemovedBy", fields: [removedById], references: [id])
+  notifications Notification[]
+
+  @@index([engagementId])
+  @@index([addedById])
+  @@index([removedById])
+}
+
+/// One email to one recipient about one superseding version. Queued in the
+/// transaction that makes the version COMPLETE; sent by the mailer
+/// (scripts/mailer.ts), at least once.
+model Notification {
+  id              String             @id @default(cuid())
+  recipientId     String
+  recipient       Recipient          @relation(fields: [recipientId], references: [id])
+  /// The version that supersedes theirs.
+  reportVersionId String
+  reportVersion   ReportVersion      @relation(fields: [reportVersionId], references: [id])
+  status          NotificationStatus @default(PENDING)
+  attempts        Int                @default(0)
+  /// A name for the last failure, never its message.
+  lastError       String?
+  leaseUntil      DateTime?
+  createdAt       DateTime           @default(now())
+  sentAt          DateTime?
+
+  @@unique([recipientId, reportVersionId])
+  @@index([reportVersionId])
+  @@index([status, leaseUntil])
 }

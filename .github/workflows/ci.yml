@@ -30,6 +30,15 @@ jobs:
           --health-interval 5s
           --health-timeout 5s
           --health-retries 12
+      # Catches the recipients' email for the end-to-end tests (#56): SMTP on 1025, its API on 8025.
+      mailpit:
+        image: axllent/mailpit:v1.31.5@sha256:94f6b70c1436defae6799d9ac7ff0eeff9540465b842026d5cdb018f1c0234ea
+        ports: ['1025:1025', '8025:8025']
+        options: >-
+          --health-cmd "/mailpit readyz"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     env:
       # Throwaway databases in a service container that lives for this job: the
       # database tests truncate theirs and leave rows whose files live in their
@@ -43,6 +52,10 @@ jobs:
       SEED_PREPARER_EMAIL: preparer@ci.example
       SEED_APPROVER_EMAIL: approver@ci.example
       SEED_ADMIN_EMAIL: admin@ci.example
+      # The mailer sends to Mailpit; the end-to-end tests read what it sent.
+      SMTP_URL: smtp://127.0.0.1:1025
+      MAIL_FROM: Audit Report Anchoring <noreply@ci.example>
+      MAILPIT_URL: http://127.0.0.1:8025
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: foundry-rs/foundry-toolchain@dba66c27052e63476d886f22216e119ba7e615bf # v1.9.2

@@ -31,7 +31,9 @@ export type IntakeErrorCode =
   | 'ENGAGEMENT_EXISTS'
   | 'DRAFT_PENDING'
   | 'VERSION_CONFLICT'
-  | 'NOT_DRAFT';
+  | 'NOT_DRAFT'
+  | 'RECIPIENT_EXISTS'
+  | 'RECIPIENT_LIMIT';
 
 export class IntakeError extends Error {
   constructor(

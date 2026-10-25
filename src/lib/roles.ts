@@ -14,6 +14,8 @@ export const CAN = {
   approve: ['APPROVER'],
   /** Ask for an anchored version to be revoked, or take that request back. */
   requestRevocation: ['ADMIN'],
+  /** Add or remove an engagement's recipients, who are told when a newer version supersedes theirs. */
+  manageRecipients: ['PREPARER', 'ADMIN'],
   /** Move the firm's chain write mode. */
   setChainMode: ['APPROVER', 'ADMIN'],
   /** Set up a second factor: the roles that must sign in with one. */

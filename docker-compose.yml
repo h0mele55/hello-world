@@ -1,4 +1,6 @@
-# Local Postgres for development and the database tests.
+# Local Postgres for development and the database tests, and Mailpit, which
+# catches the mailer's email (SMTP_URL=smtp://127.0.0.1:1025; read it at
+# http://127.0.0.1:8025).
 #   POSTGRES_PASSWORD=<choose one> docker compose up -d
 # Creates two databases: anchor (the app) and anchor_test (npm run test:db).
 services:
@@ -17,6 +19,12 @@ services:
       test: ['CMD-SHELL', 'pg_isready -U anchor -d anchor']
       interval: 5s
       retries: 12
+
+  mailpit:
+    image: axllent/mailpit:v1.31.5@sha256:94f6b70c1436defae6799d9ac7ff0eeff9540465b842026d5cdb018f1c0234ea
+    ports:
+      - '127.0.0.1:1025:1025'
+      - '127.0.0.1:8025:8025'
 
 volumes:
   pgdata: {}

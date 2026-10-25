@@ -48,14 +48,19 @@ export type AuditAction =
   | 'revocation.requested'
   | 'revocation.approved'
   | 'revocation.rejected'
-  | 'revocation.withdrawn';
+  | 'revocation.withdrawn'
+  | 'recipient.added'
+  | 'recipient.removed'
+  | 'notification.queued'
+  | 'notification.sent'
+  | 'notification.failed';
 
 export interface AuditEventInput {
   orgId: string;
   /** The user, or null for the worker. */
   actorId: string | null;
   action: AuditAction;
-  subjectType: 'Engagement' | 'ReportVersion' | 'IssuerOrg' | 'ChainWrite' | 'User' | 'Revocation';
+  subjectType: 'Engagement' | 'ReportVersion' | 'IssuerOrg' | 'ChainWrite' | 'User' | 'Revocation' | 'Recipient' | 'Notification';
   subjectId: string;
   /** Plain JSON only: strings, safe integers, booleans, null, arrays and objects. */
   data: Record<string, unknown>;

@@ -84,6 +84,9 @@ jobs:
           cast rpc --rpc-url http://127.0.0.1:8545 anvil_setBalance "$issuer_address" 0x8AC7230489E80000 > /dev/null
           DEPLOYER_PRIVATE_KEY="$deployer" ISSUER_ADDRESS="$issuer_address" ISSUER_ORG_NAME="$SEED_ORG_NAME" \
             LOCAL_RPC_URL=http://127.0.0.1:8545 npx tsx scripts/deploy-registry.ts local
+          # Finalize the deployment, as a real one long is: the verifier reads the
+          # registry's code at the finalized block and refuses a chain without it.
+          cast rpc --rpc-url http://127.0.0.1:8545 anvil_mine 0x3 > /dev/null
           {
             echo "ANCHOR_NETWORK=local"
             echo "LOCAL_RPC_URL=http://127.0.0.1:8545"
@@ -98,6 +101,19 @@ jobs:
           if grep -rqF "${ISSUER_PRIVATE_KEY#0x}" .next; then echo "The issuer key appears in .next"; exit 1; fi
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
+      - name: The single-file verifier and the CLI, for the local chain
+        run: npm run build:verifier
+      - name: Tamper suite (the Phase 4 exit gate)
+        run: |
+          sudo apt-get update -q && sudo apt-get install -y --no-install-recommends qpdf
+          npm run test:tamper
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        if: always()
+        with:
+          name: tamper-results
+          path: test-results/tamper-results.md
+          if-no-files-found: ignore
+          retention-days: 30
       - name: End-to-end tests
         run: npm run test:e2e
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

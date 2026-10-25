@@ -19,9 +19,10 @@ storage, sign-in and the confirmation screen) is done. Phase 3 (the write
 ladder, four-eyes approval, the ChainWrite journal and its worker, new
 versions, the audit log, the balance alert, stamping, the distribution copy
 and the certificate for anchor-only reports) is done and tested on Anvil; its
-Sepolia run waits on #4. Phase 4a (the shared verification code, `/verify` and
-`/r/<familyId>/latest`) is done; 4b (the standalone verifier and CLI, the
-tamper suite, CSP and rate limits) is next.
+Sepolia run waits on #4. Phase 4 (the shared verification code, `/verify`,
+`/r/<familyId>/latest`, the single-file verifier and CLI, the tamper suite,
+CSP and rate limits) is done on Anvil, which completes the prototype; its
+Sepolia run waits on #4 too.
 
 ## Rules every phase keeps
 
@@ -76,6 +77,11 @@ npm run db:seed                # the firm and two users, from SEED_* in the envi
 npm run test:db                # intake and approval use cases against TEST_DATABASE_URL (name must end in _test)
 npm run test:anchoring         # the worker against TEST_DATABASE_URL and a throwaway Anvil node
 npm run worker                 # the anchoring worker; add `-- --once` for one pass
+
+# The verifier
+npm run build:verifier         # dist/verifier.html and dist/verify-report.mjs, for VERIFY_NETWORK (or ANCHOR_NETWORK)
+node bin/verify-report.mjs report.pdf [--deployment <file> --rpc <url> --rpc <url>]   # verdict as JSON
+npm run test:tamper            # the tamper suite on Anvil, through verify-core and the CLI; needs qpdf and Chromium
 
 # PDFs
 npm run test:pdf               # parser, golden hashes, fuzzing (forks the real parser)
@@ -208,6 +214,11 @@ to one inflect-compliance commit.
 - **The audit log is append-only**: write through `appendAuditEvent` inside
   the transaction that makes the change, with ids, hashes and codes only.
   `verifyAuditChain` re-derives every hash.
+- **Lock a firm's row `FOR NO KEY UPDATE`, never `FOR UPDATE`.** Every audited
+  write holds the firm's audit lock and then inserts rows whose foreign key
+  takes a key-share lock on that row; `FOR UPDATE` blocks that, and a
+  transaction holding it that then asks for the audit lock deadlocks
+  (`tests/db/anchoring.test.ts` reproduces it).
 - **Worker tests use fault seams** (`faults.afterBuild`, `beforeSend`,
   `afterSend`) and an injected clock. A throw from a seam is a crash: the row
   keeps its lease until it runs out.
@@ -243,6 +254,20 @@ to one inflect-compliance commit.
 - **Wording**: only AUTHENTIC_* verdicts say authentic or genuine, in either
   language, and every altered verdict says the file is not the registered
   file (`tests/unit/verify-wording.test.ts`).
+- **Three front ends, one core.** `/verify`, `dist/verifier.html` and the CLI
+  (`standalone/`, built by `scripts/build-verifier.ts`) all call `verifyFile`.
+  The HTML file inlines everything, pdf.js's worker included, writes only text
+  into the page, and carries its own CSP: scripts by hash plus the worker's
+  `blob:`, and connections to the two endpoints only.
+- **The tamper suite is the exit gate** (`tests/tamper/`): each case is made
+  with the tool a person would use (an incremental save, a re-render keeping
+  the reference, qpdf, Chromium's print) and must get the same verdict from
+  verify-core and from the CLI. A change to a verdict changes this table.
+- **`src/proxy.ts` guards the verifier's pages**: a per-request nonce CSP
+  (`src/lib/csp.ts`) whose `connect-src` is the origin and the two endpoints,
+  and the lookup page's rate limit (`src/lib/rate-limit.ts`: 60 a minute per
+  address, 600 in all; the address only behind a proxy that sets it,
+  `TRUST_PROXY_HEADERS=1`). Neither covers the signed-in app.
 
 ## Conventions
 

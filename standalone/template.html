@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="__CSP__">
+<meta name="referrer" content="no-referrer">
+<title>Verify an audit report</title>
+<style>__STYLE__</style>
+</head>
+<body>
+<main>
+  <div class="locales" role="group" aria-label="Language">
+    <button type="button" id="locale-en" data-testid="locale-en">EN</button>
+    <button type="button" id="locale-bg" data-testid="locale-bg">BG</button>
+  </div>
+  <h1 id="title"></h1>
+  <p id="intro" class="muted"></p>
+  <p id="disclaimer" class="notice"></p>
+  <div id="drop" class="drop" data-testid="verify-drop-zone">
+    <p id="drop-title"></p>
+    <label class="button"><span id="choose-label"></span><input id="file" type="file" accept="application/pdf,.pdf" data-testid="verify-file"></label>
+  </div>
+  <p id="status" role="status" class="muted"></p>
+  <div id="result" aria-live="polite"></div>
+  <p id="registry" class="muted small" data-testid="verify-registry"></p>
+</main>
+<script type="module">__SCRIPT__</script>
+</body>
+</html>

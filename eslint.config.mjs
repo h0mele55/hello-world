@@ -19,6 +19,7 @@ const config = [
       'storage/**',
       'playwright-report/**',
       'test-results/**',
+      'dist/**',
       'next-env.d.ts',
     ],
   },

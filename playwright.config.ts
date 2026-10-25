@@ -4,7 +4,11 @@ const PORT = 3100;
 
 // The app's server never holds the issuer key: only the worker does
 // (scripts/worker.ts, run by tests/e2e/anchoring.spec.ts as its own process).
-const serverEnv = Object.fromEntries(Object.entries(process.env).filter(([name, value]) => name !== 'ISSUER_PRIVATE_KEY' && value !== undefined)) as Record<string, string>;
+const serverEnv = {
+  ...(Object.fromEntries(Object.entries(process.env).filter(([name, value]) => name !== 'ISSUER_PRIVATE_KEY' && value !== undefined)) as Record<string, string>),
+  // Tests address the lookup rate limit per client through X-Forwarded-For, as a trusted proxy would set it.
+  TRUST_PROXY_HEADERS: '1',
+};
 
 export default defineConfig({
   testDir: 'tests/e2e',

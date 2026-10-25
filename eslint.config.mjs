@@ -12,6 +12,8 @@ const config = [
       'contracts/lib/**',
       'contracts/out/**',
       'contracts/cache/**',
+      '.claude/**',
+      '.cache/**',
       'playwright-report/**',
       'test-results/**',
       'next-env.d.ts',

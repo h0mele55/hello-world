@@ -319,13 +319,56 @@ every miss shows as "not found", never as a wrong passage.
 
 **Hardening**
 
-- [ ] Golden tests pin `docHash`, `manifestHash` and `opinionCommitment` for fixed fixtures
-- [ ] Malformed-PDF fuzzing (truncated files, looping cross-references, decompression bombs) never crashes or hangs the server
-- [ ] PDFs and manifests are encrypted at rest with AES-256-GCM; opinion text never reaches a log
-- [ ] Salts come from a CSPRNG, fresh per version, and are never reused
-- [ ] A scanned PDF with no text layer is refused for the opinion check with a named reason, not OCR'd silently
-- [ ] The manifest carries a schema version, and readers refuse a version they do not know
-- [ ] Only synthetic PDFs are committed; public reports are fetched into a git-ignored cache by URL and expected hash
+- [x] Golden tests pin `docHash`, `manifestHash` and `opinionCommitment` for fixed fixtures
+- [x] Malformed-PDF fuzzing (truncated files, looping cross-references, decompression bombs) never crashes or hangs the server
+- [ ] PDFs and manifests are encrypted at rest with AES-256-GCM; opinion text never reaches a log (2b)
+- [ ] Salts come from a CSPRNG, fresh per version, and are never reused (CSPRNG in 2a; uniqueness is a database constraint in 2b)
+- [x] A scanned PDF with no text layer is refused for the opinion check with a named reason, not OCR'd silently
+- [x] The manifest carries a schema version, and readers refuse a version they do not know
+- [x] Only synthetic PDFs are committed; public reports are fetched into a git-ignored cache by URL and expected hash
+
+**As built: Phase 2 ships in two pull requests.** 2a is the hashing core with
+no database and no UI: the parser, the locator and normaliser, commitments and
+manifest, fixtures, golden and fuzz tests (#28, #29, #31, #32, #33). 2b adds
+Postgres, sign-in, upload with encrypted storage and the confirmation screen
+(#26, #27, #30). Departures from the prompt below, each deliberate:
+
+- **The parser runs in a forked child process, not a worker thread.** A
+  worker shares the server's memory, and V8's heap limit does not cover the
+  ArrayBuffers a decompression bomb inflates into. The child gets a 512 MB
+  heap and is killed at 20 seconds; whatever it answers is schema-checked.
+  Every outcome is a parsed PDF or one of `NOT_A_PDF`, `TRUNCATED`,
+  `TOO_LARGE`, `TOO_MANY_PAGES`, `TOO_MUCH_TEXT`, `ENCRYPTED`, `UNPARSEABLE`,
+  `TIMEOUT`, `RESOURCE_LIMIT` or `PARSER_CRASHED`.
+- **A file without `%%EOF` in its last kilobyte is refused as `TRUNCATED`.**
+  pdfjs recovers what it can from a cut-off file, which would hand back part
+  of a report as if it were whole.
+- **Encrypted means any encryption**, including an owner password that only
+  restricts editing. #74 asks whether to accept those anchor-only.
+- **The family id preimage carries `v: 1`**, so a later key layout cannot
+  collide with this one. The key is `registrationNumber` (spaces removed,
+  upper-cased), `periodEnd`, `reportType` (`STANDALONE` or `CONSOLIDATED`)
+  and `engagementRef` (#6).
+- **The locator reads whole lines only.** An opinion heading must be the
+  entire line and start with a capital letter. The basis heading must be the
+  entire line and name the same opinion type. Running text that wraps to start
+  with "Basis for Qualified Opinion section…", or a line holding just
+  "opinion.", is therefore never taken for a heading. Bulgarian basis
+  headings are read with and without "изразяване на".
+- **Normaliser v1** applies NFKC, replaces lone surrogates, drops soft
+  hyphens, zero-width and control characters, and collapses whitespace. At a
+  line break, a letter, a hyphen and a lower-case continuation re-join into
+  one word; any other hyphen stays, with no space added. A running header or
+  footer is a line in the top or bottom three slots of a page whose
+  digit-blind shape fills the same slot on at least two pages and half of all
+  pages.
+- **`reasonCode`** is one of `INITIAL` (version 1 only), `CORRECTION`,
+  `SUBSEQUENT_EVENT` or `OTHER`.
+- **The signed fixture carries a placeholder signature** (`/ByteRange`, zeroed
+  `/Contents`). It exercises detection, not validation.
+- **Canonical JSON** is Inflect's function copied verbatim, behind a strict
+  guard that refuses `undefined`, non-integer numbers, `Date` and other
+  non-plain values, which the copied function would silently coerce.
 
 **Prompt**
 

@@ -18,7 +18,10 @@
     "vendor:sync": "node scripts/sync-inflect-ui.mjs",
     "vendor:check": "node scripts/check-vendor.mjs",
     "test:integration": "vitest run --config vitest.integration.config.mts",
-    "contracts:artifact": "node scripts/gen-registry-artifact.mjs"
+    "contracts:artifact": "node scripts/gen-registry-artifact.mjs",
+    "test:pdf": "vitest run --config vitest.pdf.config.mts",
+    "test:golden": "vitest run --config vitest.pdf.config.mts tests/pdf/golden.test.ts",
+    "fixtures:pdf": "tsx scripts/gen-pdf-fixtures.ts"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "1.3.1",
@@ -30,21 +33,26 @@
     "lucide-react": "1.61.0",
     "next": "16.4.2",
     "next-intl": "4.14.9",
+    "pdfjs-dist": "6.4.299",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "sonner": "2.0.8",
     "tailwind-merge": "3.7.0",
     "vaul": "1.1.2",
-    "viem": "2.57.11"
+    "viem": "2.57.11",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "@playwright/test": "1.64.1",
     "@tailwindcss/postcss": "4.3.3",
     "@types/node": "26.6.5",
+    "@types/pdfkit": "0.17.7",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
+    "dejavu-fonts-ttf": "2.37.3",
     "eslint": "10.13.0",
     "eslint-config-next": "16.4.2",
+    "pdfkit": "0.20.2",
     "tailwindcss": "4.3.3",
     "tsx": "4.23.15",
     "typescript": "5.9.3",

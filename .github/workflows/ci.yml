@@ -44,6 +44,36 @@ jobs:
           path: playwright-report/
           retention-days: 7
 
+  pdf:
+    name: PDF parsing, golden hashes and fuzzing
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Fixture PDFs reproduce from their generator
+        run: npx tsx scripts/gen-pdf-fixtures.ts --check
+      - name: Parser, golden and fuzz tests
+        run: npm run test:pdf
+
+  golden-windows:
+    name: Golden hashes on Windows
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Golden tests
+        run: npm run test:golden
+
   contracts:
     name: Contracts and chain adapter
     runs-on: ubuntu-latest

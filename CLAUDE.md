@@ -14,7 +14,8 @@ that starts each phase. The decisions behind the design are in `docs/adr/`.
 Phase 0 (the Next.js scaffold rendering Inflect's UI primitives in its own
 theme) and Phase 1 (the `AuditReportRegistry` contract and the viem chain
 adapter, tested on Anvil) are done. The Sepolia deployment waits on funded keys
-(#4). Nothing touches a PDF yet.
+(#4). Phase 2a (PDF parsing, the opinion locator and the commitments, with no
+database or UI) is done; 2b adds storage, sign-in and the confirmation screen.
 
 ## Rules every phase keeps
 
@@ -62,6 +63,12 @@ node scripts/sync-inflect-ui.mjs --check   # re-derive the vendored tree from up
 npm run contracts:artifact     # regenerate src/lib/chain/registry-artifact.ts after a contract change
 npm run test:integration       # chain adapter against a throwaway Anvil node
 npx tsx scripts/deploy-registry.ts <sepolia|local>       # deploy; reads keys from env only
+
+# PDFs
+npm run test:pdf               # parser, golden hashes, fuzzing (forks the real parser)
+npm run test:golden            # golden hashes only; CI also runs this on Windows
+npm run fixtures:pdf           # regenerate tests/fixtures/pdf/*.pdf; add `-- --check` to compare
+node scripts/fetch-public-corpus.mjs && npx tsx scripts/measure-opinion-locator.ts   # real-report hit rate
 ```
 
 Locally, Playwright needs the browser of its own version:
@@ -123,6 +130,26 @@ to one inflect-compliance commit.
   check.
 - **DataTable is not vendored**: upstream classifies it MIXED. Use
   `@tanstack/react-table` inside the vendored `Card`.
+
+## PDFs, the opinion and the commitments
+
+- **Never parse an untrusted PDF in the server process.** Call
+  `parsePdf` (`src/lib/pdf/parse.ts`), which forks `parse-child.mjs` with a
+  heap cap and a timeout and returns a parsed PDF or a named refusal.
+- **What a commitment means is versioned.** `normaliseText`, `joinLines`,
+  `dropRunningLines` and the commitment encodings are normaliser v1 and
+  manifest schema 1. A change that moves any value in
+  `tests/pdf/golden.test.ts` is a new version (and a reader for the old one),
+  never an edit; regenerating a fixture legitimately moves only its `docHash`.
+- **The locator answers FOUND only when it is sure.** Every doubt is a
+  `NOT_FOUND` with a reason, and a person types the opinion instead. Do not
+  loosen a heading rule to raise the hit rate without a corpus case that shows
+  the new rule cannot pick a wrong passage.
+- **Fixtures are synthetic and reproducible.** `tests/fixtures/pdf/reports.ts`
+  holds their text; CI regenerates the PDFs and fails on any byte difference.
+  Real reports are listed by URL and SHA-256 in
+  `tests/fixtures/public-corpus.json` and downloaded into `.cache/`, never
+  committed.
 
 ## Conventions
 

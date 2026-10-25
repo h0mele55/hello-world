@@ -106,6 +106,7 @@ npm run test:backup            # back up, restore into <db>_restore_test, check 
 npm run build:verifier         # dist/verifier.html and dist/verify-report.mjs, for VERIFY_NETWORK (or ANCHOR_NETWORK)
 node bin/verify-report.mjs report.pdf [--deployment <file> --rpc <url> --rpc <url>]   # verdict as JSON
 npm run test:tamper            # the tamper suite on Anvil, through verify-core and the CLI; needs qpdf and Chromium
+k6 run -e BASE_URL=<deploy> tests/load/verify.js   # /verify at 50 requests a second for 5 minutes (#69); a staging deploy, not CI
 
 # PDFs
 npm run test:pdf               # parser, golden hashes, fuzzing (forks the real parser)

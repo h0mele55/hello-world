@@ -37,8 +37,13 @@ export function createRegistryReader(client: PublicClient, deployment: Deploymen
     if (!code || keccak256(code) !== deployment.runtimeBytecodeHash) throw new BytecodeMismatchError(address);
   }
 
-  async function getRecord(recordId: Hex): Promise<RegistryRecord | null> {
-    const raw = await client.readContract({ address, abi: registryAbi, functionName: 'getRecord', args: [recordId] });
+  /**
+   * The record as it stands at a block: the latest by default. Whether a
+   * revocation is in effect depends on the block's time, so a caller deciding
+   * that for good (rule 2) reads at the finalized block.
+   */
+  async function getRecord(recordId: Hex, at: { blockNumber?: bigint } = {}): Promise<RegistryRecord | null> {
+    const raw = await client.readContract({ address, abi: registryAbi, functionName: 'getRecord', args: [recordId], blockNumber: at.blockNumber });
     return decodeRecord(recordId, raw);
   }
 

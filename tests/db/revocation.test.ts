@@ -143,6 +143,35 @@ describe('approving a revocation', () => {
     await expectCode(approveRevocation(approver, revocationId, TARGET), 'CHAIN_WRITES_DISABLED');
   });
 
+  it('keeps a scheduled revocation open, frees the version once the owner cancels it, and journals one REVOKE at a time (#95)', async () => {
+    const versionId = await anchoredVersion();
+    const first = await request(versionId);
+    const { chainWriteId } = await approveRevocation(approver, first.revocationId, TARGET);
+    // What the worker records once the REVOKE is final: the request now waits out the registry's delay.
+    await prisma.chainWrite.update({ where: { id: chainWriteId }, data: { status: 'FINAL', blockNumber: 12n } });
+    const at = (iso: string) => new Date(iso);
+    await expect(prisma.revocation.update({ where: { id: first.revocationId }, data: { status: 'SCHEDULED' } })).rejects.toThrow(/Revocation_scheduled_has_time/);
+    await prisma.revocation.update({ where: { id: first.revocationId }, data: { status: 'SCHEDULED', effectiveAt: at('2026-10-26T09:00:00Z') } });
+    await expectCode(request(versionId, secondAdmin), 'REVOCATION_OPEN');
+    expect((await getRevocations(admin, versionId))[0]).toMatchObject({ status: 'SCHEDULED', effectiveAt: '2026-10-26T09:00:00.000Z' });
+
+    // The owner cancelled it on chain: nobody in the firm closed it.
+    await expect(
+      prisma.revocation.update({ where: { id: first.revocationId }, data: { status: 'CANCELLED', closedAt: new Date(), closedById: admin.id } }),
+    ).rejects.toThrow(/Revocation_cancelled_has_time/);
+    await prisma.revocation.update({ where: { id: first.revocationId }, data: { status: 'CANCELLED', closedAt: new Date() } });
+
+    // The firm may ask again, and a second REVOKE is journalled beside the first, final one.
+    const second = await request(versionId, secondAdmin);
+    const again = await approveRevocation(approver, second.revocationId, TARGET);
+    expect(await prisma.chainWrite.count({ where: { reportVersionId: versionId, kind: 'REVOKE' } })).toBe(2);
+    // But never two in flight at once.
+    await expect(
+      prisma.chainWrite.create({ data: { reportVersionId: versionId, kind: 'REVOKE', mode: 'LIVE', chainId: TARGET.chainId, registry: TARGET.registry, issuer: TARGET.issuer } }),
+    ).rejects.toThrow();
+    expect((await prisma.chainWrite.findUniqueOrThrow({ where: { id: again.chainWriteId } })).status).toBe('INTENT');
+  });
+
   it('holds four eyes in the database too: whoever asked never approves', async () => {
     const versionId = await anchoredVersion();
     const { revocationId } = await request(versionId);

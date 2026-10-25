@@ -107,7 +107,8 @@ jobs:
           issuer_address=$(cast wallet address --private-key "$issuer")
           cast rpc --rpc-url http://127.0.0.1:8545 anvil_setBalance "$deployer_address" 0x16345785D8A0000 > /dev/null
           cast rpc --rpc-url http://127.0.0.1:8545 anvil_setBalance "$issuer_address" 0x8AC7230489E80000 > /dev/null
-          DEPLOYER_PRIVATE_KEY="$deployer" ISSUER_ADDRESS="$issuer_address" ISSUER_ORG_NAME="$SEED_ORG_NAME" \
+          # A revocation waits an hour (#95), as it would on a real chain; the end-to-end test moves Anvil's clock past it.
+          DEPLOYER_PRIVATE_KEY="$deployer" ISSUER_ADDRESS="$issuer_address" ISSUER_ORG_NAME="$SEED_ORG_NAME" REVOCATION_DELAY_HOURS=1 \
             LOCAL_RPC_URL=http://127.0.0.1:8545 npx tsx scripts/deploy-registry.ts local
           # Finalize the deployment, as a real one long is: the verifier reads the
           # registry's code at the finalized block and refuses a chain without it.

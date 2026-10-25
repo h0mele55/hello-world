@@ -6,7 +6,7 @@ import { Card } from '@inflect/ui/components/ui/card';
 import { StatusBadge } from '@inflect/ui/components/ui/status-badge';
 import { Heading } from '@inflect/ui/components/ui/typography';
 import { PreferencesBar } from '@/components/preferences-bar';
-import { RecordView } from '@/components/verify/record-view';
+import { RecordView, utcDate } from '@/components/verify/record-view';
 import { CannotVerify, openRegistryView, summariseRecord, type CannotVerifyReason, type RecordSummary } from '@/lib/verify-core';
 import { recordLookup } from '@/lib/lookups';
 import { verifierSetupFromEnv, type VerifierSetupResult } from '@/lib/verify-setup';
@@ -65,9 +65,19 @@ export default async function LatestVersionPage({ params }: { params: Promise<{ 
         {result.status === 'FOUND' && setup ? (
           <>
             <div>
-              <StatusBadge variant={result.latest.revoked ? 'error' : 'success'} data-testid="latest-status">
-                {result.latest.revoked ? t('latest.revoked', { code: result.latest.revokeReason }) : t('latest.current')}
-              </StatusBadge>
+              {result.latest.revoked ? (
+                <StatusBadge variant="error" data-testid="latest-status" data-state="REVOKED">
+                  {t('latest.revoked', { code: result.latest.revokeReason })}
+                </StatusBadge>
+              ) : result.latest.revokeReason !== 0 ? (
+                <StatusBadge variant="warning" data-testid="latest-status" data-state="REVOCATION_PENDING">
+                  {t('latest.pending', { code: result.latest.revokeReason, when: utcDate(result.latest.revokeEffectiveAt) })}
+                </StatusBadge>
+              ) : (
+                <StatusBadge variant="success" data-testid="latest-status" data-state="CURRENT">
+                  {t('latest.current')}
+                </StatusBadge>
+              )}
             </div>
             <RecordView title={t('verify.details.latest')} record={result.latest} chainId={setup.chainId} issuers={setup.issuers} testId="record-latest" />
             <p className="text-sm text-content-muted">{t('verify.details.asOf', { block: result.asOfBlock })}</p>

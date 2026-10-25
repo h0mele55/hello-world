@@ -17,8 +17,11 @@ import type { AnchorTarget } from './target';
  * Withdrawing an anchored version (Phase 5, #55). An admin asks, naming the
  * engagement to show they mean it, with a reason and a note; an approver who
  * is someone else approves (rule 6), which writes the REVOKE row to the
- * journal in the same transaction (rule 3). Only the worker sends it; the
- * version is REVOKED once that write's block is final (rule 2).
+ * journal in the same transaction (rule 3). Only the worker sends it. Once
+ * that write's block is final the revocation is SCHEDULED: the registry
+ * delays it (#95), and the registry's owner may cancel it until then. The
+ * version is REVOKED once the revocation is in effect at a final block (rule
+ * 2), or the revocation is CANCELLED if the owner cancelled it.
  *
  * The note is sealed and never leaves the database: the chain gets the
  * reason's number and nothing else (rule 1).
@@ -185,6 +188,7 @@ export async function getRevocations(user: SessionUser, versionId: string) {
     approvedAt: r.approvedAt?.toISOString() ?? null,
     closedBy: r.closedBy?.email ?? null,
     closedAt: r.closedAt?.toISOString() ?? null,
+    effectiveAt: r.effectiveAt?.toISOString() ?? null,
     revokedAt: r.revokedAt?.toISOString() ?? null,
   }));
 }

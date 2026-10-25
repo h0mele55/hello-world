@@ -5,7 +5,7 @@ import { useTranslations } from 'next-intl';
 import { StatusBadge } from '@inflect/ui/components/ui/status-badge';
 import { Heading } from '@inflect/ui/components/ui/typography';
 import type { RecordSummary, Verdict } from '@/lib/verify-core';
-import { HashValue, RecordView } from './record-view';
+import { HashValue, RecordView, utcDate } from './record-view';
 
 /** A verdict as the page shows it; UNEXPECTED is a failure of this page, not of the chain. */
 export type ShownVerdict = Verdict | { kind: 'CANNOT_VERIFY'; reason: 'UNEXPECTED' };
@@ -14,6 +14,7 @@ const VARIANT = {
   AUTHENTIC_LATEST: 'success',
   AUTHENTIC_SUPERSEDED: 'warning',
   REVOKED: 'error',
+  REVOCATION_PENDING: 'warning',
   ALTERED_OPINION_CHANGED: 'error',
   ALTERED_OPINION_APPEARS_UNCHANGED: 'warning',
   ALTERED_OPINION_NOT_CHECKABLE: 'warning',
@@ -33,6 +34,8 @@ export function VerdictView({ verdict, chainId, issuers }: { verdict: ShownVerdi
     switch (verdict.kind) {
       case 'AUTHENTIC_SUPERSEDED':
         return t('verdict.AUTHENTIC_SUPERSEDED.body', { latest: verdict.latest.version });
+      case 'REVOCATION_PENDING':
+        return t('verdict.REVOCATION_PENDING.body', { when: utcDate(verdict.pending.revokeEffectiveAt) });
       case 'UNKNOWN_REGISTRY':
         return t('verdict.UNKNOWN_REGISTRY.body', { chainId: verdict.claimedChainId, contract: verdict.claimedContract });
       case 'NOT_REGISTERED':

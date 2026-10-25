@@ -10,7 +10,9 @@ One JSON file per network, written by `scripts/deploy-registry.ts` and read by
 | `mainnet.json`, `base.json`, `optimism.json`, `arbitrum.json` | Production: refused by the deploy script until the owner chooses the chain ([#63](https://github.com/h0mele55/hello-world/issues/63), `docs/decision-production-chain.md`). |
 
 A file records the chain id, the registry address, the deploy transaction and
-block, the owner, the registered issuer, and `runtimeBytecodeHash`. Code refuses
+block, the owner, the registered issuer, the revocation delay
+(`revocationDelaySeconds`: how long a revocation waits, during which the owner
+may cancel it, #95), and `runtimeBytecodeHash`. Code refuses
 a deployment whose bytecode hash is not the current build's
 (`DEPLOYMENT_STALE`), and every write re-checks the chain id and the code at the
 address before it is sent.

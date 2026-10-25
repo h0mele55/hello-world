@@ -1,5 +1,6 @@
 import type { Client as PgClient } from 'pg';
 import {
+  decodeEventLog,
   encodeFunctionData,
   getAddress,
   keccak256,
@@ -70,11 +71,15 @@ import { classifySendError, type SendOutcome } from './send';
  * email to each of the engagement's recipients in the same transaction
  * (src/lib/notifications/queue.ts); the mailer sends them.
  *
- * REVOKE withdraws a version's original record, with the reason of the
- * revocation an approver approved (src/lib/anchoring/revocation.ts). When it
- * is FINAL, and the record reads revoked with that reason, the version and
- * the revocation are REVOKED. A failed or simulated REVOKE returns the
- * revocation for approval, as a failed ANCHOR returns its version.
+ * REVOKE asks the registry to withdraw a version's original record, with the
+ * reason of the revocation an approver approved
+ * (src/lib/anchoring/revocation.ts). The registry delays it (#95): when the
+ * REVOKE is FINAL the revocation is SCHEDULED, with the time it takes effect.
+ * Each pass then reads every scheduled revocation at the finalized block: in
+ * effect, the version and the revocation are REVOKED; gone, the registry's
+ * owner cancelled it and the revocation is CANCELLED, the version standing. A
+ * failed or simulated REVOKE returns the revocation for approval, as a failed
+ * ANCHOR returns its version.
  */
 
 export interface WorkerOptions {
@@ -145,6 +150,8 @@ export interface PassReport {
   errors: { writeId: string; error: string }[];
   /** Anchor-only versions made COMPLETE with a certificate in this pass. */
   certified: string[];
+  /** Scheduled revocations found in effect, or cancelled by the registry's owner, in this pass. */
+  revocations: { revocationId: string; outcome: 'REVOKED' | 'CANCELLED' }[];
 }
 
 const writeInclude = {
@@ -207,7 +214,7 @@ export async function runWorkerPass(deps: WorkerDeps): Promise<PassReport> {
     files: deps.files,
     verifyUrl: `${deps.verifyBaseUrl.replace(/\/+$/, '')}/verify`,
   };
-  const report: PassReport = { ran: false, steps: [], errors: [], certified: [] };
+  const report: PassReport = { ran: false, steps: [], errors: [], certified: [], revocations: [] };
   const lockArgs = issuerLockArgs(ctx.chainId, ctx.issuer);
   const { rows } = await deps.lockClient.query<{ locked: boolean }>('SELECT pg_try_advisory_lock($1::int, hashtext($2)) AS locked', lockArgs);
   if (!rows[0]?.locked) return { ...report, reason: 'ISSUER_LOCKED' };
@@ -239,6 +246,7 @@ export async function runWorkerPass(deps: WorkerDeps): Promise<PassReport> {
       }
     }
     await certifyAnchorOnly(ctx, report);
+    await settleScheduledRevocations(ctx, report);
     return report;
   } finally {
     await deps.lockClient.query('SELECT pg_advisory_unlock($1::int, hashtext($2))', lockArgs);
@@ -308,8 +316,8 @@ type VersionEffect =
   | { kind: 'COMPLETE'; recordId: string; txHash: string | null; blockNumber: bigint }
   /** The approval was for this REVOKE; a new attempt needs a new approval. */
   | { kind: 'REVERT_REVOCATION' }
-  /** The revocation is final. */
-  | { kind: 'REVOKED' };
+  /** The revocation's request is final; it takes effect at `effectiveAt` (Unix seconds) unless the owner cancels it. */
+  | { kind: 'REVOCATION_SCHEDULED'; recordId: string; effectiveAt: number };
 
 interface Effects {
   version?: VersionEffect;
@@ -332,6 +340,8 @@ async function transition(
     if (count !== 1) return false;
     const version = write.reportVersion;
     const effect = effects.version;
+    // Events about what the write caused, appended after the write's own event.
+    const followUps: (() => Promise<unknown>)[] = [];
     if (effect?.kind === 'REVERT_TO_CONFIRMED') {
       await tx.reportVersion.updateMany({ where: { id: version.id, status: 'APPROVED' }, data: { status: 'CONFIRMED', approvedById: null, approvedAt: null } });
     } else if (effect?.kind === 'ANCHORED') {
@@ -354,12 +364,26 @@ async function transition(
       await queueSupersededNotices(tx, version, version.engagement.client.orgId, ctx.now());
     } else if (effect?.kind === 'REVERT_REVOCATION') {
       await tx.revocation.updateMany({ where: { reportVersionId: version.id, status: 'APPROVED' }, data: { status: 'REQUESTED', approvedById: null, approvedAt: null } });
-    } else if (effect?.kind === 'REVOKED') {
-      const revokedAt = ctx.now();
-      const revoked = await tx.reportVersion.updateMany({ where: { id: version.id, status: { in: ['ANCHORED', 'COMPLETE'] } }, data: { status: 'REVOKED', revokedAt } });
-      if (revoked.count !== 1) throw new ChainError('VERSION_NOT_ANCHORED', `version ${version.id} is not ANCHORED or COMPLETE`);
-      const closed = await tx.revocation.updateMany({ where: { reportVersionId: version.id, status: 'APPROVED' }, data: { status: 'REVOKED', revokedAt } });
-      if (closed.count !== 1) throw new ChainError('REVOCATION_NOT_APPROVED', `version ${version.id} has no approved revocation`);
+    } else if (effect?.kind === 'REVOCATION_SCHEDULED') {
+      const revocation = version.revocations[0];
+      if (!revocation) throw new ChainError('REVOCATION_NOT_APPROVED', `version ${version.id} has no approved revocation`);
+      const effectiveAt = new Date(effect.effectiveAt * 1000);
+      const scheduled = await tx.revocation.updateMany({ where: { id: revocation.id, status: 'APPROVED' }, data: { status: 'SCHEDULED', effectiveAt } });
+      if (scheduled.count !== 1) throw new ChainError('REVOCATION_NOT_APPROVED', `revocation ${revocation.id} is not APPROVED`);
+      followUps.push(() =>
+        appendAuditEvent(
+          tx,
+          {
+            orgId: version.engagement.client.orgId,
+            actorId: null,
+            action: 'revocation.scheduled',
+            subjectType: 'Revocation',
+            subjectId: revocation.id,
+            data: { reportVersionId: version.id, chainWriteId: write.id, recordId: effect.recordId, effectiveAt: effectiveAt.toISOString() },
+          },
+          ctx.now(),
+        ),
+      );
     }
     if (effects.audit) {
       await appendAuditEvent(
@@ -375,6 +399,7 @@ async function transition(
         ctx.now(),
       );
     }
+    for (const followUp of followUps) await followUp();
     return true;
   });
   if (!moved) return { writeId: write.id, from: write.status, to: write.status, note: 'changed by another writer; left alone' };
@@ -416,11 +441,16 @@ function simulated(ctx: Context, write: Write, outcome: string | null) {
   }, outcome ?? 'would succeed');
 }
 
-function finalize(ctx: Context, write: Write, final: { txHash: string | null; blockNumber: bigint; recordId: string; linked: boolean; data?: Prisma.ChainWriteUpdateManyMutationInput }) {
+function finalize(
+  ctx: Context,
+  write: Write,
+  final: { txHash: string | null; blockNumber: bigint; recordId: string; linked: boolean; revokeEffectiveAt?: number; data?: Prisma.ChainWriteUpdateManyMutationInput },
+) {
+  if (write.kind === 'REVOKE' && final.revokeEffectiveAt === undefined) throw new ChainError('REVOCATION_TIME_UNKNOWN', `write ${write.id} is final without the time its revocation takes effect`);
   return transition(ctx, write, 'FINAL', { ...final.data, txHash: final.txHash, blockNumber: final.blockNumber, recordId: final.recordId, error: null }, {
     version:
       write.kind === 'REVOKE'
-        ? { kind: 'REVOKED' }
+        ? { kind: 'REVOCATION_SCHEDULED', recordId: final.recordId, effectiveAt: final.revokeEffectiveAt! }
         : { kind: write.kind === 'ANCHOR' ? 'ANCHORED' : 'COMPLETE', recordId: final.recordId, txHash: final.txHash, blockNumber: final.blockNumber },
     audit: { action: final.linked ? 'anchor.linked' : 'anchor.final', data: { recordId: final.recordId, txHash: final.txHash, blockNumber: Number(final.blockNumber) } },
   });
@@ -573,10 +603,11 @@ async function startCopy(ctx: Context, write: Write): Promise<StepReport> {
 }
 
 /**
- * REVOKE: withdraw the version's original record with the approved reason.
- * The record must be this version's original and final. One already revoked
- * with the same reason is linked, never revoked again; one revoked with
- * another reason is a refusal for a person.
+ * REVOKE: ask the registry to withdraw the version's original record with the
+ * approved reason. The record must be this version's original and final. A
+ * revocation already on chain for it, pending or in effect, with the same
+ * reason is linked, never asked again; one with another reason is a refusal
+ * for a person.
  */
 async function startRevoke(ctx: Context, write: Write): Promise<StepReport> {
   const version = write.reportVersion;
@@ -589,7 +620,7 @@ async function startRevoke(ctx: Context, write: Write): Promise<StepReport> {
   const isOriginal =
     record !== null && record.kind === 'ORIGINAL' && record.docHash === version.docHash && BigInt(record.blockNumber) === version.anchorBlock && finalized.number >= version.anchorBlock;
   if (!isOriginal) return live ? fail(ctx, write, 'ORIGINAL_RECORD_MISMATCH') : simulated(ctx, write, 'ORIGINAL_RECORD_MISMATCH');
-  if (record.revoked) return live ? linkRevocation(ctx, write, record) : simulated(ctx, write, 'AlreadyRevoked');
+  if (record.revokeReason !== 0) return live ? linkRevocation(ctx, write, record) : simulated(ctx, write, 'RevocationExists');
 
   const built = await ctx.prisma.chainWrite.updateMany({ where: { id: write.id, status: 'INTENT', txHash: null }, data: { recordId: version.recordId, parentId: null, error: null } });
   if (built.count !== 1) return { writeId: write.id, from: 'INTENT', to: 'INTENT', note: 'changed by another writer; left alone' };
@@ -607,45 +638,75 @@ async function startRevoke(ctx: Context, write: Write): Promise<StepReport> {
   return signAndSend(ctx, current);
 }
 
-/** Whether a record reads as this REVOKE made it: the version's original, revoked with the approved reason. */
-function revocationLanded(record: RegistryRecord | null, write: Write): boolean {
+/** Whether a record is the original this REVOKE is about: the version's, by id, kind, document and family. */
+function isRevokeTarget(record: RegistryRecord | null, write: Write): record is RegistryRecord {
   const version = write.reportVersion;
   return (
     record !== null &&
     record.recordId === write.recordId &&
     record.kind === 'ORIGINAL' &&
     record.docHash === version.docHash &&
-    record.familyId === version.engagement.familyId &&
-    record.revoked &&
-    record.revokeReason === revocationCodeOf(write)
+    record.familyId === version.engagement.familyId
   );
 }
 
-/** The final transaction that revoked a record, found by its Revoked event; null until one is final. */
-async function revokingTxOf(ctx: Context, record: RegistryRecord): Promise<{ txHash: Hash; blockNumber: bigint } | null> {
+/** Whether a record carries this REVOKE's request: the version's original, with a revocation of the approved reason, pending or in effect. */
+function revocationRequested(record: RegistryRecord | null, write: Write): record is RegistryRecord {
+  return isRevokeTarget(record, write) && record.revokeReason === revocationCodeOf(write);
+}
+
+/**
+ * The final transaction that asked for a record's current revocation, found
+ * by its RevocationRequested event with the same reason and time (a cancelled
+ * request may have come before it); null until one is final.
+ */
+async function requestTxOf(ctx: Context, record: RegistryRecord): Promise<{ txHash: Hash; blockNumber: bigint } | null> {
   const events = await ctx.publicClient.getContractEvents({
     address: ctx.registry,
     abi: registryAbi,
-    eventName: 'Revoked',
+    eventName: 'RevocationRequested',
     args: { recordId: record.recordId },
     fromBlock: BigInt(record.blockNumber),
     toBlock: 'finalized',
   });
-  const event = events.at(-1);
+  const event = events.filter((e) => e.args.reasonCode === record.revokeReason && Number(e.args.effectiveAt) === record.revokeEffectiveAt).at(-1);
   return event?.transactionHash && event.blockNumber !== null ? { txHash: event.transactionHash, blockNumber: event.blockNumber } : null;
 }
 
-/** The record is already revoked: settle on that, sending nothing, once its revocation is final. */
+/** The record already carries a revocation: settle on it, sending nothing, once its request is final. */
 async function linkRevocation(ctx: Context, write: Write, record: RegistryRecord): Promise<StepReport> {
-  if (!revocationLanded(record, write)) return fail(ctx, write, 'REVOKED_WITH_OTHER_REASON');
-  const revoking = await revokingTxOf(ctx, record);
-  if (!revoking) return release(ctx, write, { recordId: record.recordId }, 'already revoked on chain; waiting for finality');
-  return finalize(ctx, write, { txHash: revoking.txHash, blockNumber: revoking.blockNumber, recordId: record.recordId, linked: true, data: { nonce: null } });
+  if (!revocationRequested(record, write)) return fail(ctx, write, 'REVOCATION_EXISTS_WITH_OTHER_REASON');
+  const request = await requestTxOf(ctx, record);
+  if (!request) return release(ctx, write, { recordId: record.recordId }, 'already requested on chain; waiting for finality');
+  return finalize(ctx, write, {
+    txHash: request.txHash,
+    blockNumber: request.blockNumber,
+    recordId: record.recordId,
+    linked: true,
+    revokeEffectiveAt: record.revokeEffectiveAt,
+    data: { nonce: null },
+  });
+}
+
+/** The time a REVOKE's own transaction asked its revocation to take effect, read from its receipt; null if it asked nothing of the kind. */
+function requestedEffectiveAt(receipt: { logs: readonly { address: string; data: Hex; topics: readonly Hex[] }[] }, ctx: Context, write: Write): number | null {
+  for (const log of receipt.logs) {
+    if (getAddress(log.address) !== ctx.registry) continue;
+    try {
+      const event = decodeEventLog({ abi: registryAbi, data: log.data, topics: log.topics as [Hex, ...Hex[]] });
+      if (event.eventName === 'RevocationRequested' && event.args.recordId === write.recordId && event.args.reasonCode === revocationCodeOf(write)) {
+        return Number(event.args.effectiveAt);
+      }
+    } catch {
+      // Not one of the registry's events.
+    }
+  }
+  return null;
 }
 
 const hexOf = (bytes: Uint8Array) => `0x${Buffer.from(bytes).toString('hex')}` as Hex;
 
-/** The original's record on chain must be this version's, final and not revoked, before anything is written about it. */
+/** The original's record on chain must be this version's, final, and with no revocation pending or in effect, before anything is written about it. */
 async function originalRecordOk(ctx: Context, version: { recordId: string | null; anchorBlock: bigint | null; docHash: string }): Promise<boolean> {
   if (!version.recordId || version.anchorBlock === null) return false;
   const [record, finalized] = await Promise.all([ctx.reader.getRecord(version.recordId as Hex), ctx.publicClient.getBlock({ blockTag: 'finalized' })]);
@@ -653,7 +714,7 @@ async function originalRecordOk(ctx: Context, version: { recordId: string | null
     record !== null &&
     record.kind === 'ORIGINAL' &&
     record.docHash === version.docHash &&
-    !record.revoked &&
+    record.revokeReason === 0 &&
     BigInt(record.blockNumber) === version.anchorBlock &&
     finalized.number >= version.anchorBlock
   );
@@ -739,6 +800,8 @@ async function certifyAnchorOnly(ctx: Context, report: PassReport) {
       anchorOnly: true,
       certificateStoredFileId: null,
       chainWrites: { some: { kind: 'ANCHOR', status: 'FINAL', chainId: ctx.chainId, registry: ctx.registry } },
+      // A version being withdrawn gets no certificate; one whose revocation is cancelled gets it then.
+      revocations: { none: { status: { in: ['APPROVED', 'SCHEDULED'] } } },
     },
     include: { engagement: { include: { client: { select: { orgId: true } } } } },
     orderBy: { createdAt: 'asc' },
@@ -795,6 +858,101 @@ async function certifyAnchorOnly(ctx: Context, report: PassReport) {
       ctx.log('error', 'certificate failed; retried next pass', { versionId: version.id, error: errorName(error) });
     }
   }
+}
+
+/**
+ * A scheduled revocation waits out the registry's delay (#95). Each pass reads
+ * the original's record at the finalized block (rule 2), so the answer is
+ * final:
+ *   - the same request, its time come: in effect. The version and the
+ *     revocation are REVOKED, as of the time it took effect. Terminal.
+ *   - the same request, its time not come: still pending; nothing changes.
+ *   - not the same request: the registry's owner cancelled it. The revocation
+ *     is CANCELLED and the version stands; the firm may ask again.
+ * Whichever issuer key sent it: a rotation must not strand one.
+ */
+async function settleScheduledRevocations(ctx: Context, report: PassReport) {
+  const scheduled = await ctx.prisma.revocation.findMany({
+    where: {
+      status: 'SCHEDULED',
+      reportVersion: { chainWrites: { some: { kind: 'REVOKE', status: 'FINAL', chainId: ctx.chainId, registry: ctx.registry } } },
+    },
+    include: { reportVersion: { include: { engagement: { include: { client: { select: { orgId: true } } } } } } },
+    orderBy: { effectiveAt: 'asc' },
+    take: 50,
+  });
+  if (scheduled.length === 0) return;
+  const finalized = await ctx.publicClient.getBlock({ blockTag: 'finalized' });
+  for (const revocation of scheduled) {
+    const version = revocation.reportVersion;
+    try {
+      if (!version.recordId || !revocation.effectiveAt) throw new ChainError('REVOCATION_INCOMPLETE', `revocation ${revocation.id} has no record or time`);
+      const record = await ctx.reader.getRecord(version.recordId as Hex, { blockNumber: finalized.number });
+      if (!record || record.docHash !== version.docHash) throw new ChainError('ORIGINAL_RECORD_MISMATCH', `the record of version ${version.id} is not on chain as anchored`);
+      const effectiveAt = Math.floor(revocation.effectiveAt.getTime() / 1000);
+      const ours = record.revokeReason === REVOCATION_CODES[revocation.reason] && record.revokeEffectiveAt === effectiveAt;
+      if (ours && !record.revoked) continue;
+      const outcome = ours ? 'REVOKED' : 'CANCELLED';
+      const cancelTx = ours ? null : await cancellingTxOf(ctx, record, finalized.number);
+      if (!ours && record.revokeReason !== 0) {
+        // Ours was cancelled and another request, which this firm did not make through the console, stands in its place.
+        ctx.log('error', 'the record carries a revocation the console did not ask for', {
+          revocationId: revocation.id,
+          recordId: record.recordId,
+          reason: record.revokeReason,
+          effectiveAt: record.revokeEffectiveAt,
+        });
+      }
+      const moved = await ctx.prisma.$transaction(async (tx) => {
+        if (outcome === 'REVOKED') {
+          const revokedAt = revocation.effectiveAt!;
+          const closed = await tx.revocation.updateMany({ where: { id: revocation.id, status: 'SCHEDULED' }, data: { status: 'REVOKED', revokedAt } });
+          if (closed.count !== 1) return false;
+          const revoked = await tx.reportVersion.updateMany({ where: { id: version.id, status: { in: ['ANCHORED', 'COMPLETE'] } }, data: { status: 'REVOKED', revokedAt } });
+          if (revoked.count !== 1) throw new ChainError('VERSION_NOT_ANCHORED', `version ${version.id} is not ANCHORED or COMPLETE`);
+        } else {
+          const closed = await tx.revocation.updateMany({ where: { id: revocation.id, status: 'SCHEDULED' }, data: { status: 'CANCELLED', closedAt: ctx.now() } });
+          if (closed.count !== 1) return false;
+        }
+        await appendAuditEvent(
+          tx,
+          {
+            orgId: version.engagement.client.orgId,
+            actorId: null,
+            action: outcome === 'REVOKED' ? 'revocation.in_effect' : 'revocation.cancelled',
+            subjectType: 'Revocation',
+            subjectId: revocation.id,
+            data: {
+              reportVersionId: version.id,
+              recordId: record.recordId,
+              effectiveAt: revocation.effectiveAt!.toISOString(),
+              finalizedBlock: Number(finalized.number),
+              ...(outcome === 'CANCELLED' ? { cancelTxHash: cancelTx, otherRevocationOnChain: record.revokeReason !== 0 } : {}),
+            },
+          },
+          ctx.now(),
+        );
+        return true;
+      });
+      if (moved) report.revocations.push({ revocationId: revocation.id, outcome });
+    } catch (error) {
+      report.errors.push({ writeId: revocation.id, error: errorName(error) });
+      ctx.log('error', 'scheduled revocation could not be settled; retried next pass', { revocationId: revocation.id, error: errorName(error) });
+    }
+  }
+}
+
+/** The final transaction in which the owner cancelled a record's revocation, if one is found. */
+async function cancellingTxOf(ctx: Context, record: RegistryRecord, toBlock: bigint): Promise<Hash | null> {
+  const events = await ctx.publicClient.getContractEvents({
+    address: ctx.registry,
+    abi: registryAbi,
+    eventName: 'RevocationCancelled',
+    args: { recordId: record.recordId },
+    fromBlock: BigInt(record.blockNumber),
+    toBlock,
+  });
+  return events.at(-1)?.transactionHash ?? null;
 }
 
 /** Whether a record is the one this write makes: same kind, document, family, version and commitments. */
@@ -945,8 +1103,13 @@ async function trackBroadcast(ctx: Context, write: Write): Promise<StepReport> {
   if (!again || again.blockHash !== receipt.blockHash) return release(ctx, write, {}, 'block changed; checking again next pass');
 
   const record = write.recordId ? await ctx.reader.getRecord(write.recordId as Hex) : null;
-  const landedAsSent = write.kind === 'REVOKE' ? revocationLanded(record, write) : recordMatches(record, write, ctx.issuer, receipt.blockNumber);
-  if (!landedAsSent) return indeterminate(ctx, write, 'RECORD_MISMATCH', settled);
+  if (write.kind === 'REVOKE') {
+    // The request is judged by the transaction's own event: the owner may have cancelled it since.
+    const effectiveAt = isRevokeTarget(record, write) ? requestedEffectiveAt(again, ctx, write) : null;
+    if (effectiveAt === null) return indeterminate(ctx, write, 'RECORD_MISMATCH', settled);
+    return finalize(ctx, write, { txHash: landed, blockNumber: receipt.blockNumber, recordId: write.recordId!, linked: false, revokeEffectiveAt: effectiveAt, data: { replacedTxHashes: settled.replacedTxHashes } });
+  }
+  if (!recordMatches(record, write, ctx.issuer, receipt.blockNumber)) return indeterminate(ctx, write, 'RECORD_MISMATCH', settled);
   return finalize(ctx, write, { txHash: landed, blockNumber: receipt.blockNumber, recordId: write.recordId!, linked: false, data: { replacedTxHashes: settled.replacedTxHashes } });
 }
 
@@ -1025,10 +1188,17 @@ async function reconcile(ctx: Context, write: Write): Promise<StepReport> {
     // Another transaction used this nonce, so ours can never be mined.
     if (write.kind === 'REVOKE') {
       const record = write.recordId ? await ctx.reader.getRecord(write.recordId as Hex) : null;
-      if (record && revocationLanded(record, write)) {
-        const revoking = await revokingTxOf(ctx, record);
-        if (!revoking) return release(ctx, write, {}, 'revoked on chain; waiting for finality');
-        return finalize(ctx, write, { txHash: revoking.txHash, blockNumber: revoking.blockNumber, recordId: record.recordId, linked: true, data: { nonce: null } });
+      if (revocationRequested(record, write)) {
+        const request = await requestTxOf(ctx, record);
+        if (!request) return release(ctx, write, {}, 'requested on chain; waiting for finality');
+        return finalize(ctx, write, {
+          txHash: request.txHash,
+          blockNumber: request.blockNumber,
+          recordId: record.recordId,
+          linked: true,
+          revokeEffectiveAt: record.revokeEffectiveAt,
+          data: { nonce: null },
+        });
       }
       return fail(ctx, write, 'NONCE_CONSUMED', { nonce: null });
     }

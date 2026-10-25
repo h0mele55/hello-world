@@ -79,10 +79,14 @@ let admin: SessionUser;
 let refCounter = 0;
 let files: FileStore;
 const VERIFY_BASE = 'https://anchor.example.test';
+/** The registry's revocation delay here (#95): an hour, passed with Anvil's clock. */
+const DELAY = 3600;
 
 const issuerWallet = () => createWalletClient({ chain: foundry, transport: http(anvil.url), account: issuer });
 const nonceOf = (blockTag: 'latest' | 'pending' = 'latest') => publicClient.getTransactionCount({ address: issuer.address, blockTag });
 const mine = (blocks = 3) => testClient.mine({ blocks });
+/** Lets the registry's revocation delay pass on chain: the next blocks are DELAY seconds later. */
+const waitOutDelay = () => testClient.increaseTime({ seconds: DELAY });
 
 function deps(overrides: Partial<WorkerDeps> = {}): WorkerDeps {
   return { prisma, lockClient, publicClient, account: issuer, deployment, files, verifyBaseUrl: VERIFY_BASE, now: () => clock, log: () => {}, ...overrides };
@@ -159,6 +163,7 @@ beforeAll(async () => {
     publicClient,
     walletClient: createWalletClient({ chain: foundry, transport, account: getAddress(deployer) }),
     issuer: { address: issuer.address, orgId: orgIdFor('Example Audit OOD') },
+    revocationDelaySeconds: DELAY,
   });
   reader = createRegistryReader(publicClient, deployment);
   target = { network: 'local', chainId: 31337, registry: getAddress(deployment.address), issuer: issuer.address };
@@ -680,28 +685,100 @@ describe('revocation', () => {
     return txHash;
   };
 
-  it('revokes the original with the approved reason, and calls the version REVOKED only once that block is final', async () => {
+  const blockTime = async (blockNumber: bigint) => Number((await publicClient.getBlock({ blockNumber })).timestamp);
+  const cancelAsOwner = async (recordId: string) => {
+    const wallet = createWalletClient({ chain: foundry, transport: http(anvil.url), account: owner });
+    const txHash = await wallet.writeContract({ address: deployment.address, abi: registryAbi, functionName: 'cancelRevocation', args: [recordId as Hex] });
+    await publicClient.waitForTransactionReceipt({ hash: txHash });
+    return txHash;
+  };
+
+  it('asks for the revocation, schedules it once that block is final, and calls the version REVOKED only once it is in effect at a final block', async () => {
     const { versionId, revocationId, chainWriteId } = await approvedRevocation();
     const nonceBefore = await nonceOf();
     expect((await pass()).steps).toEqual([expect.objectContaining({ writeId: chainWriteId, from: 'INTENT', to: 'BROADCAST' })]);
     expect(await nonceOf()).toBe(nonceBefore + 1);
 
-    // Mined, not final: the version is still COMPLETE and the request still APPROVED (rule 2).
+    // Mined, not final: the request is still APPROVED (rule 2).
     await pass();
     expect(await writeOf(chainWriteId)).toMatchObject({ status: 'BROADCAST' });
-    expect(await versionOf(versionId)).toMatchObject({ status: 'COMPLETE', revokedAt: null });
+    expect(await revocationOf(revocationId)).toMatchObject({ status: 'APPROVED', effectiveAt: null });
 
     await mine();
     await pass();
     const version = await versionOf(versionId);
-    expect(await writeOf(chainWriteId)).toMatchObject({ status: 'FINAL', kind: 'REVOKE', recordId: version.recordId, error: null });
-    expect(version).toMatchObject({ status: 'REVOKED', revokedAt: clock });
-    expect(await revocationOf(revocationId)).toMatchObject({ status: 'REVOKED', revokedAt: clock, approvedById: approver.id });
-    expect(await reader.getRecord(version.recordId as Hex)).toMatchObject({ revoked: true, revokeReason: 2 });
+    const write = await writeOf(chainWriteId);
+    expect(write).toMatchObject({ status: 'FINAL', kind: 'REVOKE', recordId: version.recordId, error: null });
+    const effectiveAt = (await blockTime(write.blockNumber!)) + DELAY;
+    // Final, and waiting out the registry's delay: the version stands, and the owner may still cancel.
+    expect(await revocationOf(revocationId)).toMatchObject({ status: 'SCHEDULED', effectiveAt: new Date(effectiveAt * 1000), revokedAt: null });
+    expect(version).toMatchObject({ status: 'COMPLETE', revokedAt: null });
+    expect(await reader.getRecord(version.recordId as Hex)).toMatchObject({ revoked: false, revokeReason: 2, revokeEffectiveAt: effectiveAt });
+
+    // Its time has come on the latest block, not yet on the finalized one: still scheduled.
+    await waitOutDelay();
+    await mine(1);
+    expect(await reader.getRecord(version.recordId as Hex)).toMatchObject({ revoked: true });
+    expect((await pass()).revocations).toEqual([]);
+    expect(await revocationOf(revocationId)).toMatchObject({ status: 'SCHEDULED' });
+
+    await mine(2);
+    expect((await pass()).revocations).toEqual([{ revocationId, outcome: 'REVOKED' }]);
+    expect(await versionOf(versionId)).toMatchObject({ status: 'REVOKED', revokedAt: new Date(effectiveAt * 1000) });
+    expect(await revocationOf(revocationId)).toMatchObject({ status: 'REVOKED', revokedAt: new Date(effectiveAt * 1000), approvedById: approver.id });
 
     const actions = (await prisma.auditEvent.findMany({ where: { subjectId: { in: [revocationId, chainWriteId] } }, orderBy: { seq: 'asc' } })).map((e) => e.action);
-    expect(actions).toEqual(['revocation.requested', 'revocation.approved', 'anchor.broadcast', 'anchor.final']);
+    expect(actions).toEqual(['revocation.requested', 'revocation.approved', 'anchor.broadcast', 'anchor.final', 'revocation.scheduled', 'revocation.in_effect']);
     expect(await verifyAuditChain(prisma, admin.orgId)).toMatchObject({ ok: true });
+    // Nothing more to do: a later pass changes nothing.
+    expect((await pass()).revocations).toEqual([]);
+  });
+
+  it('marks a revocation the registry’s owner cancelled as CANCELLED, keeps the version, and lets the firm ask again', async () => {
+    const { versionId, revocationId, chainWriteId } = await approvedRevocation();
+    await pass();
+    await mine();
+    await pass();
+    expect(await revocationOf(revocationId)).toMatchObject({ status: 'SCHEDULED' });
+    const version = await versionOf(versionId);
+
+    const cancelTx = await cancelAsOwner(version.recordId!);
+    // Not final yet: still scheduled.
+    await pass();
+    expect(await revocationOf(revocationId)).toMatchObject({ status: 'SCHEDULED' });
+    await mine();
+    expect((await pass()).revocations).toEqual([{ revocationId, outcome: 'CANCELLED' }]);
+    expect(await revocationOf(revocationId)).toMatchObject({ status: 'CANCELLED', closedAt: clock, closedById: null, revokedAt: null });
+    expect(await versionOf(versionId)).toMatchObject({ status: 'COMPLETE', revokedAt: null });
+    expect(await writeOf(chainWriteId)).toMatchObject({ status: 'FINAL' });
+    const cancelled = await prisma.auditEvent.findFirstOrThrow({ where: { subjectId: revocationId, action: 'revocation.cancelled' } });
+    expect(cancelled.data).toMatchObject({ cancelTxHash: cancelTx, otherRevocationOnChain: false });
+
+    // Even after the time it would have taken effect, nothing changes.
+    await waitOutDelay();
+    await mine();
+    expect((await pass()).revocations).toEqual([]);
+    expect(await versionOf(versionId)).toMatchObject({ status: 'COMPLETE' });
+
+    // The firm may ask again: a new request, a new approval, a new delay.
+    const again = await requestRevocation(admin, { versionId, reason: 'WITHDRAWN', note: 'Withdrawn after all.', confirmation: version.engagement.engagementRef });
+    const { chainWriteId: secondWrite } = await approveRevocation(approver, again.revocationId, target);
+    await pass();
+    await mine();
+    await pass();
+    expect(await writeOf(secondWrite)).toMatchObject({ status: 'FINAL', nonce: expect.any(Number) });
+    expect(await revocationOf(again.revocationId)).toMatchObject({ status: 'SCHEDULED' });
+  });
+
+  it('settles a request cancelled before it was even final: its own transaction says it asked, the record says it is gone', async () => {
+    const { versionId, revocationId, chainWriteId } = await approvedRevocation();
+    await pass();
+    await cancelAsOwner((await versionOf(versionId)).recordId!);
+    await mine();
+    const report = await pass();
+    expect(report.steps[0]).toMatchObject({ writeId: chainWriteId, from: 'BROADCAST', to: 'FINAL' });
+    expect(report.revocations).toEqual([{ revocationId, outcome: 'CANCELLED' }]);
+    expect(await versionOf(versionId)).toMatchObject({ status: 'COMPLETE' });
   });
 
   it('only simulates under DRY_RUN, and returns the request for approval', async () => {
@@ -716,12 +793,12 @@ describe('revocation', () => {
     expect(await revocationOf(revocationId)).toMatchObject({ status: 'REQUESTED', approvedById: null });
     const version = await versionOf(versionId);
     expect(version.status).toBe('COMPLETE');
-    expect(await reader.getRecord(version.recordId as Hex)).toMatchObject({ revoked: false });
+    expect(await reader.getRecord(version.recordId as Hex)).toMatchObject({ revoked: false, revokeReason: 0 });
     // It can be approved again, in the mode of the moment.
     await approveRevocation(approver, revocationId, target);
   });
 
-  it('links a revocation already on chain with the same reason, and sends nothing', async () => {
+  it('links a revocation already asked for on chain with the same reason, and sends nothing', async () => {
     const { versionId, revocationId, chainWriteId } = await approvedRevocation();
     const version = await versionOf(versionId);
     const direct = await revokeDirectly(version.recordId!, 2);
@@ -729,22 +806,26 @@ describe('revocation', () => {
     expect((await pass()).steps[0]).toMatchObject({ writeId: chainWriteId, from: 'INTENT', to: 'FINAL' });
     expect(await nonceOf()).toBe(nonceBefore);
     expect(await writeOf(chainWriteId)).toMatchObject({ status: 'FINAL', txHash: direct, nonce: null });
+    expect(await revocationOf(revocationId)).toMatchObject({ status: 'SCHEDULED' });
+    expect(await prisma.auditEvent.count({ where: { subjectId: chainWriteId, action: 'anchor.linked' } })).toBe(1);
+    await waitOutDelay();
+    await mine();
+    await pass();
     expect(await versionOf(versionId)).toMatchObject({ status: 'REVOKED' });
     expect(await revocationOf(revocationId)).toMatchObject({ status: 'REVOKED' });
-    expect(await prisma.auditEvent.count({ where: { subjectId: chainWriteId, action: 'anchor.linked' } })).toBe(1);
   });
 
-  it('refuses, by name, a record revoked with another reason, and returns the request', async () => {
+  it('refuses, by name, a record with a revocation of another reason, pending or in effect, and returns the request', async () => {
     const { versionId, revocationId, chainWriteId } = await approvedRevocation();
     await revokeDirectly((await versionOf(versionId)).recordId!, 1);
     await pass();
-    expect(await writeOf(chainWriteId)).toMatchObject({ status: 'FAILED', error: 'REVOKED_WITH_OTHER_REASON' });
+    expect(await writeOf(chainWriteId)).toMatchObject({ status: 'FAILED', error: 'REVOCATION_EXISTS_WITH_OTHER_REASON' });
     expect(await versionOf(versionId)).toMatchObject({ status: 'COMPLETE' });
     expect(await revocationOf(revocationId)).toMatchObject({ status: 'REQUESTED', approvedById: null });
   });
 
   it('settles a REVOKE whose worker died after sending from chain state, never resending it', async () => {
-    const { versionId, chainWriteId } = await approvedRevocation();
+    const { revocationId, chainWriteId } = await approvedRevocation();
     const nonceBefore = await nonceOf();
     await pass({ faults: { afterSend: async () => Promise.reject(new Error('killed')) } });
     const orphan = await writeOf(chainWriteId);
@@ -755,8 +836,29 @@ describe('revocation', () => {
     await mine();
     await pass();
     expect(await writeOf(chainWriteId)).toMatchObject({ status: 'FINAL', txHash: orphan.txHash });
-    expect(await versionOf(versionId)).toMatchObject({ status: 'REVOKED' });
+    expect(await revocationOf(revocationId)).toMatchObject({ status: 'SCHEDULED' });
     expect(await nonceOf()).toBe(nonceBefore + 1);
+  });
+
+  it('does not queue a distribution copy again while a revocation is approved or scheduled', async () => {
+    await goLive();
+    const e = await engagement();
+    const versionId = await confirmedVersion(e.id, 'en-qualified.pdf');
+    const { chainWriteId } = await approveVersion(approver, versionId, target);
+    await pass();
+    await mine();
+    // The copy fails before anything is sent, leaving the version ANCHORED with nothing in flight.
+    await pass({ files: { ...files, read: async () => new Uint8Array(fixture('en-adverse.pdf')) } });
+    expect(await writeOf(chainWriteId)).toMatchObject({ status: 'FINAL' });
+    expect(await copyWriteOf(versionId)).toMatchObject({ status: 'FAILED' });
+    const { revocationId } = await requestRevocation(admin, { versionId, reason: 'OTHER', note: 'x', confirmation: e.engagementRef });
+    await approveRevocation(approver, revocationId, target);
+    await expect(requeueCopy(approver, versionId, target)).rejects.toMatchObject({ code: 'REVOCATION_OPEN' });
+    await pass();
+    await mine();
+    await pass();
+    expect(await revocationOf(revocationId)).toMatchObject({ status: 'SCHEDULED' });
+    await expect(requeueCopy(approver, versionId, target)).rejects.toMatchObject({ code: 'REVOCATION_OPEN' });
   });
 
   it('waits for a stamped copy still on its way to the chain before a revocation is approved', async () => {
@@ -894,6 +996,11 @@ describe('rotating the issuer key (docs/runbooks/key-rotation.md)', () => {
     const { revocationId } = await requestRevocation(admin, { versionId: v1, reason: 'ISSUED_IN_ERROR', note: 'Rotation rehearsal.', confirmation: e.engagementRef });
     await approveRevocation(approver, revocationId, nextTarget);
     await passNext();
+    await mine();
+    await passNext();
+    // Scheduled: until the delay has passed, every copy reads as being withdrawn.
+    expect(await verify(new Uint8Array(fixture('en-unmodified.pdf')))).toMatchObject({ kind: 'REVOCATION_PENDING' });
+    await waitOutDelay();
     await mine();
     await passNext();
     expect((await versionOf(v1)).status).toBe('REVOKED');

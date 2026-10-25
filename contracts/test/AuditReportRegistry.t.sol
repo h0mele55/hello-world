@@ -16,9 +16,10 @@ contract AuditReportRegistryTest is Test {
     bytes32 internal constant ORG = keccak256("org:ledger-audit");
     bytes32 internal constant OTHER_ORG = keccak256("org:someone-else");
     bytes32 internal constant FAMILY = keccak256("family:1");
+    uint32 internal constant DELAY = 1 days;
 
     function setUp() public {
-        registry = new AuditReportRegistry(owner);
+        registry = new AuditReportRegistry(owner, DELAY);
         vm.startPrank(owner);
         registry.setIssuer(issuer, ORG, true);
         registry.setIssuer(issuer2, ORG, true);
@@ -55,7 +56,19 @@ contract AuditReportRegistryTest is Test {
 
     function test_constructor_refusesZeroOwner() public {
         vm.expectRevert(AuditReportRegistry.ZeroValue.selector);
-        new AuditReportRegistry(address(0));
+        new AuditReportRegistry(address(0), DELAY);
+    }
+
+    function test_constructor_setsTheDelay_andCapsIt() public {
+        assertEq(registry.revocationDelay(), DELAY);
+        uint32 max = registry.MAX_REVOCATION_DELAY();
+        assertEq(max, 30 days);
+        assertEq(new AuditReportRegistry(owner, max).revocationDelay(), max);
+        assertEq(new AuditReportRegistry(owner, 0).revocationDelay(), 0);
+        vm.expectRevert(
+            abi.encodeWithSelector(AuditReportRegistry.DelayTooLong.selector, max + 1, max)
+        );
+        new AuditReportRegistry(owner, max + 1);
     }
 
     function test_ownership_isTwoStep() public {
@@ -124,7 +137,7 @@ contract AuditReportRegistryTest is Test {
         vm.roll(42);
         bytes32 id = _v1();
         assertEq(id, registry.recordIdFor(FAMILY, 1, AuditReportRegistry.Kind.ORIGINAL));
-        AuditReportRegistry.Record memory r = registry.getRecord(id);
+        AuditReportRegistry.RecordView memory r = registry.getRecord(id);
         assertEq(r.familyId, FAMILY);
         assertEq(r.docHash, _doc(1));
         assertEq(r.version, 1);
@@ -133,6 +146,8 @@ contract AuditReportRegistryTest is Test {
         assertEq(r.blockNumber, 42);
         assertEq(uint8(r.kind), uint8(AuditReportRegistry.Kind.ORIGINAL));
         assertFalse(r.revoked);
+        assertEq(r.revokeReason, 0);
+        assertEq(r.revokeEffectiveAt, 0);
         assertEq(registry.recordOfDoc(_doc(1)), id);
         assertEq(registry.latestOf(FAMILY), id);
         assertEq(registry.familyOrg(FAMILY), ORG);
@@ -260,8 +275,8 @@ contract AuditReportRegistryTest is Test {
         bytes32 v1 = _v1();
         vm.prank(issuer);
         bytes32 copy = registry.anchorDistributionCopy(v1, _doc(100));
-        AuditReportRegistry.Record memory c = registry.getRecord(copy);
-        AuditReportRegistry.Record memory o = registry.getRecord(v1);
+        AuditReportRegistry.RecordView memory c = registry.getRecord(copy);
+        AuditReportRegistry.RecordView memory o = registry.getRecord(v1);
         assertEq(uint8(c.kind), uint8(AuditReportRegistry.Kind.DISTRIBUTION_COPY));
         assertEq(c.parentId, v1);
         assertEq(c.familyId, FAMILY);
@@ -304,30 +319,147 @@ contract AuditReportRegistryTest is Test {
         registry.anchorDistributionCopy(v1, _doc(100));
     }
 
-    function test_copy_refusesRevokedOriginal() public {
+    function test_copy_refusesAnOriginalBeingRevoked_andOneRevoked() public {
         bytes32 v1 = _v1();
-        vm.startPrank(issuer);
-        registry.revoke(v1, 2);
-        vm.expectRevert(abi.encodeWithSelector(AuditReportRegistry.RecordRevoked.selector, v1));
+        vm.prank(issuer);
+        uint40 effectiveAt = registry.revoke(v1, 2);
+        bytes memory refusal =
+            abi.encodeWithSelector(AuditReportRegistry.RevocationExists.selector, v1, effectiveAt);
+        vm.prank(issuer);
+        vm.expectRevert(refusal);
         registry.anchorDistributionCopy(v1, _doc(100));
-        vm.stopPrank();
+        vm.warp(effectiveAt);
+        vm.prank(issuer);
+        vm.expectRevert(refusal);
+        registry.anchorDistributionCopy(v1, _doc(100));
+    }
+
+    function test_copy_allowedAfterTheOwnerCancels() public {
+        bytes32 v1 = _v1();
+        vm.prank(issuer);
+        registry.revoke(v1, 2);
+        vm.prank(owner);
+        registry.cancelRevocation(v1);
+        vm.prank(issuer);
+        registry.anchorDistributionCopy(v1, _doc(100));
     }
 
     // ── revoke ──
 
-    function test_revoke_isTerminal() public {
+    function test_revoke_waitsForTheDelay_thenTakesEffectWithoutAnotherTransaction() public {
         bytes32 v1 = _v1();
+        uint40 expected = uint40(vm.getBlockTimestamp()) + DELAY;
         vm.expectEmit(address(registry));
-        emit AuditReportRegistry.Revoked(v1, 3, issuer);
+        emit AuditReportRegistry.RevocationRequested(v1, 3, expected, issuer);
         vm.prank(issuer);
-        registry.revoke(v1, 3);
-        AuditReportRegistry.Record memory r = registry.getRecord(v1);
-        assertTrue(r.revoked);
-        assertEq(r.revokeReason, 3);
+        assertEq(registry.revoke(v1, 3), expected);
 
+        AuditReportRegistry.RecordView memory r = registry.getRecord(v1);
+        assertFalse(r.revoked, "pending, not yet in effect");
+        assertEq(r.revokeReason, 3);
+        assertEq(r.revokeEffectiveAt, expected);
+
+        vm.warp(expected - 1);
+        assertFalse(registry.getRecord(v1).revoked, "one second early");
+        vm.warp(expected);
+        r = registry.getRecord(v1);
+        assertTrue(r.revoked, "in effect at effectiveAt");
+        assertEq(r.revokeReason, 3);
+        assertEq(r.revokeEffectiveAt, expected);
+    }
+
+    function test_revoke_withNoDelayIsImmediate() public {
+        AuditReportRegistry local = new AuditReportRegistry(owner, 0);
+        vm.prank(owner);
+        local.setIssuer(issuer, ORG, true);
+        vm.prank(issuer);
+        bytes32 v1 = local.anchor(FAMILY, 1, bytes32(0), _doc(1), _doc(2), _doc(3));
+        vm.prank(issuer);
+        assertEq(local.revoke(v1, 1), uint40(vm.getBlockTimestamp()));
+        assertTrue(local.getRecord(v1).revoked);
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(
+                AuditReportRegistry.RevocationInEffect.selector, v1, uint40(vm.getBlockTimestamp())
+            )
+        );
+        local.cancelRevocation(v1);
+    }
+
+    function test_revoke_oneAtATime_pendingOrInEffect() public {
+        bytes32 v1 = _v1();
+        vm.prank(issuer);
+        uint40 effectiveAt = registry.revoke(v1, 3);
+        bytes memory refusal =
+            abi.encodeWithSelector(AuditReportRegistry.RevocationExists.selector, v1, effectiveAt);
+        // A second key of the firm cannot replace a pending reason with its own.
         vm.prank(issuer2);
-        vm.expectRevert(abi.encodeWithSelector(AuditReportRegistry.AlreadyRevoked.selector, v1));
+        vm.expectRevert(refusal);
         registry.revoke(v1, 1);
+        vm.warp(effectiveAt);
+        vm.prank(issuer2);
+        vm.expectRevert(refusal);
+        registry.revoke(v1, 1);
+    }
+
+    function test_cancelRevocation_byTheOwnerBeforeItTakesEffect() public {
+        bytes32 v1 = _v1();
+        vm.prank(issuer);
+        uint40 effectiveAt = registry.revoke(v1, 3);
+        vm.warp(effectiveAt - 1);
+        vm.expectEmit(address(registry));
+        emit AuditReportRegistry.RevocationCancelled(v1, 3, owner);
+        vm.prank(owner);
+        registry.cancelRevocation(v1);
+
+        AuditReportRegistry.RecordView memory r = registry.getRecord(v1);
+        assertFalse(r.revoked);
+        assertEq(r.revokeReason, 0);
+        assertEq(r.revokeEffectiveAt, 0);
+        vm.warp(uint256(effectiveAt) + 365 days);
+        assertFalse(registry.getRecord(v1).revoked, "a cancelled revocation never takes effect");
+
+        // The firm may still withdraw the record later; the delay starts again.
+        vm.prank(issuer2);
+        uint40 again = registry.revoke(v1, 1);
+        assertEq(again, uint40(vm.getBlockTimestamp()) + DELAY);
+    }
+
+    function test_cancelRevocation_refusals() public {
+        bytes32 v1 = _v1();
+        vm.prank(owner);
+        vm.expectRevert(abi.encodeWithSelector(AuditReportRegistry.NoRevocation.selector, v1));
+        registry.cancelRevocation(v1);
+
+        vm.prank(issuer);
+        uint40 effectiveAt = registry.revoke(v1, 3);
+        // An issuer key, even the one that asked, cannot cancel: only the owner can.
+        address[3] memory notOwner = [issuer, issuer2, stranger];
+        for (uint256 i; i < notOwner.length; i++) {
+            vm.prank(notOwner[i]);
+            vm.expectRevert(AuditReportRegistry.NotOwner.selector);
+            registry.cancelRevocation(v1);
+        }
+
+        vm.warp(effectiveAt);
+        vm.prank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(AuditReportRegistry.RevocationInEffect.selector, v1, effectiveAt)
+        );
+        registry.cancelRevocation(v1);
+        assertTrue(registry.getRecord(v1).revoked, "in effect is terminal");
+    }
+
+    function test_revoke_aDeactivatedKeysRevocationStillTakesEffectUnlessCancelled() public {
+        bytes32 v1 = _v1();
+        vm.prank(issuer);
+        uint40 effectiveAt = registry.revoke(v1, 3);
+        // Deactivating the key (a rotation, or a theft) does not undo what it asked;
+        // only the owner's cancel does.
+        vm.prank(owner);
+        registry.setIssuer(issuer, ORG, false);
+        vm.warp(effectiveAt);
+        assertTrue(registry.getRecord(v1).revoked);
     }
 
     function test_revoke_refusals() public {
@@ -351,15 +483,17 @@ contract AuditReportRegistryTest is Test {
     // ── reads and payability ──
 
     function test_unknownRecord_readsAsZero() public view {
-        AuditReportRegistry.Record memory r = registry.getRecord(_doc(9));
+        AuditReportRegistry.RecordView memory r = registry.getRecord(_doc(9));
         assertEq(r.docHash, bytes32(0));
+        assertFalse(r.revoked);
+        assertEq(r.revokeEffectiveAt, 0);
         assertEq(registry.recordOfDoc(_doc(9)), bytes32(0));
         assertEq(registry.latestOf(FAMILY), bytes32(0));
     }
 
     function test_recordId_bindsChainAndContract() public {
         bytes32 here = registry.recordIdFor(FAMILY, 1, AuditReportRegistry.Kind.ORIGINAL);
-        AuditReportRegistry other = new AuditReportRegistry(owner);
+        AuditReportRegistry other = new AuditReportRegistry(owner, DELAY);
         assertTrue(here != other.recordIdFor(FAMILY, 1, AuditReportRegistry.Kind.ORIGINAL));
         vm.chainId(11155111);
         assertTrue(here != registry.recordIdFor(FAMILY, 1, AuditReportRegistry.Kind.ORIGINAL));
@@ -403,5 +537,26 @@ contract AuditReportRegistryTest is Test {
         vm.expectRevert(AuditReportRegistry.NotIssuer.selector);
         registry.revoke(family, 1);
         vm.stopPrank();
+    }
+
+    /// Whatever the delay and whenever the record is read, it reads revoked
+    /// exactly from effectiveAt on, and the owner can cancel exactly before it.
+    function testFuzz_revocation_takesEffectExactlyAtItsTime(uint32 delay, uint32 later) public {
+        delay = uint32(bound(delay, 0, 30 days));
+        AuditReportRegistry r = new AuditReportRegistry(owner, delay);
+        vm.prank(owner);
+        r.setIssuer(issuer, ORG, true);
+        vm.prank(issuer);
+        bytes32 v1 = r.anchor(FAMILY, 1, bytes32(0), _doc(1), _doc(2), _doc(3));
+        vm.prank(issuer);
+        uint40 effectiveAt = r.revoke(v1, 1);
+        assertEq(effectiveAt, uint40(vm.getBlockTimestamp()) + delay);
+        vm.warp(vm.getBlockTimestamp() + later);
+        bool due = vm.getBlockTimestamp() >= effectiveAt;
+        assertEq(r.getRecord(v1).revoked, due);
+        vm.prank(owner);
+        if (due) vm.expectRevert();
+        r.cancelRevocation(v1);
+        assertEq(r.getRecord(v1).revokeReason, due ? 1 : 0);
     }
 }

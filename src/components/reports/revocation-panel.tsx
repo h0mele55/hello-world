@@ -10,12 +10,22 @@ import { mayDo } from '@/lib/roles';
 import { RevocationActions } from './revocation-actions';
 import { RevocationForm } from './revocation-form';
 
-const STATUS_VARIANT = { REQUESTED: 'warning', APPROVED: 'info', REVOKED: 'error', REJECTED: 'neutral', WITHDRAWN: 'neutral' } as const satisfies Record<RevocationStatus, string>;
+const STATUS_VARIANT = {
+  REQUESTED: 'warning',
+  APPROVED: 'info',
+  SCHEDULED: 'warning',
+  REVOKED: 'error',
+  REJECTED: 'neutral',
+  WITHDRAWN: 'neutral',
+  CANCELLED: 'neutral',
+} as const satisfies Record<RevocationStatus, string>;
+const OPEN: readonly RevocationStatus[] = ['REQUESTED', 'APPROVED', 'SCHEDULED', 'REVOKED'];
 
 /**
  * A version's revocation: the open request and what each person may do with
- * it, the form to ask for one, or the revocation that is on chain. Earlier
- * requests that were turned down or taken back stay listed.
+ * it, the form to ask for one, the revocation waiting out the registry's
+ * delay, or the one in effect. Earlier requests that were turned down, taken
+ * back or cancelled by the registry's owner stay listed.
  */
 export async function RevocationPanel({ user, version }: { user: SessionUser; version: { id: string; version: number; status: VersionStatus; engagementRef: string } }) {
   const revocable = version.status === 'ANCHORED' || version.status === 'COMPLETE' || version.status === 'REVOKED';
@@ -24,8 +34,10 @@ export async function RevocationPanel({ user, version }: { user: SessionUser; ve
   const format = await getFormatter();
   const when = (iso: string) => format.dateTime(new Date(iso), { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' });
   const revocations = await getRevocations(user, version.id);
-  const current = revocations.find((r) => r.status === 'REQUESTED' || r.status === 'APPROVED' || r.status === 'REVOKED');
+  const current = revocations.find((r) => OPEN.includes(r.status));
   const earlier = revocations.filter((r) => r !== current);
+  // The owner cancelling a revocation is news the firm must not miss: say it above the form.
+  const lastCancelled = !current && revocations[0]?.status === 'CANCELLED';
   const dryRun = current?.status === 'REQUESTED' && mayDo(user.role, 'approve') ? (await getChainWriteMode(user)) === 'DRY_RUN' : false;
 
   const acts: ('approve' | 'reject' | 'withdraw')[] = [];
@@ -53,6 +65,11 @@ export async function RevocationPanel({ user, version }: { user: SessionUser; ve
               {t('queued', { who: current.approvedBy ?? '' })}
             </p>
           ) : null}
+          {current.status === 'SCHEDULED' && current.effectiveAt ? (
+            <p className="text-content-warning" data-testid="revocation-scheduled" data-effective-at={current.effectiveAt}>
+              {t('scheduled', { when: when(current.effectiveAt) })}
+            </p>
+          ) : null}
           {current.status === 'REVOKED' && current.revokedAt ? (
             <p className="text-content-error" data-testid="revocation-final">
               {t('revoked', { when: when(current.revokedAt), reason: t(`reasons.${current.reason}`), code: current.code })}
@@ -62,6 +79,11 @@ export async function RevocationPanel({ user, version }: { user: SessionUser; ve
         </div>
       ) : (
         <>
+          {lastCancelled ? (
+            <p className="text-content-warning" data-testid="revocation-cancelled">
+              {t('cancelled')}
+            </p>
+          ) : null}
           <p className="text-content-muted">{t('intro')}</p>
           {mayDo(user.role, 'requestRevocation') ? <RevocationForm versionId={version.id} version={version.version} engagementRef={version.engagementRef} /> : <p className="text-content-muted">{t('adminOnly')}</p>}
         </>
@@ -74,7 +96,11 @@ export async function RevocationPanel({ user, version }: { user: SessionUser; ve
               <li key={r.id} className="flex flex-wrap items-center gap-tight">
                 <StatusBadge variant={STATUS_VARIANT[r.status]}>{t(`statuses.${r.status}`)}</StatusBadge>
                 <span>{t(`reasons.${r.reason}`)}</span>
-                <span className="text-content-muted">{t('closed', { who: r.closedBy ?? '', when: r.closedAt ? when(r.closedAt) : '' })}</span>
+                <span className="text-content-muted">
+                  {r.status === 'CANCELLED'
+                    ? t('cancelledOn', { when: r.closedAt ? when(r.closedAt) : '' })
+                    : t('closed', { who: r.closedBy ?? '', when: r.closedAt ? when(r.closedAt) : '' })}
+                </span>
               </li>
             ))}
           </ul>

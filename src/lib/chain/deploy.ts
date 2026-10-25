@@ -13,20 +13,26 @@ export function orgIdFor(name: string): Hex {
  * owner) and, optionally, registers one issuer key. Used by the Anvil
  * integration tests and by scripts/deploy-registry.ts for Sepolia, so both
  * take the same path.
+ *
+ * `revocationDelaySeconds` is how long an issuer's revocation waits before it
+ * takes effect, during which the owner may cancel it (#95). Zero, the default
+ * here, makes revocation immediate: for test chains only. The deploy script
+ * refuses less than an hour anywhere else.
  */
 export async function deployRegistry(options: {
   publicClient: PublicClient;
   walletClient: WalletClient;
   issuer?: { address: Address; orgId: Hex };
-}): Promise<Deployment & { deployTxHash: Hash; deployBlock: number; issuerTxHash?: Hash }> {
-  const { publicClient, walletClient, issuer } = options;
+  revocationDelaySeconds?: number;
+}): Promise<Deployment & { deployTxHash: Hash; deployBlock: number; issuerTxHash?: Hash; revocationDelaySeconds: number }> {
+  const { publicClient, walletClient, issuer, revocationDelaySeconds = 0 } = options;
   const account = walletClient.account;
   if (!account) throw new ChainError('NO_ACCOUNT', 'The wallet client has no account to deploy from');
 
   const deployTxHash = await walletClient.deployContract({
     abi: registryAbi,
     bytecode: registryBytecode,
-    args: [account.address],
+    args: [account.address, revocationDelaySeconds],
     account,
     chain: walletClient.chain,
   });
@@ -58,5 +64,6 @@ export async function deployRegistry(options: {
     deployTxHash,
     deployBlock: Number(receipt.blockNumber),
     issuerTxHash,
+    revocationDelaySeconds,
   };
 }

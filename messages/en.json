@@ -312,12 +312,11 @@
       "VERSION_NOT_ANCHORED": "The original is not anchored.",
       "COPY_NEEDS_LIVE": "A distribution copy is anchored only in Live mode.",
       "CopyExists": "The original already has a distribution copy on chain, made from another file.",
-      "RecordRevoked": "The original record has been revoked.",
+      "RevocationExists": "A revocation is already on chain for this record, pending or in effect.",
       "KIND_UNSUPPORTED": "The worker does not send this kind of write.",
-      "REVOKED_WITH_OTHER_REASON": "The record on chain was already revoked, with another reason. A person must look at this.",
+      "REVOCATION_EXISTS_WITH_OTHER_REASON": "A revocation with another reason is already on chain for this record, pending or in effect. A person must look at this.",
       "REVOCATION_NOT_APPROVED": "The revocation was no longer approved.",
-      "ORIGINAL_RECORD_MISMATCH": "The original’s record on chain is not this version’s, or is not final yet.",
-      "AlreadyRevoked": "The record is already revoked."
+      "ORIGINAL_RECORD_MISMATCH": "The original’s record on chain is not this version’s, or is not final yet."
     },
     "completeCopy": "Complete: the stamped distribution copy is anchored too. Hand recipients this copy; its metadata names its own record.",
     "completeCertificate": "Complete. This report is signed or protected against editing, so it was anchored as issued. Hand recipients the report as issued together with its verification certificate.",
@@ -406,6 +405,10 @@
         "title": "Revoked",
         "body": "This file was anchored by the issuer and later revoked. Do not rely on it."
       },
+      "REVOCATION_PENDING": {
+        "title": "Being withdrawn",
+        "body": "This file is byte for byte the file the issuer anchored, but the issuer has asked to withdraw it. The withdrawal takes effect on {when} unless the registry’s owner cancels it first. Do not rely on it without asking the issuer."
+      },
       "ALTERED_OPINION_CHANGED": {
         "title": "Altered: the opinion differs",
         "body": "This is not the file the issuer anchored. It refers to an anchored report, but the audit opinion in it does not match that report's opinion. This is strong evidence that the opinion was edited."
@@ -466,6 +469,7 @@
       "block": "Block {block}",
       "transaction": "Transaction",
       "revokedReason": "Revoked, reason code {code}",
+      "revocationPending": "Revocation pending, reason code {code}: takes effect {when}",
       "latestLink": "Latest version of this report",
       "asOf": "Read at finalized block {block}.",
       "noExplorer": "local chain, no block explorer"
@@ -478,6 +482,7 @@
     "status": "Status",
     "current": "Current",
     "revoked": "Revoked, reason code {code}",
+    "pending": "Being withdrawn: reason code {code}, takes effect {when}",
     "noPdf": "This page shows the record only. Get the file from the issuer, then check it on the verify page.",
     "verifyLink": "Verify a file"
   },
@@ -572,7 +577,8 @@
       "explorer": "Etherscan ↗",
       "downloadCopy": "Download the stamped PDF",
       "downloadCertificate": "Download the certificate",
-      "revokedOn": "Revoked on {when} UTC: anyone who checks this version, or a copy of it, is told so."
+      "revokedOn": "Revoked on {when} UTC: anyone who checks this version, or a copy of it, is told so.",
+      "revocationScheduled": "Being withdrawn: takes effect on {when} UTC unless the registry’s owner cancels it."
     },
     "dashboard": {
       "title": "Dashboard",
@@ -614,7 +620,7 @@
   },
   "revocation": {
     "title": "Revocation",
-    "intro": "A revocation withdraws this version on chain: anyone who checks it, or a copy of it, is told it was revoked. It cannot be undone. An admin asks for it, and an approver who is someone else approves.",
+    "intro": "A revocation withdraws this version on chain: anyone who checks it, or a copy of it, is told it was revoked. An admin asks for it, and an approver who is someone else approves. The registry then waits out a delay before it takes effect, during which only the registry’s owner can cancel it. Once in effect, it cannot be undone.",
     "adminOnly": "Only an admin can ask for a version to be revoked.",
     "reasonLabel": "Reason",
     "reasons": {
@@ -628,14 +634,14 @@
     "confirmLabel": "Type the engagement reference, {ref}, to confirm",
     "request": "Ask to revoke version {version}",
     "requestTitle": "Ask for version {version} to be revoked?",
-    "requestBody": "An approver who is someone else must approve the request before anything is sent. Once the revocation is on chain, it cannot be undone.",
+    "requestBody": "An approver who is someone else must approve the request before anything is sent. Once on chain, the revocation takes effect after the registry’s delay, and from then on it cannot be undone.",
     "requestConfirm": "Ask for revocation",
     "requested": "{who} asked on {when} UTC for this version to be revoked.",
     "waitingApprover": "Waiting for an approver who is someone else.",
     "approve": "Approve revocation",
     "approveDryRun": "Approve revocation (dry run)",
     "approveTitle": "Approve this revocation?",
-    "approveBody": "The revocation is written to the journal and sent to the chain. Once its block is final, the verifier reports this version, and every copy of it, as revoked. It cannot be undone.",
+    "approveBody": "The revocation is written to the journal and sent to the chain. Once its block is final, the registry’s delay runs; when it ends, the verifier reports this version, and every copy of it, as revoked, and that cannot be undone. Until then only the registry’s owner can cancel it.",
     "approveBodyDryRun": "Dry run: the revocation is simulated against the registry and the result recorded. Nothing is sent, and the request waits for approval again.",
     "approveConfirm": "Approve revocation",
     "reject": "Reject",
@@ -646,17 +652,22 @@
     "withdrawTitle": "Take this request back?",
     "withdrawBody": "The version stays as it is.",
     "withdrawConfirm": "Take the request back",
-    "queued": "Approved by {who}. The revocation is in the journal; the version counts as revoked once its block is final.",
+    "queued": "Approved by {who}. The revocation is in the journal; once its block is final, the registry’s delay runs before it takes effect.",
+    "scheduled": "On chain: takes effect on {when} UTC, unless the registry’s owner cancels it first. Until then the verifier says this version is being withdrawn.",
     "revoked": "Revoked on {when} UTC. Reason: {reason} (code {code}).",
+    "cancelled": "The registry’s owner cancelled this revocation on chain before it took effect. The version stands; an admin can ask again.",
     "history": "Earlier requests",
     "statuses": {
       "REQUESTED": "Requested",
       "APPROVED": "Approved",
+      "SCHEDULED": "Scheduled",
       "REVOKED": "Revoked",
       "REJECTED": "Rejected",
-      "WITHDRAWN": "Taken back"
+      "WITHDRAWN": "Taken back",
+      "CANCELLED": "Cancelled by the owner"
     },
-    "closed": "by {who}, {when} UTC"
+    "closed": "by {who}, {when} UTC",
+    "cancelledOn": "cancelled by the registry’s owner; found {when} UTC"
   },
   "auditLog": {
     "title": "Audit log",

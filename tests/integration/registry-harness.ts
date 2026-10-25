@@ -27,7 +27,8 @@ export interface Registry {
 
 export type Anchored = Awaited<ReturnType<typeof anchorOriginal>>;
 
-export async function deployOn(url: string): Promise<Registry> {
+/** Deploys a registry on an Anvil node. Revocation is immediate unless a delay is given (#95). */
+export async function deployOn(url: string, options: { revocationDelaySeconds?: number } = {}): Promise<Registry> {
   const transport = http(url);
   const client = createPublicClient({ chain: foundry, transport, pollingInterval: 50 }) as PublicClient;
   // Anvil's unlocked dev accounts sign through JSON-RPC: no key appears in this repo.
@@ -36,6 +37,7 @@ export async function deployOn(url: string): Promise<Registry> {
     publicClient: client,
     walletClient: createWalletClient({ chain: foundry, transport, account: deployer }),
     issuer: { address: issuer, orgId: orgIdFor(ISSUER_ORG) },
+    revocationDelaySeconds: options.revocationDelaySeconds,
   });
   return {
     deployment: deployed,

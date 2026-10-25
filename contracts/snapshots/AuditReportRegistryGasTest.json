@@ -1,6 +1,7 @@
 {
-  "anchor_distribution_copy": "224853",
-  "anchor_v1": "190407",
-  "anchor_v2": "196522",
-  "revoke": "42294"
+  "anchor_distribution_copy": "226605",
+  "anchor_v1": "190070",
+  "anchor_v2": "196185",
+  "cancel_revocation": "26361",
+  "revoke": "62334"
 }

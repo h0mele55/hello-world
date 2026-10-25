@@ -55,14 +55,18 @@ async function mailTo(address: string): Promise<MailpitMessage[]> {
   return Promise.all(found.messages.map(async (m) => (await (await fetch(`${base}/api/v1/message/${m.ID}`)).json()) as MailpitMessage));
 }
 
-async function mine(blocks: number) {
+async function anvil(method: string, params: unknown[]) {
   const response = await fetch(process.env.LOCAL_RPC_URL ?? 'http://127.0.0.1:8545', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'anvil_mine', params: [`0x${blocks.toString(16)}`] }),
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
   });
   expect(response.ok).toBe(true);
 }
+
+const mine = (blocks: number) => anvil('anvil_mine', [`0x${blocks.toString(16)}`]);
+/** The registry is deployed with a one-hour revocation delay (REVOCATION_DELAY_HOURS=1, see CI): move the chain's clock past it. */
+const passRevocationDelay = () => anvil('evm_increaseTime', [3600]);
 
 const LADDER = ['DISABLED', 'DRY_RUN', 'LIVE'] as const;
 
@@ -342,6 +346,29 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     await mine(3);
     runWorkerOnce();
     await approving.reload();
+    // Final, and waiting out the registry's delay (#95): the owner may still cancel it.
+    await expect(panel).toHaveAttribute('data-status', 'SCHEDULED');
+    await expect(approving.getByTestId('revocation-scheduled')).toBeVisible();
+  });
+
+  await test.step('while the revocation waits out the delay, the verifier says version 1 is being withdrawn, never authentic', async () => {
+    test.skip(!admin.email, 'needs SEED_ADMIN_* (see CI)');
+    await visitor.goto('/verify');
+    for (const file of [copy, uniquePdf('en-unmodified.pdf', tag)]) {
+      await visitor.getByTestId('verify-file').setInputFiles({ name: 'report.pdf', mimeType: 'application/pdf', buffer: file });
+      await expect(visitor.getByTestId('verdict')).toHaveAttribute('data-kind', 'REVOCATION_PENDING', { timeout: 30_000 });
+      await visitor.getByTestId('verify-another').click();
+      await expect(visitor.getByTestId('verdict')).toHaveCount(0);
+    }
+  });
+
+  await test.step('once the delay has passed at a final block, the version is revoked', async () => {
+    test.skip(!admin.email, 'needs SEED_ADMIN_* (see CI)');
+    await passRevocationDelay();
+    await mine(3);
+    runWorkerOnce();
+    await approving.goto(versionUrl);
+    const panel = approving.getByTestId('revocation-panel');
     await expect(panel).toHaveAttribute('data-status', 'REVOKED');
     await expect(approving.getByTestId('revocation-final')).toContainText('Issued in error (code 2)');
   });

@@ -12,6 +12,10 @@
  *   <NETWORK>_RPC_URL     the endpoint to deploy through, e.g. SEPOLIA_RPC_URL
  *   ISSUER_ADDRESS        the issuer key to register (a different key)
  *   ISSUER_ORG_NAME       the audit firm's name; its keccak256 is the org id
+ *   REVOCATION_DELAY_HOURS optional; how long a revocation waits before it takes effect,
+ *                         during which the owner may cancel it (#95). Default 24;
+ *                         at least 1 and at most 720 (the contract's cap, 30 days).
+ *                         `local` defaults to 0, which makes revocation immediate.
  *   ETHERSCAN_API_KEY     optional; when set, the source is verified on Etherscan
  *   DEPLOYMENT_FILE       optional; write the record there instead of deployments/<network>.json
  *
@@ -32,6 +36,22 @@ import { deploymentPath, isNetworkName, NETWORKS, PRODUCTION_NETWORKS, rpcUrlFor
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const MAX_DEPLOYER_BALANCE = parseEther('0.1');
+const DEFAULT_REVOCATION_DELAY_HOURS = 24;
+const MIN_REVOCATION_DELAY_HOURS = 1;
+/** The contract's MAX_REVOCATION_DELAY. */
+const MAX_REVOCATION_DELAY_HOURS = 30 * 24;
+
+/** The revocation delay, in seconds. Below an hour, the owner could not cancel a stolen key's revocation in time. */
+function revocationDelaySeconds(network: string): number {
+  const raw = process.env.REVOCATION_DELAY_HOURS;
+  const local = network === 'local';
+  if (raw === undefined || raw === '') return local ? 0 : DEFAULT_REVOCATION_DELAY_HOURS * 3600;
+  const hours = Number(raw);
+  if (!Number.isInteger(hours) || hours < 0) fail('REVOCATION_DELAY_HOURS is not a whole number of hours');
+  if (!local && hours < MIN_REVOCATION_DELAY_HOURS) fail(`REVOCATION_DELAY_HOURS must be at least ${MIN_REVOCATION_DELAY_HOURS} outside a local chain`);
+  if (hours > MAX_REVOCATION_DELAY_HOURS) fail(`REVOCATION_DELAY_HOURS must be at most ${MAX_REVOCATION_DELAY_HOURS} (30 days)`);
+  return hours * 3600;
+}
 
 function fail(message: string): never {
   console.error(`Refused: ${message}`);
@@ -63,6 +83,7 @@ async function main() {
   if (!isAddress(issuerAddress)) fail('ISSUER_ADDRESS is not an address');
   if (getAddress(issuerAddress) === deployer.address) fail('the issuer key must not be the deployer key');
   const orgName = env('ISSUER_ORG_NAME');
+  const delay = revocationDelaySeconds(network);
 
   const transport = http(rpcUrl);
   const publicClient = createPublicClient({ chain, transport }) as PublicClient;
@@ -77,11 +98,12 @@ async function main() {
     fail(`the deployer holds ${formatEther(balance)} ETH; move all but ${formatEther(MAX_DEPLOYER_BALANCE)} to the issuer key, which pays for anchoring`);
   }
 
-  console.log(`Deploying AuditReportRegistry to ${network} from ${deployer.address}…`);
+  console.log(`Deploying AuditReportRegistry to ${network} from ${deployer.address}, revocation delay ${delay / 3600} h…`);
   const deployment = await deployRegistry({
     publicClient,
     walletClient,
     issuer: { address: getAddress(issuerAddress), orgId: orgIdFor(orgName) },
+    revocationDelaySeconds: delay,
   });
 
   const record = {
@@ -92,6 +114,7 @@ async function main() {
     deployTxHash: deployment.deployTxHash,
     deployBlock: deployment.deployBlock,
     owner: deployer.address,
+    revocationDelaySeconds: deployment.revocationDelaySeconds,
     issuer: { address: getAddress(issuerAddress), orgId: orgIdFor(orgName), orgName, setIssuerTxHash: deployment.issuerTxHash },
   };
   fs.mkdirSync(path.dirname(target), { recursive: true });
@@ -100,7 +123,7 @@ async function main() {
 
   if (network === 'local') return;
   // One Etherscan key covers every chain here; forge picks the explorer by chain id.
-  const constructorArgs = encodeAbiParameters([{ type: 'address' }], [deployer.address]);
+  const constructorArgs = encodeAbiParameters([{ type: 'address' }, { type: 'uint32' }], [deployer.address, delay]);
   const verify = ['verify-contract', deployment.address, 'src/AuditReportRegistry.sol:AuditReportRegistry', '--chain', String(chain.id), '--constructor-args', constructorArgs, '--watch'];
   if (!process.env.ETHERSCAN_API_KEY) {
     console.log(`ETHERSCAN_API_KEY is not set. Verify the source later with:\n  (cd contracts && forge ${verify.join(' ')})`);

@@ -44,6 +44,7 @@ function record(overrides: Partial<RegistryRecord> & Pick<RegistryRecord, 'recor
     kind: 'ORIGINAL',
     revoked: false,
     revokeReason: 0,
+    revokeEffectiveAt: 0,
     ...overrides,
   };
 }
@@ -136,6 +137,7 @@ describe('an exact-file match', () => {
       orgId: ORG,
       revoked: false,
       revokeReason: 0,
+      revokeEffectiveAt: 0,
     });
   });
 
@@ -148,12 +150,36 @@ describe('an exact-file match', () => {
   });
 
   it('is REVOKED when the matched record is revoked, or when a copy\'s original is', async () => {
-    const revokedOriginal = { ...ORIGINAL, revoked: true, revokeReason: 2 };
+    const revokedOriginal = { ...ORIGINAL, revoked: true, revokeReason: 2, revokeEffectiveAt: 1_700_000_000 };
     const view1 = fakeView([revokedOriginal, COPY], { [FAMILY]: id(1) });
     expect(await verify(ORIGINAL_BYTES, view1)).toMatchObject({ kind: 'REVOKED', revoked: { recordId: id(1), revokeReason: 2 } });
     expect(await verify(COPY_BYTES, view1)).toMatchObject({ kind: 'REVOKED', matched: { recordId: id(2) }, revoked: { recordId: id(1) } });
-    const view2 = fakeView([ORIGINAL, { ...COPY, revoked: true, revokeReason: 1 }], { [FAMILY]: id(1) });
+    const view2 = fakeView([ORIGINAL, { ...COPY, revoked: true, revokeReason: 1, revokeEffectiveAt: 1_700_000_000 }], { [FAMILY]: id(1) });
     expect(await verify(COPY_BYTES, view2)).toMatchObject({ kind: 'REVOKED', revoked: { recordId: id(2) } });
+  });
+
+  it('is REVOCATION_PENDING, never authentic, while a revocation waits out the registry\'s delay', async () => {
+    const pending = { revoked: false, revokeReason: 2, revokeEffectiveAt: 1_800_000_000 };
+    const pendingOriginal = fakeView([{ ...ORIGINAL, ...pending }, COPY], { [FAMILY]: id(1) });
+    expect(await verify(ORIGINAL_BYTES, pendingOriginal)).toMatchObject({
+      kind: 'REVOCATION_PENDING',
+      matched: { recordId: id(1) },
+      pending: { recordId: id(1), revokeReason: 2, revokeEffectiveAt: 1_800_000_000 },
+    });
+    // A copy whose original is being withdrawn is being withdrawn too.
+    expect(await verify(COPY_BYTES, pendingOriginal)).toMatchObject({ kind: 'REVOCATION_PENDING', matched: { recordId: id(2) }, pending: { recordId: id(1) } });
+    const pendingCopy = fakeView([ORIGINAL, { ...COPY, ...pending }], { [FAMILY]: id(1) });
+    expect(await verify(COPY_BYTES, pendingCopy)).toMatchObject({ kind: 'REVOCATION_PENDING', pending: { recordId: id(2) } });
+    // The original itself still stands when only its copy is being withdrawn.
+    expect(await verify(ORIGINAL_BYTES, pendingCopy)).toMatchObject({ kind: 'AUTHENTIC_LATEST' });
+  });
+
+  it('is REVOKED when one record is revoked and the other only pending', async () => {
+    const view = fakeView(
+      [{ ...ORIGINAL, revoked: true, revokeReason: 2, revokeEffectiveAt: 1_700_000_000 }, { ...COPY, revoked: false, revokeReason: 1, revokeEffectiveAt: 1_800_000_000 }],
+      { [FAMILY]: id(1) },
+    );
+    expect(await verify(COPY_BYTES, view)).toMatchObject({ kind: 'REVOKED', revoked: { recordId: id(1) } });
   });
 
   it('refuses a chain that holds a copy without its original, or a family without a latest record', async () => {

@@ -58,6 +58,9 @@ function recordSection(title: string, record: RecordSummary, testId: string): HT
   section.append(el('h3', title));
   const head = el('p', `${t('details.version', { version: record.version })} · ${t(`details.kind.${record.kind}`)}`);
   if (record.revoked) head.append(el('span', ` · ${t('details.revokedReason', { code: record.revokeReason })}`, { class: 'bad' }));
+  else if (record.revokeReason !== 0) {
+    head.append(el('span', ` · ${t('details.revocationPending', { code: record.revokeReason, when: utcDate(record.revokeEffectiveAt) })}`, { class: 'warn', 'data-testid': `${testId}-revocation-pending` }));
+  }
   section.append(head);
   const block = el('p', `${t('details.block', { block: record.blockNumber })}, ${utcDate(record.blockTime)} `);
   block.append(link(explorerBlockUrl(setup.chainId, record.blockNumber), t('details.block', { block: record.blockNumber })));
@@ -75,6 +78,8 @@ function bodyOf(verdict: Shown): string {
   switch (verdict.kind) {
     case 'AUTHENTIC_SUPERSEDED':
       return t('verdict.AUTHENTIC_SUPERSEDED.body', { latest: verdict.latest.version });
+    case 'REVOCATION_PENDING':
+      return t('verdict.REVOCATION_PENDING.body', { when: utcDate(verdict.pending.revokeEffectiveAt) });
     case 'UNKNOWN_REGISTRY':
       return t('verdict.UNKNOWN_REGISTRY.body', { chainId: verdict.claimedChainId, contract: verdict.claimedContract });
     case 'NOT_REGISTERED':
@@ -90,6 +95,7 @@ const TONE: Record<Shown['kind'], string> = {
   AUTHENTIC_LATEST: 'good',
   AUTHENTIC_SUPERSEDED: 'warn',
   REVOKED: 'bad',
+  REVOCATION_PENDING: 'warn',
   ALTERED_OPINION_CHANGED: 'bad',
   ALTERED_OPINION_APPEARS_UNCHANGED: 'warn',
   ALTERED_OPINION_NOT_CHECKABLE: 'warn',

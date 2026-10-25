@@ -4,7 +4,7 @@ import { toRegistryError } from '@/lib/chain/adapter';
 import { orgIdFor } from '@/lib/chain/deploy';
 import { parseDeployment } from '@/lib/chain/deployment';
 import { ChainError } from '@/lib/chain/errors';
-import { decodeRecord, ZERO_HASH, type RawRecord } from '@/lib/chain/records';
+import { decodeRecord, revocationStateOf, ZERO_HASH, type RawRecord } from '@/lib/chain/records';
 import { registryAbi, registryRuntimeBytecodeHash } from '@/lib/chain/registry-artifact';
 
 const ADDRESS = '0x5FbDB2315678afecb367f032d93F642f64180aa3';
@@ -44,6 +44,7 @@ describe('decodeRecord', () => {
     kind: 1,
     revoked: false,
     revokeReason: 0,
+    revokeEffectiveAt: 0,
   };
 
   it('reads an all-zero struct as "no record"', () => {
@@ -56,6 +57,14 @@ describe('decodeRecord', () => {
 
   it('refuses a kind this code does not know', () => {
     expect(() => decodeRecord(ZERO_HASH, { ...raw, kind: 2 })).toThrow(expect.objectContaining({ code: 'UNKNOWN_KIND' }));
+  });
+
+  it('keeps when a revocation takes effect, and tells pending from in effect', () => {
+    const pending = decodeRecord(ZERO_HASH, { ...raw, revokeReason: 2, revokeEffectiveAt: 1_800_000_000 })!;
+    expect(pending.revokeEffectiveAt).toBe(1_800_000_000);
+    expect(revocationStateOf(pending)).toBe('PENDING');
+    expect(revocationStateOf({ ...pending, revoked: true })).toBe('IN_EFFECT');
+    expect(revocationStateOf(decodeRecord(ZERO_HASH, raw)!)).toBe('NONE');
   });
 });
 

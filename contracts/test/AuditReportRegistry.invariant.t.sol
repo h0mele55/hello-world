@@ -4,26 +4,53 @@ pragma solidity 0.8.30;
 import {Test} from "forge-std/Test.sol";
 import {AuditReportRegistry} from "../src/AuditReportRegistry.sol";
 
-/// Drives the registry with random anchors, copies, revocations and attempts by
-/// keys that are not issuers, and keeps a ghost model of what must be true.
+/// Drives the registry with random anchors, copies, revocations, cancellations,
+/// the passing of time and attempts by keys that are not issuers, and keeps a
+/// ghost model of what must be true.
 contract RegistryHandler is Test {
     AuditReportRegistry public immutable registry;
     address[] public issuerKeys;
     address public immutable stranger;
+    address public immutable owner;
 
     bytes32[] public families;
     bytes32[] public recordIds;
     bytes32[] public originals;
     mapping(bytes32 familyId => uint32) public ghostVersion;
-    mapping(bytes32 recordId => bool) public ghostRevoked;
+    mapping(bytes32 recordId => uint8) public ghostReason;
+    mapping(bytes32 recordId => uint40) public ghostEffectiveAt;
+    /// The time every call runs at; the invariants warp to it too.
+    uint256 public currentTime;
     uint256 public strangerWrites;
     uint256 public staleAccepted;
+    uint256 public replacedRevocations;
+    uint256 public nonOwnerCancels;
+    uint256 public lateCancels;
     uint256 private nonce;
 
-    constructor(AuditReportRegistry registry_, address[] memory issuerKeys_, address stranger_) {
+    constructor(
+        AuditReportRegistry registry_,
+        address[] memory issuerKeys_,
+        address stranger_,
+        address owner_
+    ) {
         registry = registry_;
         issuerKeys = issuerKeys_;
         stranger = stranger_;
+        owner = owner_;
+        currentTime = block.timestamp;
+    }
+
+    modifier atCurrentTime() {
+        vm.warp(currentTime);
+        _;
+    }
+
+    /// Moves time on by up to two days: the delay is one, so revocations are
+    /// seen both pending and in effect.
+    function passTime(uint32 seconds_) external {
+        currentTime += bound(seconds_, 0, 2 days);
+        vm.warp(currentTime);
     }
 
     function familyCount() external view returns (uint256) {
@@ -43,7 +70,7 @@ contract RegistryHandler is Test {
         return keccak256(abi.encode("fresh", nonce));
     }
 
-    function startFamily(uint256 keySeed) external {
+    function startFamily(uint256 keySeed) external atCurrentTime {
         bytes32 family = _fresh();
         bytes32 doc = _fresh();
         vm.prank(_key(keySeed));
@@ -55,7 +82,7 @@ contract RegistryHandler is Test {
     }
 
     /// Reissue, sometimes from a stale view of the family (which must revert).
-    function reissue(uint256 familySeed, uint256 keySeed, bool stale) external {
+    function reissue(uint256 familySeed, uint256 keySeed, bool stale) external atCurrentTime {
         if (families.length == 0) return;
         bytes32 family = families[familySeed % families.length];
         bytes32 latest = registry.latestOf(family);
@@ -74,7 +101,7 @@ contract RegistryHandler is Test {
         } catch {}
     }
 
-    function copy(uint256 originalSeed, uint256 keySeed) external {
+    function copy(uint256 originalSeed, uint256 keySeed) external atCurrentTime {
         if (originals.length == 0) return;
         bytes32 original = originals[originalSeed % originals.length];
         vm.prank(_key(keySeed));
@@ -83,16 +110,33 @@ contract RegistryHandler is Test {
         } catch {}
     }
 
-    function revoke(uint256 recordSeed, uint256 keySeed, uint8 reason) external {
+    function revoke(uint256 recordSeed, uint256 keySeed, uint8 reason) external atCurrentTime {
         if (recordIds.length == 0) return;
         bytes32 id = recordIds[recordSeed % recordIds.length];
         vm.prank(_key(keySeed));
-        try registry.revoke(id, reason) {
-            ghostRevoked[id] = true;
+        try registry.revoke(id, reason) returns (uint40 effectiveAt) {
+            if (ghostReason[id] != 0) replacedRevocations++;
+            ghostReason[id] = reason;
+            ghostEffectiveAt[id] = effectiveAt;
         } catch {}
     }
 
-    function strangerAttempts(uint256 seed) external {
+    /// The owner, an issuer key or a stranger tries to cancel.
+    function cancel(uint256 recordSeed, uint256 callerSeed) external atCurrentTime {
+        if (recordIds.length == 0) return;
+        bytes32 id = recordIds[recordSeed % recordIds.length];
+        uint256 pick = callerSeed % 4;
+        address caller = pick == 0 ? owner : pick == 1 ? stranger : _key(callerSeed / 4);
+        vm.prank(caller);
+        try registry.cancelRevocation(id) {
+            if (caller != owner) nonOwnerCancels++;
+            if (ghostReason[id] == 0 || currentTime >= ghostEffectiveAt[id]) lateCancels++;
+            ghostReason[id] = 0;
+            ghostEffectiveAt[id] = 0;
+        } catch {}
+    }
+
+    function strangerAttempts(uint256 seed) external atCurrentTime {
         bytes32 target = recordIds.length == 0 ? _fresh() : recordIds[seed % recordIds.length];
         vm.startPrank(stranger);
         try registry.anchor(_fresh(), 1, bytes32(0), _fresh(), _fresh(), _fresh()) {
@@ -102,6 +146,9 @@ contract RegistryHandler is Test {
             strangerWrites++;
         } catch {}
         try registry.revoke(target, 1) {
+            strangerWrites++;
+        } catch {}
+        try registry.cancelRevocation(target) {
             strangerWrites++;
         } catch {}
         vm.stopPrank();
@@ -114,7 +161,7 @@ contract AuditReportRegistryInvariantTest is Test {
 
     function setUp() public {
         address owner = makeAddr("owner");
-        registry = new AuditReportRegistry(owner);
+        registry = new AuditReportRegistry(owner, 1 days);
         address[] memory keys = new address[](2);
         keys[0] = makeAddr("issuerA");
         keys[1] = makeAddr("issuerB");
@@ -122,7 +169,7 @@ contract AuditReportRegistryInvariantTest is Test {
         registry.setIssuer(keys[0], keccak256("org"), true);
         registry.setIssuer(keys[1], keccak256("org"), true);
         vm.stopPrank();
-        handler = new RegistryHandler(registry, keys, makeAddr("stranger"));
+        handler = new RegistryHandler(registry, keys, makeAddr("stranger"), owner);
         targetContract(address(handler));
     }
 
@@ -130,7 +177,7 @@ contract AuditReportRegistryInvariantTest is Test {
     function invariant_docHashMapsToOneRecord() public view {
         for (uint256 i = 0; i < handler.recordCount(); i++) {
             bytes32 id = handler.recordIds(i);
-            AuditReportRegistry.Record memory r = registry.getRecord(id);
+            AuditReportRegistry.RecordView memory r = registry.getRecord(id);
             assertEq(registry.recordOfDoc(r.docHash), id);
         }
     }
@@ -142,7 +189,7 @@ contract AuditReportRegistryInvariantTest is Test {
             bytes32 family = handler.families(f);
             bytes32 cursor = registry.latestOf(family);
             uint32 expected = handler.ghostVersion(family);
-            AuditReportRegistry.Record memory r = registry.getRecord(cursor);
+            AuditReportRegistry.RecordView memory r = registry.getRecord(cursor);
             assertEq(uint8(r.kind), uint8(AuditReportRegistry.Kind.ORIGINAL));
             while (expected > 0) {
                 r = registry.getRecord(cursor);
@@ -155,12 +202,31 @@ contract AuditReportRegistryInvariantTest is Test {
         }
     }
 
-    /// Revocation never reverses.
-    function invariant_revokedIsTerminal() public view {
+    /// Every record reads exactly the revocation it was asked for, and reads
+    /// revoked exactly from that revocation's time on.
+    function invariant_revocationReadsAsAsked() public {
+        vm.warp(handler.currentTime());
         for (uint256 i = 0; i < handler.recordCount(); i++) {
             bytes32 id = handler.recordIds(i);
-            if (handler.ghostRevoked(id)) assertTrue(registry.getRecord(id).revoked);
+            AuditReportRegistry.RecordView memory r = registry.getRecord(id);
+            uint8 reason = handler.ghostReason(id);
+            uint40 effectiveAt = handler.ghostEffectiveAt(id);
+            assertEq(r.revokeReason, reason);
+            assertEq(r.revokeEffectiveAt, effectiveAt);
+            assertEq(r.revoked, reason != 0 && block.timestamp >= effectiveAt);
         }
+    }
+
+    /// A revocation in effect never reverses: nobody cancels one at or after
+    /// its time, and a second ask never replaces the first.
+    function invariant_revokedIsTerminal() public view {
+        assertEq(handler.lateCancels(), 0);
+        assertEq(handler.replacedRevocations(), 0);
+    }
+
+    /// Only the owner cancels a revocation; an issuer key never does.
+    function invariant_onlyTheOwnerCancels() public view {
+        assertEq(handler.nonOwnerCancels(), 0);
     }
 
     /// A key that is not an issuer never writes.

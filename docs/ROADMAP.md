@@ -1080,7 +1080,7 @@ script (#61, #67, #68):
   - a database owner can rewrite the audit log and its last check together
     (#94);
   - one stolen key can revoke every record for good, a decision before
-    production (#95);
+    production (#95, since built as delayed revocation, 6d);
   - recipients are not told of a revocation (#96).
 
   It also found cross-site write refusal untested, which now has a test over
@@ -1163,6 +1163,33 @@ script (#61, #67, #68):
   matter: a mainnet record stays readable without anybody's continued service,
   and costs about EUR 0.04 a report today and EUR 1 to 17 at 1 to 20 gwei.
   Arbitrum One is the alternative if cost must be near zero.
+
+6d is delayed revocation (#95). The owner chose it over the other options in
+that issue: one issuer key may no longer withdraw a firm's records at once.
+
+- **The contract.** An issuer key's `revoke` now only asks: the revocation
+  takes effect `revocationDelay` seconds later, with no second transaction
+  (`getRecord` computes `revoked` from the block's time). Until then only the
+  owner's `cancelRevocation` undoes it; once in effect it is terminal. A record
+  holds one revocation, so a second key cannot replace a genuine reason. The
+  delay is set at deployment and kept in storage, so every deployment has the
+  same bytecode; the deploy script defaults to 24 hours and refuses less than
+  one off a local chain. Unit, fuzz and invariant tests cover the window; a
+  revocation now writes a fresh slot (62,334 gas, was 42,294).
+- **The worker.** A final REVOKE leaves its revocation SCHEDULED, with the time
+  it takes effect. Each pass reads every scheduled one at the finalized block:
+  in effect, the version and the revocation are REVOKED; gone, the owner
+  cancelled it, and the revocation is CANCELLED while the version stands. The
+  firm may then ask again.
+- **The verifier** has a new verdict, REVOCATION_PENDING: the exact file, whose
+  issuer has asked to withdraw it, with the time that takes effect. It is never
+  called authentic. `/verify`, `verifier.html`, the CLI and
+  `/r/<familyId>/latest` all show it.
+- **The owner** cancels with `scripts/owner-call.ts cancel-revocation`;
+  `docs/runbooks/stolen-issuer-key.md` says how to find revocations the firm
+  did not ask for, and in what order to act.
+- **What it does not do:** notice such a revocation. That is the registry
+  watcher (#93), without which the delay protects only those who look.
 
 **Prompt**
 

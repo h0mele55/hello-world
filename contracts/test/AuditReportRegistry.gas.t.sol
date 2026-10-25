@@ -18,10 +18,13 @@ contract AuditReportRegistryGasTest is Test {
     // holding the stamped file gets everything from one read (recordOfDoc, then
     // getRecord). Three extra storage slots, so a higher ceiling.
     uint256 internal constant COPY_CEILING = 250_000;
-    uint256 internal constant REVOKE_CEILING = 60_000;
+    // A revocation writes a fresh slot (its reason and the time it takes
+    // effect) and reads the deployment's delay.
+    uint256 internal constant REVOKE_CEILING = 80_000;
+    uint256 internal constant CANCEL_CEILING = 40_000;
 
     function setUp() public {
-        registry = new AuditReportRegistry(address(this));
+        registry = new AuditReportRegistry(address(this), 1 days);
         registry.setIssuer(issuer, keccak256("org"), true);
     }
 
@@ -42,9 +45,13 @@ contract AuditReportRegistryGasTest is Test {
         uint256 revokeGas = vm.snapshotGasLastCall("revoke");
         vm.stopPrank();
 
+        registry.cancelRevocation(copy);
+        uint256 cancelGas = vm.snapshotGasLastCall("cancel_revocation");
+
         assertLt(anchorV1, ANCHOR_CEILING, "anchor v1");
         assertLt(anchorV2, ANCHOR_CEILING, "anchor v2");
         assertLt(copyGas, COPY_CEILING, "copy");
         assertLt(revokeGas, REVOKE_CEILING, "revoke");
+        assertLt(cancelGas, CANCEL_CEILING, "cancel");
     }
 }

@@ -136,6 +136,9 @@ export async function requeueCopy(user: SessionUser, versionId: string, target: 
     if (!version) throw new AnchoringError('NOT_FOUND');
     if (version.anchorOnly) throw new AnchoringError('ANCHOR_ONLY');
     if (version.status !== 'ANCHORED') throw new AnchoringError('NOT_ANCHORED');
+    // A copy of an original being withdrawn is never anchored; the registry refuses it too.
+    const withdrawing = await tx.revocation.count({ where: { reportVersionId: version.id, status: { in: ['APPROVED', 'SCHEDULED'] } } });
+    if (withdrawing > 0) throw new AnchoringError('REVOCATION_OPEN');
     let write;
     try {
       write = await tx.chainWrite.create({

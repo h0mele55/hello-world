@@ -89,9 +89,13 @@ that is refused by the registry. Then:
 - Look for writes the journal did not make: the key's transactions on the
   explorer, compared with the `ChainWrite` rows of that issuer. Automatic
   detection is #93.
-- A stolen key could have revoked records. Revocation is terminal and a
-  revoked document cannot be anchored again (#95): reissue each affected report
-  as a new version (a new file), and tell its recipients.
+- A stolen key could have asked to revoke records. Each request waits out the
+  registry's delay, and the owner cancels it in that time
+  ([stolen-issuer-key.md](stolen-issuer-key.md)), right after retiring the key
+  or in the same Safe batch: retiring it does not undo what it asked. A revocation
+  already in effect is terminal and its document cannot be anchored again:
+  reissue each affected report as a new version (a new file), and tell its
+  recipients.
 - Record what you found and did in the incident log.
 
 ## Never

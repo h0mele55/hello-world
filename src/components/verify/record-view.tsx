@@ -61,6 +61,12 @@ export function RecordView({
       <p className="text-sm text-content-default">
         <span data-testid={`${testId}-version`}>{t('version', { version: record.version })}</span> · {t(`kind.${record.kind}`)}
         {record.revoked ? <span className="text-content-error"> · {t('revokedReason', { code: record.revokeReason })}</span> : null}
+        {!record.revoked && record.revokeReason !== 0 ? (
+          <span className="text-content-warning" data-testid={`${testId}-revocation-pending`}>
+            {' '}
+            · {t('revocationPending', { code: record.revokeReason, when: utcDate(record.revokeEffectiveAt) })}
+          </span>
+        ) : null}
       </p>
       <p className="flex items-center gap-tight text-sm text-content-default">
         <span>

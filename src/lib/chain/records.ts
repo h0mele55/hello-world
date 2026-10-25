@@ -19,8 +19,12 @@ export interface RegistryRecord {
   blockNumber: number;
   version: number;
   kind: RecordKind;
+  /** In effect at the block read: asked for, and its time has come (#95). */
   revoked: boolean;
+  /** Non-zero once a revocation was asked for, pending or in effect. */
   revokeReason: number;
+  /** When the revocation takes effect, in Unix seconds; zero when none was asked for. */
+  revokeEffectiveAt: number;
 }
 
 /** The struct as viem decodes `getRecord`. */
@@ -36,6 +40,19 @@ export interface RawRecord {
   kind: number;
   revoked: boolean;
   revokeReason: number;
+  revokeEffectiveAt: number;
+}
+
+/**
+ * Where a record's revocation stands at the block it was read at: none asked
+ * for, asked for and waiting out the delay (the owner may still cancel it), or
+ * in effect, which is terminal.
+ */
+export type RevocationState = 'NONE' | 'PENDING' | 'IN_EFFECT';
+
+export function revocationStateOf(record: Pick<RegistryRecord, 'revoked' | 'revokeReason'>): RevocationState {
+  if (record.revoked) return 'IN_EFFECT';
+  return record.revokeReason !== 0 ? 'PENDING' : 'NONE';
 }
 
 /** An all-zero struct is how the contract says "no such record". */
@@ -56,6 +73,7 @@ export function decodeRecord(recordId: Hex, raw: RawRecord): RegistryRecord | nu
     kind,
     revoked: raw.revoked,
     revokeReason: raw.revokeReason,
+    revokeEffectiveAt: raw.revokeEffectiveAt,
   };
 }
 

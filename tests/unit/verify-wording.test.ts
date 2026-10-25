@@ -39,6 +39,12 @@ describe.each(LOCALES)('%s verifier wording', (locale) => {
     }
   });
 
+  it('tells a reader not to rely on a file being withdrawn, and when the withdrawal takes effect', () => {
+    const verdict = (messages.verify as { verdict: Record<string, { body: string }> }).verdict.REVOCATION_PENDING;
+    expect(verdict.body).toMatch(locale === 'en' ? /Do not rely on it/ : /Не разчитайте на него/);
+    expect(verdict.body).toContain('{when}');
+  });
+
   it('never calls an anchor legally binding, anywhere in the app', () => {
     for (const [key, text] of entries(messages, '')) {
       if (/legally binding/i.test(text)) expect(text, key).toMatch(/not a legally binding/i);

@@ -12,7 +12,8 @@ import { CannotVerify, type CannotVerifyReason, type RegistryView, type Verifier
  * agreeing reads of the chain (CLAUDE.md rules 4, 5 and 7). Only an exact-file
  * match is AUTHENTIC; every other verdict says what it does and does not show.
  *
- *   exact match ─┬─ the record, its original or (for a copy) either revoked ─▶ REVOKED
+ *   exact match ─┬─ the record or (for a copy) its original revoked ──────────▶ REVOKED
+ *                ├─ either with a revocation pending (the registry's delay) ─▶ REVOCATION_PENDING
  *                ├─ the original is its family's latest ────────────────────▶ AUTHENTIC_LATEST
  *                └─ otherwise ───────────────────────────────────────────────▶ AUTHENTIC_SUPERSEDED
  *   no match ────┬─ the file's stamp names this chain and contract, a record that exists:
@@ -37,8 +38,12 @@ export interface RecordSummary {
   issuer: Address;
   /** Null when the key is no longer registered. */
   orgId: Hex | null;
+  /** In effect at the block read. */
   revoked: boolean;
+  /** Non-zero once a revocation was asked for, pending or in effect. */
   revokeReason: number;
+  /** When it takes effect, in Unix seconds; zero when none was asked for. */
+  revokeEffectiveAt: number;
 }
 
 interface Resolved {
@@ -52,6 +57,8 @@ interface Resolved {
 export type Verdict =
   | (Resolved & { kind: 'AUTHENTIC_LATEST' | 'AUTHENTIC_SUPERSEDED'; matched: RecordSummary })
   | (Resolved & { kind: 'REVOKED'; matched: RecordSummary; revoked: RecordSummary })
+  /** The issuer asked to withdraw it; the registry's owner may still cancel that until `pending.revokeEffectiveAt`. Never authentic. */
+  | (Resolved & { kind: 'REVOCATION_PENDING'; matched: RecordSummary; pending: RecordSummary })
   | (Resolved & { kind: 'ALTERED_OPINION_CHANGED' | 'ALTERED_OPINION_APPEARS_UNCHANGED'; claimed: RecordSummary })
   | (Resolved & { kind: 'ALTERED_OPINION_NOT_CHECKABLE'; claimed: RecordSummary; reason: string })
   | { kind: 'UNKNOWN_REGISTRY'; docHash: Hex; asOfBlock: number; claimedChainId: number; claimedContract: Address }
@@ -102,6 +109,8 @@ async function decide(view: RegistryView, input: Parameters<typeof verifyFile>[0
     const resolved = { docHash, asOfBlock, original: await summary(original), latest: await summary(latest), matched: await summary(matched) };
     const revoked = [matched, original].find((r) => r.revoked);
     if (revoked) return { kind: 'REVOKED', ...resolved, revoked: await summary(revoked) };
+    const pending = [matched, original].find((r) => r.revokeReason !== 0);
+    if (pending) return { kind: 'REVOCATION_PENDING', ...resolved, pending: await summary(pending) };
     return { kind: latest.recordId === original.recordId ? 'AUTHENTIC_LATEST' : 'AUTHENTIC_SUPERSEDED', ...resolved };
   }
 
@@ -144,5 +153,6 @@ export async function summariseRecord(view: RegistryView, record: RegistryRecord
     orgId,
     revoked: record.revoked,
     revokeReason: record.revokeReason,
+    revokeEffectiveAt: record.revokeEffectiveAt,
   };
 }

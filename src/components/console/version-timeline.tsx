@@ -64,6 +64,11 @@ export async function VersionTimeline({ versions }: { versions: TimelineVersion[
                 {t('revokedOn', { when: when(v.revokedAt) })}
               </p>
             ) : null}
+            {v.revocationEffectiveAt ? (
+              <p className="text-content-warning" data-testid="timeline-revocation-scheduled">
+                {t('revocationScheduled', { when: when(v.revocationEffectiveAt) })}
+              </p>
+            ) : null}
             <dl className="grid gap-compact sm:grid-cols-2">
               <div className="flex flex-col gap-tight">
                 <dt className="text-sm text-content-muted">{t('prepared')}</dt>

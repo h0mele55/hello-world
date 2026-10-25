@@ -8,6 +8,7 @@ import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { createChainAdapter } from '@/lib/chain/adapter';
 import { loadDeploymentFile, NETWORKS } from '@/lib/chain/networks';
+import { registryAbi } from '@/lib/chain/registry-artifact';
 import { ZERO_HASH } from '@/lib/chain/records';
 import { startAnvil, type AnvilHandle } from './anvil';
 
@@ -68,11 +69,33 @@ describe('deploying to a production candidate’s testnet', () => {
     expect(deployment.chainId).toBe(84532);
     expect(() => loadDeploymentFile('sepolia', file)).toThrow('not sepolia');
 
+    // Off a local chain a revocation waits a day by default (#95), and the record says so.
     const publicClient = createPublicClient({ chain: NETWORKS['base-sepolia'], transport, pollingInterval: 50 }) as PublicClient;
+    expect(JSON.parse(fs.readFileSync(file, 'utf8'))).toMatchObject({ revocationDelaySeconds: 86_400 });
+    expect(await publicClient.readContract({ address: deployment.address, abi: registryAbi, functionName: 'revocationDelay' })).toBe(86_400);
+    // The source verification command carries the delay among the constructor arguments.
+    expect(deployed.out).toContain('0000000000000000000000000000000000000000000000000000000000015180');
+
     const adapter = createChainAdapter({ publicClient, walletClient: createWalletClient({ chain: NETWORKS['base-sepolia'], transport, account: issuer }), deployment });
     const sent = await adapter.anchor({ familyId: h('f'), version: 1, parentId: ZERO_HASH, docHash: h('d'), manifestHash: h('m'), opinionCommitment: h('o') });
     await testClient.mine({ blocks: 3 });
     await adapter.waitFinal(sent.txHash, { pollMs: 20, timeoutMs: 5_000 });
     expect(await adapter.findByDocHash(h('d'))).toMatchObject({ recordId: sent.recordId, issuer: getAddress(issuer.address) });
+  });
+
+  it('refuses a revocation delay under an hour off a local chain, or over the contract\'s 30 days, before deploying', async () => {
+    const env = (hours: string) => ({
+      BASE_SEPOLIA_RPC_URL: anvil.url,
+      DEPLOYER_PRIVATE_KEY: generatePrivateKey(),
+      ISSUER_ADDRESS: privateKeyToAccount(generatePrivateKey()).address,
+      ISSUER_ORG_NAME: 'Firm',
+      DEPLOYMENT_FILE: path.join(dir, `delay-${hours}.json`),
+      REVOCATION_DELAY_HOURS: hours,
+    });
+    for (const [hours, reason] of [['0', 'at least 1'], ['721', 'at most 720'], ['1.5', 'whole number'], ['-2', 'whole number']]) {
+      const refused = await deploy('base-sepolia', env(hours));
+      expect(refused, hours).toMatchObject({ code: 1, err: expect.stringContaining(reason) });
+      expect(fs.existsSync(path.join(dir, `delay-${hours}.json`))).toBe(false);
+    }
   });
 });

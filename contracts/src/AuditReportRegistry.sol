@@ -11,7 +11,14 @@ pragma solidity 0.8.30;
 /// type or report text is ever stored (CLAUDE.md rule 1).
 ///
 /// The contract is immutable: no proxy, no delegatecall, no payable function
-/// and no external call. Ownership only manages the issuer allowlist.
+/// and no external call. Ownership manages the issuer allowlist and may cancel
+/// a revocation before it takes effect.
+///
+/// Revocation is delayed (#95). An issuer key asks; the revocation takes effect
+/// `revocationDelay` seconds later, and until then only the owner can cancel
+/// it. A stolen issuer key therefore cannot withdraw a firm's records at once:
+/// the firm has the delay to notice and to have the owner cancel. Once in
+/// effect, a revocation is terminal.
 contract AuditReportRegistry {
     enum Kind {
         ORIGINAL,
@@ -26,14 +33,39 @@ contract AuditReportRegistry {
         // The previous version for an ORIGINAL (zero for version 1), or the
         // original a DISTRIBUTION_COPY was stamped from.
         bytes32 parentId;
-        // The next five pack into one slot (20 + 5 + 4 + 1 + 1 + 1 bytes).
+        // The next four pack into one slot (20 + 5 + 4 + 1 bytes).
         // uint40 holds block numbers past 10^12.
         address issuer;
         uint40 blockNumber;
         uint32 version;
         Kind kind;
+    }
+
+    /// @notice A revocation asked for by an issuer key: the reason's code and
+    /// the time it takes effect. One slot.
+    struct Revocation {
+        uint8 reason;
+        uint40 effectiveAt;
+    }
+
+    /// @notice What `getRecord` returns: the record, and its revocation as it
+    /// stands at the block read.
+    struct RecordView {
+        bytes32 familyId;
+        bytes32 docHash;
+        bytes32 manifestHash;
+        bytes32 opinionCommitment;
+        bytes32 parentId;
+        address issuer;
+        uint40 blockNumber;
+        uint32 version;
+        Kind kind;
+        // In effect at this block: asked for, and its time has come.
         bool revoked;
+        // Non-zero once asked for, whether pending or in effect.
         uint8 revokeReason;
+        // When it takes effect (Unix seconds), or zero when none was asked for.
+        uint40 revokeEffectiveAt;
     }
 
     struct Issuer {
@@ -41,8 +73,17 @@ contract AuditReportRegistry {
         bool active;
     }
 
+    /// @notice The longest delay a deployment may set: past it, a firm could
+    /// not withdraw a wrong report in any useful time.
+    uint32 public constant MAX_REVOCATION_DELAY = 30 days;
+
     address public owner;
     address public pendingOwner;
+    /// @notice Seconds between an issuer's revocation and its effect, fixed at
+    /// deployment. Kept in storage, not as an immutable, so every deployment of
+    /// this build has the same runtime bytecode (DEPLOYMENT_STALE checks it).
+    // slither-disable-next-line immutable-states
+    uint32 public revocationDelay;
 
     mapping(address issuer => Issuer) public issuers;
     mapping(bytes32 recordId => Record) private _records;
@@ -52,6 +93,7 @@ contract AuditReportRegistry {
     mapping(bytes32 familyId => bytes32 recordId) public latestOf;
     /// @notice The distribution copy of an ORIGINAL, or zero.
     mapping(bytes32 originalId => bytes32 copyId) public copyOf;
+    mapping(bytes32 recordId => Revocation) private _revocations;
 
     event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -65,7 +107,10 @@ contract AuditReportRegistry {
         bytes32 parentId,
         address issuer
     );
-    event Revoked(bytes32 indexed recordId, uint8 reasonCode, address issuer);
+    event RevocationRequested(
+        bytes32 indexed recordId, uint8 reasonCode, uint40 effectiveAt, address issuer
+    );
+    event RevocationCancelled(bytes32 indexed recordId, uint8 reasonCode, address by);
 
     error NotOwner();
     error NotPendingOwner();
@@ -81,17 +126,26 @@ contract AuditReportRegistry {
     error UnknownRecord(bytes32 recordId);
     error NotOriginal(bytes32 recordId);
     error CopyExists(bytes32 originalId, bytes32 copyId);
-    error RecordRevoked(bytes32 recordId);
-    error AlreadyRevoked(bytes32 recordId);
+    error RevocationExists(bytes32 recordId, uint40 effectiveAt);
+    error NoRevocation(bytes32 recordId);
+    error RevocationInEffect(bytes32 recordId, uint40 effectiveAt);
+    error DelayTooLong(uint32 given, uint32 max);
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
         _;
     }
 
-    constructor(address initialOwner) {
+    /// @param revocationDelay_ Seconds a revocation waits before it takes
+    /// effect. Zero makes revocation immediate, for local test chains only;
+    /// scripts/deploy-registry.ts refuses less than an hour anywhere else.
+    constructor(address initialOwner, uint32 revocationDelay_) {
         if (initialOwner == address(0)) revert ZeroValue();
+        if (revocationDelay_ > MAX_REVOCATION_DELAY) {
+            revert DelayTooLong(revocationDelay_, MAX_REVOCATION_DELAY);
+        }
         owner = initialOwner;
+        revocationDelay = revocationDelay_;
         emit OwnershipTransferred(address(0), initialOwner);
     }
 
@@ -166,9 +220,7 @@ contract AuditReportRegistry {
             // forge-lint: disable-next-line(unsafe-typecast)
             blockNumber: uint40(block.number),
             version: version,
-            kind: Kind.ORIGINAL,
-            revoked: false,
-            revokeReason: 0
+            kind: Kind.ORIGINAL
         });
         recordOfDoc[docHash] = recordId;
         latestOf[familyId] = recordId;
@@ -188,7 +240,9 @@ contract AuditReportRegistry {
         if (original.docHash == bytes32(0)) revert UnknownRecord(originalId);
         if (original.kind != Kind.ORIGINAL) revert NotOriginal(originalId);
         if (familyOrg(original.familyId) != orgId) revert NotFamilyIssuer(original.familyId);
-        if (original.revoked) revert RecordRevoked(originalId);
+        // A copy of an original being withdrawn, or withdrawn, is never anchored.
+        Revocation memory revocation = _revocations[originalId];
+        if (revocation.reason != 0) revert RevocationExists(originalId, revocation.effectiveAt);
         bytes32 existing = copyOf[originalId];
         if (existing != bytes32(0)) revert CopyExists(originalId, existing);
         _requireUnusedDoc(docHash);
@@ -204,9 +258,7 @@ contract AuditReportRegistry {
             // forge-lint: disable-next-line(unsafe-typecast)
             blockNumber: uint40(block.number),
             version: original.version,
-            kind: Kind.DISTRIBUTION_COPY,
-            revoked: false,
-            revokeReason: 0
+            kind: Kind.DISTRIBUTION_COPY
         });
         recordOfDoc[docHash] = recordId;
         copyOf[originalId] = recordId;
@@ -221,17 +273,39 @@ contract AuditReportRegistry {
         );
     }
 
-    /// @notice Withdraws a record. Terminal: nothing un-revokes it.
-    function revoke(bytes32 recordId, uint8 reasonCode) external {
+    /// @notice Asks to withdraw a record. It takes effect `revocationDelay`
+    /// seconds from now; until then the owner may cancel it. Once in effect it
+    /// is terminal. One revocation per record: a second ask reverts, pending or
+    /// not, so a stolen key cannot replace a genuine reason with its own.
+    function revoke(bytes32 recordId, uint8 reasonCode) external returns (uint40 effectiveAt) {
         bytes32 orgId = _activeOrgOf(msg.sender);
         if (reasonCode == 0) revert ZeroValue();
         Record storage record = _records[recordId];
         if (record.docHash == bytes32(0)) revert UnknownRecord(recordId);
         if (familyOrg(record.familyId) != orgId) revert NotFamilyIssuer(record.familyId);
-        if (record.revoked) revert AlreadyRevoked(recordId);
-        record.revoked = true;
-        record.revokeReason = reasonCode;
-        emit Revoked(recordId, reasonCode, msg.sender);
+        Revocation memory existing = _revocations[recordId];
+        if (existing.reason != 0) revert RevocationExists(recordId, existing.effectiveAt);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        effectiveAt = uint40(block.timestamp) + revocationDelay;
+        _revocations[recordId] = Revocation({reason: reasonCode, effectiveAt: effectiveAt});
+        emit RevocationRequested(recordId, reasonCode, effectiveAt, msg.sender);
+    }
+
+    /// @notice Cancels a revocation that has not yet taken effect. The owner's
+    /// act only (the Safe, #67), never an issuer key's, so a stolen issuer key
+    /// can neither revoke at once nor cancel a genuine revocation. The record
+    /// may be revoked again later.
+    // slither-disable-next-line timestamp
+    function cancelRevocation(bytes32 recordId) external onlyOwner {
+        Revocation memory revocation = _revocations[recordId];
+        if (revocation.reason == 0) revert NoRevocation(recordId);
+        // A validator can shift a block's time by seconds; the delay is hours.
+        // forge-lint: disable-next-line(block-timestamp)
+        if (block.timestamp >= revocation.effectiveAt) {
+            revert RevocationInEffect(recordId, revocation.effectiveAt);
+        }
+        delete _revocations[recordId];
+        emit RevocationCancelled(recordId, revocation.reason, msg.sender);
     }
 
     // ── Reads ──
@@ -247,9 +321,28 @@ contract AuditReportRegistry {
         return issuers[_records[latest].issuer].orgId;
     }
 
-    /// @notice The record, or an all-zero record for an unknown id.
-    function getRecord(bytes32 recordId) external view returns (Record memory) {
-        return _records[recordId];
+    /// @notice The record and its revocation as they stand at this block, or
+    /// an all-zero view for an unknown id. `revoked` is computed from the
+    /// block's time, so a revocation takes effect without a second transaction.
+    // slither-disable-next-line timestamp
+    function getRecord(bytes32 recordId) external view returns (RecordView memory view_) {
+        Record storage record = _records[recordId];
+        Revocation memory revocation = _revocations[recordId];
+        view_ = RecordView({
+            familyId: record.familyId,
+            docHash: record.docHash,
+            manifestHash: record.manifestHash,
+            opinionCommitment: record.opinionCommitment,
+            parentId: record.parentId,
+            issuer: record.issuer,
+            blockNumber: record.blockNumber,
+            version: record.version,
+            kind: record.kind,
+            // forge-lint: disable-next-line(block-timestamp)
+            revoked: revocation.reason != 0 && block.timestamp >= revocation.effectiveAt,
+            revokeReason: revocation.reason,
+            revokeEffectiveAt: revocation.effectiveAt
+        });
     }
 
     /// @notice Deterministic record id: the chain and this contract are part of

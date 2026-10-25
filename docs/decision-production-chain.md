@@ -39,7 +39,10 @@ Anyone can run it again; it sends nothing and needs no key.
 - **ETH was EUR 2,080.57** (CoinGecko).
 
 One report is an anchor (190,407 gas) and its stamped copy (224,853 gas). A
-revocation is 42,294 gas.
+revocation is 42,294 gas. These were the figures on the day of measurement.
+Since delayed revocation (#95), an anchor and its copy take 416,675 gas
+together (0.3% more) and a revocation takes 62,334: it writes a fresh storage
+slot. Rerun the script for current figures.
 
 | Chain | Base fee, median / p90 (gwei) | L1 data fee, anchor + copy | One report, median | One report, p90 | `finalized` trails the latest block |
 | --- | --- | --- | --- | --- | --- |

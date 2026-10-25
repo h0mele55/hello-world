@@ -21,6 +21,8 @@ import { registryAbi } from '@/lib/chain/registry-artifact';
 import { startAnvil, type AnvilHandle } from './anvil';
 
 const h = (label: string): Hex => keccak256(toBytes(label));
+/** The registry's revocation delay in these tests (#95), passed with Anvil's clock. */
+const DELAY = 600;
 
 let anvil: AnvilHandle;
 let publicClient: PublicClient;
@@ -61,6 +63,7 @@ beforeAll(async () => {
     publicClient,
     walletClient: createWalletClient({ chain: foundry, transport, account: deployer }),
     issuer: { address: issuer, orgId: orgIdFor('Ledger Audit Ltd') },
+    revocationDelaySeconds: DELAY,
   });
   adapter = adapterFor(issuerAddress);
 }, 30_000);
@@ -150,10 +153,23 @@ describe('AuditReportRegistry through the chain adapter, on Anvil', () => {
 
     const revoked = await adapter.revoke(copy.recordId, 1);
     await mine();
-    await adapter.waitFinal(revoked.txHash, { pollMs: 20, timeoutMs: 5_000 });
-    expect(await adapter.getRecord(copy.recordId)).toMatchObject({ revoked: true, revokeReason: 1 });
+    const final = await adapter.waitFinal(revoked.txHash, { pollMs: 20, timeoutMs: 5_000 });
+    const asked = Number((await publicClient.getBlock({ blockNumber: final.blockNumber })).timestamp);
+    // Asked for, final, and waiting out the delay: not yet revoked.
+    expect(await adapter.getRecord(copy.recordId)).toMatchObject({ revoked: false, revokeReason: 1, revokeEffectiveAt: asked + DELAY });
+    await expect(adapter.revoke(copy.recordId, 2)).rejects.toMatchObject({ errorName: 'RevocationExists' });
 
-    await expect(adapter.revoke(copy.recordId, 2)).rejects.toMatchObject({ errorName: 'AlreadyRevoked' });
+    await testClient.increaseTime({ seconds: DELAY });
+    await mine();
+    const after = (await publicClient.getBlock({ blockTag: 'latest' })).number;
+    expect(await adapter.getRecord(copy.recordId)).toMatchObject({ revoked: true, revokeReason: 1, revokeEffectiveAt: asked + DELAY });
+    // Read at a block before its time, it is still pending: whether it is in effect depends on the block read.
+    expect(await adapter.getRecord(copy.recordId, { blockNumber: final.blockNumber })).toMatchObject({ revoked: false, revokeReason: 1 });
+    expect(await adapter.getRecord(copy.recordId, { blockNumber: after })).toMatchObject({ revoked: true });
+  });
+
+  it('reads the deployment\'s revocation delay', async () => {
+    expect(await publicClient.readContract({ address: deployment.address, abi: registryAbi, functionName: 'revocationDelay' })).toBe(DELAY);
   });
 
   it('refuses a key that is not an issuer', async () => {

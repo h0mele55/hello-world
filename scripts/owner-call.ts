@@ -1,18 +1,22 @@
 /**
- * The registry owner's acts: registering and retiring issuer keys, and moving
- * ownership to a Safe (docs/runbooks/key-rotation.md, #67, #68).
+ * The registry owner's acts: registering and retiring issuer keys, cancelling
+ * a revocation before it takes effect, and moving ownership to a Safe
+ * (docs/runbooks/key-rotation.md, docs/runbooks/stolen-issuer-key.md, #67,
+ * #68, #95).
  *
- *   npx tsx scripts/owner-call.ts <network> add-issuer <address>      setIssuer(address, firm, true)
- *   npx tsx scripts/owner-call.ts <network> remove-issuer <address>   setIssuer(address, firm, false)
- *   npx tsx scripts/owner-call.ts <network> transfer-owner <safe>     transferOwnership(safe), by the current owner
- *   npx tsx scripts/owner-call.ts <network> accept-owner              acceptOwnership(), by the new owner
+ *   npx tsx scripts/owner-call.ts <network> add-issuer <address>          setIssuer(address, firm, true)
+ *   npx tsx scripts/owner-call.ts <network> remove-issuer <address>       setIssuer(address, firm, false)
+ *   npx tsx scripts/owner-call.ts <network> cancel-revocation <recordId>  cancelRevocation(recordId), before it takes effect
+ *   npx tsx scripts/owner-call.ts <network> transfer-owner <safe>         transferOwnership(safe), by the current owner
+ *   npx tsx scripts/owner-call.ts <network> accept-owner                  acceptOwnership(), by the new owner
  *
  * Options:
  *   --deployment <file>  instead of deployments/<network>.json
  *   --send               send it with OWNER_PRIVATE_KEY. Only for the issuer
- *                        calls, and only while the owner is a single key
- *                        (Anvil, a testnet rehearsal). Moving ownership is
- *                        never sent from here: the owner executes it.
+ *                        calls and a cancellation, and only while the owner is
+ *                        a single key (Anvil, a testnet rehearsal). Moving
+ *                        ownership is never sent from here: the owner
+ *                        executes it.
  *
  * Without --send it sends nothing. It checks the chain and the contract
  * against the deployment record, simulates the call from the account that
@@ -42,13 +46,15 @@ function refuse(message: string): never {
 
 const IssuerRecord = z.object({ issuer: z.object({ orgId: z.string().regex(/^0x[0-9a-fA-F]{64}$/), orgName: z.string().min(1) }) });
 
-type Action = 'add-issuer' | 'remove-issuer' | 'transfer-owner' | 'accept-owner';
-const ACTIONS: readonly Action[] = ['add-issuer', 'remove-issuer', 'transfer-owner', 'accept-owner'];
+type Action = 'add-issuer' | 'remove-issuer' | 'cancel-revocation' | 'transfer-owner' | 'accept-owner';
+const ACTIONS: readonly Action[] = ['add-issuer', 'remove-issuer', 'cancel-revocation', 'transfer-owner', 'accept-owner'];
+/** A cancellation that lands after the revocation takes effect reverts; below this, say so. */
+const CANCEL_MARGIN_SECONDS = 15 * 60;
 
 async function main() {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: { deployment: { type: 'string' }, send: { type: 'boolean', default: false } } });
   const [network, action, argument] = positionals;
-  if (!isNetworkName(network) || !ACTIONS.includes(action as Action)) refuse(`usage: owner-call <${Object.keys(NETWORKS).join('|')}> <${ACTIONS.join('|')}> [address] [--deployment <file>] [--send]`);
+  if (!isNetworkName(network) || !ACTIONS.includes(action as Action)) refuse(`usage: owner-call <${Object.keys(NETWORKS).join('|')}> <${ACTIONS.join('|')}> [address | record id] [--deployment <file>] [--send]`);
   const act = action as Action;
   if (values.send && (act === 'transfer-owner' || act === 'accept-owner')) refuse('moving ownership is the owner’s own act: run without --send and execute the printed transaction');
 
@@ -70,7 +76,11 @@ async function main() {
     publicClient.readContract({ ...registry, functionName: 'pendingOwner' }),
   ]);
 
-  let call: { functionName: 'setIssuer'; args: readonly [Address, Hex, boolean] } | { functionName: 'transferOwnership'; args: readonly [Address] } | { functionName: 'acceptOwnership'; args: readonly [] };
+  let call:
+    | { functionName: 'setIssuer'; args: readonly [Address, Hex, boolean] }
+    | { functionName: 'cancelRevocation'; args: readonly [Hex] }
+    | { functionName: 'transferOwnership'; args: readonly [Address] }
+    | { functionName: 'acceptOwnership'; args: readonly [] };
   let from: Address = owner;
   let description: string;
   if (act === 'add-issuer' || act === 'remove-issuer') {
@@ -83,6 +93,23 @@ async function main() {
     if ((act === 'add-issuer') === active) console.error(JSON.stringify({ level: 'warn', message: `${key} is already ${active ? 'active' : 'inactive'}; the call changes nothing` }));
     call = { functionName: 'setIssuer', args: [key, orgId, act === 'add-issuer'] };
     description = act === 'add-issuer' ? `register ${key} as an issuer key of ${firm.data.issuer.orgName}` : `retire ${key}: it can no longer write, and what it anchored still verifies`;
+  } else if (act === 'cancel-revocation') {
+    if (!argument || !isHex(argument) || argument.length !== 66) refuse('give the record id (32 bytes, 0x-prefixed hex)');
+    const recordId = argument.toLowerCase() as Hex;
+    const [record, latest] = await Promise.all([
+      publicClient.readContract({ ...registry, functionName: 'getRecord', args: [recordId] }),
+      publicClient.getBlock({ blockTag: 'latest' }),
+    ]);
+    if (record.docHash === ZERO_ORG) refuse(`${recordId} is not a record of this registry`);
+    if (record.revokeReason === 0) refuse(`${recordId} has no revocation to cancel`);
+    if (record.revoked) refuse(`the revocation of ${recordId} is already in effect, which is terminal: it cannot be cancelled`);
+    const family = await publicClient.readContract({ ...registry, functionName: 'familyOrg', args: [record.familyId] });
+    if (family.toLowerCase() !== orgId) console.error(JSON.stringify({ level: 'warn', message: `${recordId} belongs to another firm (${family}), not ${firm.data.issuer.orgName}` }));
+    const effectiveAt = new Date(record.revokeEffectiveAt * 1000).toISOString();
+    const left = record.revokeEffectiveAt - Number(latest.timestamp);
+    if (left < CANCEL_MARGIN_SECONDS) console.error(JSON.stringify({ level: 'warn', message: `the revocation takes effect in ${Math.max(left, 0)} s, at ${effectiveAt}; a cancellation mined after that reverts` }));
+    call = { functionName: 'cancelRevocation', args: [recordId] };
+    description = `cancel the pending revocation of record ${recordId} (reason code ${record.revokeReason}), which would take effect at ${effectiveAt}`;
   } else if (act === 'transfer-owner') {
     if (!argument || !isAddress(argument) || argument === ZERO) refuse('give the Safe’s address');
     const safe = getAddress(argument);

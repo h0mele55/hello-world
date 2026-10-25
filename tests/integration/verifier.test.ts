@@ -5,6 +5,7 @@ import { createPublicClient, createTestClient, createWalletClient, getAddress, h
 import { foundry } from 'viem/chains';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { orgIdFor } from '@/lib/chain/deploy';
+import { registryAbi } from '@/lib/chain/registry-artifact';
 import { stampPdf } from '@/lib/stamp';
 import { CannotVerify, openRegistryView, verifyFile, type Verdict, type VerifierConfig } from '@/lib/verify-core';
 import { startAnvil, type AnvilHandle } from './anvil';
@@ -102,6 +103,52 @@ describe('verifying real files against a real registry', () => {
     await registry.publicClient.waitForTransactionReceipt({ hash: revoked.txHash });
     await finalise(registry);
     expect(await verify(v2Bytes)).toMatchObject({ kind: 'REVOKED', revoked: { recordId: v2.recordId, revokeReason: 2 } });
+  });
+});
+
+describe('a revocation waiting out the registry\'s delay (#95)', () => {
+  const DELAY = 3600;
+
+  it('is REVOCATION_PENDING, never authentic, until it is in effect at a finalized block, and the owner can cancel it before then', async () => {
+    const delayed = await deployOn(anvil.url, { revocationDelaySeconds: DELAY });
+    const cfg: VerifierConfig = { ...config, registry: delayed.deployment.address };
+    const check = (bytes: Uint8Array) => verify(bytes, cfg);
+    const bytes = fixture('en-unmodified.pdf');
+    const original = await anchorOriginal(delayed, bytes, `0x${'d1'.repeat(32)}` as Hex);
+    const copy = await stampPdf(bytes, stampFor(delayed, original));
+    await anchorCopy(delayed, original, copy);
+    await finalise(delayed);
+
+    const asked = await delayed.adapter.revoke(original.recordId, 2);
+    await delayed.publicClient.waitForTransactionReceipt({ hash: asked.txHash });
+    await finalise(delayed);
+    const pending = await check(bytes);
+    expect(pending).toMatchObject({ kind: 'REVOCATION_PENDING', matched: { recordId: original.recordId }, pending: { recordId: original.recordId, revoked: false, revokeReason: 2 } });
+    if (pending.kind !== 'REVOCATION_PENDING') throw new Error(pending.kind);
+    expect(await check(copy)).toMatchObject({ kind: 'REVOCATION_PENDING', matched: { kind: 'DISTRIBUTION_COPY' }, pending: { recordId: original.recordId } });
+
+    // The owner (the deployer here, the Safe in production) cancels: the file stands again.
+    const [owner] = await createWalletClient({ chain: foundry, transport: http(anvil.url) }).getAddresses();
+    const cancel = await createWalletClient({ chain: foundry, transport: http(anvil.url), account: getAddress(owner) }).writeContract({
+      address: delayed.deployment.address,
+      abi: registryAbi,
+      functionName: 'cancelRevocation',
+      args: [original.recordId],
+    });
+    await delayed.publicClient.waitForTransactionReceipt({ hash: cancel });
+    await finalise(delayed);
+    expect(await check(bytes)).toMatchObject({ kind: 'AUTHENTIC_LATEST' });
+
+    // Asked again and left to run: pending until a finalized block's time reaches it.
+    const again = await delayed.adapter.revoke(original.recordId, 1);
+    await delayed.publicClient.waitForTransactionReceipt({ hash: again.txHash });
+    await finalise(delayed);
+    await delayed.testClient.increaseTime({ seconds: DELAY });
+    await delayed.testClient.mine({ blocks: 1 });
+    expect(await check(copy)).toMatchObject({ kind: 'REVOCATION_PENDING' });
+    await finalise(delayed);
+    expect(await check(copy)).toMatchObject({ kind: 'REVOKED', revoked: { recordId: original.recordId, revokeReason: 1 } });
+    expect(await check(bytes)).toMatchObject({ kind: 'REVOKED' });
   });
 });
 

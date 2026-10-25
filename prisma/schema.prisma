@@ -42,7 +42,7 @@ enum VersionStatus {
   ANCHORED
   /// The stamped copy's anchor is final too (Phase 3b).
   COMPLETE
-  /// Withdrawn: the original's record is revoked on chain, in a final block.
+  /// Withdrawn: the original's revocation is in effect at a final block.
   REVOKED
 }
 
@@ -86,12 +86,17 @@ enum RevocationStatus {
   REQUESTED
   /// Approved: its REVOKE write is in the journal.
   APPROVED
-  /// The revocation is on chain, in a final block.
+  /// Its request is on chain, in a final block, and waits out the registry's
+  /// delay (#95) until `effectiveAt`. The registry's owner may still cancel it.
+  SCHEDULED
+  /// In effect at a final block: terminal.
   REVOKED
   /// An approver turned it down.
   REJECTED
   /// The admin who asked took it back before it was approved.
   WITHDRAWN
+  /// The registry's owner cancelled it on chain before it took effect.
+  CANCELLED
 }
 
 enum NotificationStatus {
@@ -259,7 +264,7 @@ model ReportVersion {
   certificateStoredFileId String?        @unique
   certificateStoredFile   StoredFile?    @relation("certificateFile", fields: [certificateStoredFileId], references: [id], onDelete: Restrict)
   completedAt             DateTime?
-  /// Set with REVOKED, when the revocation's block is final.
+  /// Set with REVOKED: the time the revocation took effect.
   revokedAt               DateTime?
   chainWrites             ChainWrite[]
   revocations             Revocation[]
@@ -274,7 +279,9 @@ model ReportVersion {
 
 /// The journal of every chain write. A row exists before anything is sent.
 /// Partial unique indexes in the migration allow at most one live (neither
-/// FAILED nor SIMULATED) row per version and kind, and one row per nonce of an
+/// FAILED nor SIMULATED) ANCHOR and ANCHOR_COPY row per version, one REVOKE row
+/// in flight per version (a revocation the registry's owner cancelled leaves
+/// its REVOKE FINAL, and the firm may ask again), and one row per nonce of an
 /// issuer key, so two workers can never journal the same nonce.
 model ChainWrite {
   id                   String           @id @default(cuid())
@@ -394,10 +401,13 @@ model Revocation {
   approvedById    String?
   approvedBy      User?            @relation("revocationApprovedBy", fields: [approvedById], references: [id])
   approvedAt      DateTime?
-  /// Who rejected or withdrew it, and when.
+  /// Who rejected or withdrew it, and when. A CANCELLED one has a time and no person: the owner cancelled it on chain.
   closedById      String?
   closedBy        User?            @relation("revocationClosedBy", fields: [closedById], references: [id])
   closedAt        DateTime?
+  /// When the request on chain takes effect, unless the owner cancels it first. Set with SCHEDULED.
+  effectiveAt     DateTime?
+  /// When it took effect: equal to effectiveAt. Set with REVOKED.
   revokedAt       DateTime?
 
   @@index([reportVersionId])

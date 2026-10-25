@@ -114,6 +114,8 @@ export interface TimelineVersion {
   approvedAt: string | null;
   completedAt: string | null;
   revokedAt: string | null;
+  /** When a scheduled revocation takes effect, unless the registry's owner cancels it first. */
+  revocationEffectiveAt: string | null;
   /** The chain the original's final anchor is on, for explorer links. */
   chainId: number | null;
   recordId: string | null;
@@ -154,6 +156,7 @@ export async function getEngagementTimeline(user: SessionUser, engagementId: str
           copyTxHash: true,
           copyBlock: true,
           chainWrites: { where: { kind: 'ANCHOR', status: 'FINAL' }, select: { chainId: true }, take: 1 },
+          revocations: { where: { status: 'SCHEDULED' }, select: { effectiveAt: true }, take: 1 },
         },
       },
     },
@@ -171,6 +174,7 @@ export async function getEngagementTimeline(user: SessionUser, engagementId: str
     approvedAt: v.approvedAt?.toISOString() ?? null,
     completedAt: v.completedAt?.toISOString() ?? null,
     revokedAt: v.revokedAt?.toISOString() ?? null,
+    revocationEffectiveAt: v.revocations[0]?.effectiveAt?.toISOString() ?? null,
     chainId: v.chainWrites[0]?.chainId ?? null,
     recordId: v.recordId,
     anchorTxHash: v.anchorTxHash,

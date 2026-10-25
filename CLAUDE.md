@@ -29,7 +29,10 @@ chain check and backups (5d), and recipients with the two-person exit gate
 (5e). `docs/operations.md` says what runs besides the app. Phase 6 is under
 way: `docs/threat-model.md` names each threat with the test that proves its
 mitigation, or the issue that tracks it, and `docs/runbooks/` says what to do
-when a key, an owner, an endpoint or the database must change.
+when a key, an owner, an endpoint or the database must change. The issuer key
+can live in Cloud KMS (6b), the production candidates are measured for the
+owner's choice (6c, `docs/decision-production-chain.md`), and revocation is
+delayed so the owner can cancel a stolen key's (6d, #95).
 
 ## Rules every phase keeps
 
@@ -76,9 +79,9 @@ node scripts/sync-inflect-ui.mjs --check   # re-derive the vendored tree from up
 (cd contracts && forge fmt --check && forge lint --deny notes)
 npm run contracts:artifact     # regenerate src/lib/chain/registry-artifact.ts after a contract change
 npm run test:integration       # chain adapter and verifier against throwaway Anvil nodes
-npx tsx scripts/deploy-registry.ts <network>             # deploy (sepolia, local, base-sepolia, …); production networks refused until #63
+npx tsx scripts/deploy-registry.ts <network>             # deploy (sepolia, local, base-sepolia, …); production networks refused until #63; REVOCATION_DELAY_HOURS (default 24, local 0)
 npx tsx scripts/measure-chain-costs.ts                   # today's cost per report and finality lag on the production candidates
-npx tsx scripts/owner-call.ts <sepolia|local> <add-issuer|remove-issuer|transfer-owner|accept-owner> [address]   # prints the owner's transaction; sends nothing
+npx tsx scripts/owner-call.ts <sepolia|local> <add-issuer|remove-issuer|cancel-revocation|transfer-owner|accept-owner> [address|recordId]   # prints the owner's transaction; sends nothing
 npx tsx scripts/kms-address.ts <KMS key version name>     # the address of a Cloud KMS issuer key, to register it
 
 # Database (Postgres 16: `docker compose up -d`, or any local server; Prisma 7 does not read .env)
@@ -115,6 +118,16 @@ Locally, Playwright needs the browser of its own version:
   (`DEPLOYMENT_STALE`). After editing the contract, run `npm run
   contracts:artifact` and commit the regenerated artifact; CI fails if the two
   disagree.
+- **Revocation is delayed (#95).** An issuer key's `revoke` only asks: the
+  revocation takes effect `revocationDelay` seconds later (set at deployment,
+  in storage so every deployment has the same bytecode; at most 30 days, and
+  the deploy script refuses less than an hour off a local chain). Until then
+  only the owner's `cancelRevocation` undoes it, never an issuer key; once in
+  effect it is terminal. `getRecord` computes `revoked` from the block's time,
+  so whether a record is revoked depends on the block read: decide it at the
+  finalized block (rule 2). A record holds one revocation, pending or in
+  effect; `revokeReason` is non-zero for both, and `revokeEffectiveAt` says
+  when.
 - **Gas ceilings are tests.** `contracts/test/AuditReportRegistry.gas.t.sol`
   caps each write, and `contracts/snapshots/` pins the exact figures. A change
   that moves them updates the snapshot in the same pull request
@@ -235,20 +248,28 @@ to one inflect-compliance commit.
   transaction used it**; otherwise clear the nonce. A partial unique index
   allows one row per (chain, issuer, nonce).
 - **Do not add a path to APPROVED, ANCHORED, REVOKED or FINAL** other than
-  `approveVersion`, `approveRevocation` and the worker's transitions. CHECK
-  constraints hold four-eyes and "approved means an approver is recorded"; a
-  partial unique index allows one live write per version and kind.
+  `approveVersion`, `approveRevocation` and the worker's transitions; nor to
+  SCHEDULED or CANCELLED, which only the worker sets, from the chain. CHECK
+  constraints hold four-eyes and "approved means an approver is recorded";
+  partial unique indexes allow one live ANCHOR and ANCHOR_COPY per version and
+  one REVOKE in flight per version (a cancelled revocation leaves its REVOKE
+  FINAL, and the firm may ask again).
 - **Revocation** (`src/lib/anchoring/revocation.ts`): an ADMIN asks, typing
   the engagement's reference, with a reason and a sealed note; an APPROVER who
   is someone else approves, which writes the REVOKE row in the same
-  transaction. The worker revokes the original's record with the reason's
-  number (`REVOCATION_CODES`, fixed: verifiers read them from records already
-  on chain) and the version is REVOKED only once that block is final. A
-  failed or simulated REVOKE returns the request for approval; a record
-  already revoked with the same reason is linked, never revoked twice, and
-  one revoked with another reason is a named refusal for a person. Revoking
-  the original is enough: the verifier calls a copy revoked when its original
-  is.
+  transaction. The worker asks the registry to revoke the original's record
+  with the reason's number (`REVOCATION_CODES`, fixed: verifiers read them from
+  records already on chain). Once that block is final the revocation is
+  SCHEDULED with its `effectiveAt`; each pass then reads every scheduled one at
+  the finalized block (`settleScheduledRevocations`): in effect, the version
+  and the revocation are REVOKED (`revokedAt` is the time it took effect);
+  gone, the owner cancelled it, the revocation is CANCELLED and the version
+  stands. A failed or simulated REVOKE returns the request for approval; a
+  record whose revocation, pending or in effect, has the same reason is
+  linked, never asked twice, and one with another reason is a named refusal
+  for a person. Revoking the original is enough: the verifier calls a copy
+  revoked (or being withdrawn) when its original is. No copy is stamped or
+  certified while a revocation is open.
 - **The audit log is append-only**: write through `appendAuditEvent` inside
   the transaction that makes the change, with ids, hashes and codes only.
   `verifyAuditChain` re-derives every hash.
@@ -279,8 +300,10 @@ to one inflect-compliance commit.
   anchor-only version whichever key anchored it: a certificate signs nothing.
 - **The owner's acts go through `scripts/owner-call.ts`**, which checks the
   chain and the registry, simulates, and prints the transaction for the owner
-  (the deployer key, later a Safe) to execute. It sends only an issuer change,
-  only with `--send` and `OWNER_PRIVATE_KEY`, and never an ownership move.
+  (the deployer key, later a Safe) to execute. It sends only an issuer change
+  or a cancellation, only with `--send` and `OWNER_PRIVATE_KEY`, and never an
+  ownership move. A revocation the firm did not ask for is
+  `docs/runbooks/stolen-issuer-key.md`.
 
 ## The verifier
 
@@ -303,6 +326,10 @@ to one inflect-compliance commit.
 - **Wording**: only AUTHENTIC_* verdicts say authentic or genuine, in either
   language, and every altered verdict says the file is not the registered
   file (`tests/unit/verify-wording.test.ts`).
+- **A pending revocation is never authentic.** An exact match whose record, or
+  whose original, has a revocation waiting out the registry's delay is
+  REVOCATION_PENDING, with the time it takes effect; one in effect is REVOKED,
+  which wins.
 - **Three front ends, one core.** `/verify`, `dist/verifier.html` and the CLI
   (`standalone/`, built by `scripts/build-verifier.ts`) all call `verifyFile`.
   The HTML file inlines everything, pdf.js's worker included, writes only text

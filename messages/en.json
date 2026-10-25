@@ -404,7 +404,7 @@
   },
   "verify": {
     "title": "Verify an audit report",
-    "intro": "Choose or drop a PDF. It is checked here, in your browser, and never uploaded: the page computes the file's fingerprint and reads the public registry directly.",
+    "intro": "Choose or drop a PDF. It is checked here, in your browser, and never uploaded: the page computes the file's fingerprint and reads the public registry directly. For a registered report it also asks the issuer's server for its Bitcoin timestamp, by the report's public manifest fingerprint.",
     "dropTitle": "Drop a PDF here",
     "dropOr": "or",
     "choose": "Choose a file",
@@ -503,6 +503,33 @@
       "latestLink": "Latest version of this report",
       "asOf": "Read at finalized block {block}.",
       "noExplorer": "local chain, no block explorer"
+    },
+    "bitcoin": {
+      "title": "Independent timestamp on Bitcoin",
+      "checking": "Looking for this report's Bitcoin timestamp…",
+      "CONFIRMED": "This report's manifest existed by {when}: the issuer's OpenTimestamps proof reaches Bitcoin block {height}, read from two block explorers that agree.",
+      "PENDING": "The issuer has submitted this report to OpenTimestamps, but Bitcoin has not confirmed it yet. Try again in a few hours.",
+      "NONE": "The issuer has no Bitcoin timestamp for this report.",
+      "UNAVAILABLE": "The Bitcoin timestamp could not be checked right now: {reason}",
+      "INVALID": "The issuer's Bitcoin timestamp for this report does not hold: {reason}",
+      "apart": "This timestamp is separate from the verdict above and does not change it. It shows only when the report's manifest existed by.",
+      "block": "Bitcoin block",
+      "status": {
+        "CONFIRMED": "On Bitcoin",
+        "PENDING": "Waiting for Bitcoin",
+        "NONE": "None",
+        "UNAVAILABLE": "Not checked",
+        "INVALID": "Does not hold"
+      },
+      "reasons": {
+        "ISSUER_UNREACHABLE": "the issuer's server did not answer.",
+        "EXPLORERS_UNREADABLE": "a block explorer could not be read.",
+        "EXPLORERS_DISAGREE": "the two block explorers gave different blocks.",
+        "BAD_HEADER": "the block explorers gave a block without Bitcoin's proof of work.",
+        "NOT_THIS_MANIFEST": "the proof is for another report.",
+        "PROOF_UNREADABLE": "the proof could not be read.",
+        "NOT_IN_BLOCK": "the proof does not lead to the block it names."
+      }
     }
   },
   "latest": {

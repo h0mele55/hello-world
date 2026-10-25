@@ -30,3 +30,14 @@ export async function readOtsProof(user: SessionUser, versionId: string): Promis
   if (!version?.otsProof) throw new AnchoringError('NOT_FOUND');
   return { bytes: new Uint8Array(version.otsProof.proof), version: version.version };
 }
+
+/**
+ * The proof of a manifest hash, for anyone (#66): the verifier asks for it by
+ * the hash, which is public on chain, and the proof holds nothing else that
+ * is not. Null when there is none.
+ */
+export async function publicOtsProof(manifestHash: string): Promise<Uint8Array<ArrayBuffer> | null> {
+  if (!/^0x[0-9a-f]{64}$/.test(manifestHash)) return null;
+  const row = await db().otsProof.findUnique({ where: { digest: manifestHash }, select: { proof: true } });
+  return row ? new Uint8Array(row.proof) : null;
+}

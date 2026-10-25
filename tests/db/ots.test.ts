@@ -4,6 +4,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionUser } from '@/auth';
 import { PrismaClient } from '@/generated/prisma/client';
+import { GET as publicProof } from '@/app/ots/[manifestHash]/route';
 import { verifyAuditChain } from '@/lib/audit';
 import { AnchoringError } from '@/lib/anchoring/errors';
 import { BitcoinError, type BitcoinTime } from '@/lib/ots/bitcoin';
@@ -255,5 +256,24 @@ describe('the console', () => {
     const outsider: SessionUser = { ...preparer, id: 'outsider', orgId: other.id };
     await expect(getOtsProof(outsider, final.id)).rejects.toMatchObject({ code: 'NOT_FOUND' });
     await expect(readOtsProof(outsider, final.id)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+  });
+});
+
+describe('the public proof route', () => {
+  const call = (hash: string) => publicProof(new Request(`http://app.test/ots/${hash}`), { params: Promise.resolve({ manifestHash: hash }) });
+
+  it('serves a report’s proof by its manifest hash to any origin, and nothing else', async () => {
+    const final = await version('en-unmodified.pdf', true);
+    expect((await call(final.manifestHash!)).status).toBe(404);
+
+    await pass({ calendar: calendars({ [ALICE]: 'pending', [BOB]: 'pending' }).deps });
+    const stored = await prisma.otsProof.findUniqueOrThrow({ where: { reportVersionId: final.id } });
+    const response = await call(`0x${final.manifestHash!.slice(2).toUpperCase()}`);
+    expect(response.status).toBe(200);
+    expect(response.headers.get('access-control-allow-origin')).toBe('*');
+    expect(response.headers.get('content-type')).toBe('application/octet-stream');
+    expect(Buffer.from(await response.arrayBuffer()).equals(Buffer.from(stored.proof))).toBe(true);
+
+    for (const bad of ['not-a-hash', final.manifestHash!.slice(0, 40), `${final.manifestHash}00`]) expect((await call(bad)).status, bad).toBe(404);
   });
 });

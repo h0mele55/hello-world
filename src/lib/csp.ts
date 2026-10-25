@@ -24,11 +24,12 @@ function policy({ nonce, connect, worker, dev }: { nonce: string; connect: reado
 
 /**
  * The public verifier's pages (Phase 4 hardening): the page may connect only
- * to its own origin and the two RPC endpoints, and pdf.js's worker comes from
- * this origin.
+ * to its own origin (for a report's OpenTimestamps proof), the two RPC
+ * endpoints and the two Bitcoin explorers (#66), and pdf.js's worker comes
+ * from this origin.
  */
-export function verifierCsp({ nonce, rpcOrigins, dev = false }: { nonce: string; rpcOrigins: readonly string[]; dev?: boolean }): string {
-  return policy({ nonce, connect: rpcOrigins, worker: "'self' blob:", dev });
+export function verifierCsp({ nonce, rpcOrigins, explorerOrigins = [], dev = false }: { nonce: string; rpcOrigins: readonly string[]; explorerOrigins?: readonly string[]; dev?: boolean }): string {
+  return policy({ nonce, connect: [...rpcOrigins, ...explorerOrigins], worker: "'self' blob:", dev });
 }
 
 /**

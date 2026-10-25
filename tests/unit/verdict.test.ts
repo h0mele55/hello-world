@@ -130,6 +130,7 @@ describe('an exact-file match', () => {
       familyId: FAMILY,
       version: 1,
       docHash: docHashOf(ORIGINAL_BYTES),
+      manifestHash: id(0xe0),
       blockNumber: 100,
       blockTime: 1_700_000_000 + 1200,
       txHash: `0x${id(1).slice(4)}aa`,

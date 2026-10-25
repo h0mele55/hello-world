@@ -38,7 +38,7 @@ watch reports any write by the firm's keys that the journal did not make (6e,
 row only on what two endpoints agree on (6g, #92), the audit log's head is
 written on chain each night (6h, #94), `npm run monitor` says what needs a
 person (6i, #68), and each manifest hash is also timestamped on Bitcoin through
-OpenTimestamps (#66; the verifier showing it is still to do).
+OpenTimestamps, which every verifier shows beside its verdict (#66).
 
 ## Rules every phase keeps
 
@@ -368,7 +368,12 @@ to one inflect-compliance commit.
   the registry, its bytecode hash, the issuer names from the deployment record
   and `VERIFY_RPC_URL_1/2`, which every visitor receives, so never a keyed
   URL. The page must not call the app's API; the end-to-end test answers
-  `/api/*` with 503 and checks that no request carries the file.
+  `/api/*` with 503 and checks that no request carries the file. Its one
+  request to the app is the public `/ots/<manifestHash>` route (#66), for a
+  matched report's Bitcoin timestamp, by a hash that is public on chain: the
+  owner accepted that the issuer's server learns which report is checked.
+  The answer never changes the verdict, and with the server down the page
+  says the timestamp could not be checked.
 - **Any doubt about the chain is a `CannotVerify`** with a named reason,
   raised by the registry view (`openRegistryView`), which checks chain id and
   bytecode on both endpoints and reads both at one finalized block. Do not
@@ -385,19 +390,23 @@ to one inflect-compliance commit.
   (`standalone/`, built by `scripts/build-verifier.ts`) all call `verifyFile`.
   The HTML file inlines everything, pdf.js's worker included, writes only text
   into the page, and carries its own CSP: scripts by hash plus the worker's
-  `blob:`, and connections to the two endpoints only.
+  `blob:`, and connections to the two endpoints, plus, when it was built with
+  `APP_PUBLIC_URL`, that origin and the two Bitcoin explorers. The CLI asks
+  for the timestamp only with the issuer's origin (baked in, or `--app-url`).
 - **The tamper suite is the exit gate** (`tests/tamper/`): each case is made
   with the tool a person would use (an incremental save, a re-render keeping
   the reference, qpdf, Chromium's print) and must get the same verdict from
   verify-core and from the CLI. A change to a verdict changes this table.
 - **`src/proxy.ts` gives every page a per-request nonce CSP** (`src/lib/csp.ts`,
   #84): `verifierCsp` on `/verify` and `/r/*`, whose `connect-src` is the
-  origin and the two endpoints; `appCsp` everywhere else, `connect-src 'self'`.
+  origin, the two endpoints and the two Bitcoin explorers (#66); `appCsp`
+  everywhere else, `connect-src 'self'`.
   The API and files in `public/` get none. A nonce needs a page rendered per
   request: every page is, because the root layout reads the theme cookie, and
   `tests/e2e/csp.spec.ts` walks every page from git and fails on a script
-  without its response's nonce. The proxy also holds the lookup page's rate
-  limit (`src/lib/rate-limit.ts`: 60 a minute per address, 600 in all; the
+  without its response's nonce. The proxy also holds the rate limit of the
+  lookup page and the public proof route, `/ots/*`
+  (`src/lib/rate-limit.ts`: 60 a minute per address, 600 in all; the
   address only behind a proxy that sets it, `TRUST_PROXY_HEADERS=1`).
 
 ## Roles and two-step sign-in
@@ -493,6 +502,14 @@ to one inflect-compliance commit.
   do. An explorer out or two that disagree leave the proof PENDING with a
   reason; a path to the wrong root is BROKEN and never touched again. Never
   set COMPLETE or a block another way: CHECKs hold COMPLETE to its block.
+- **The verifiers show it beside the verdict, never in it**
+  (`bitcoinTimestampFor`, `src/lib/verify-core/bitcoin-timestamp.ts`): only
+  for an exact match, from the matched record's manifest hash (a copy's record
+  carries its original's), the proof asked of the issuer's public
+  `/ots/<manifestHash>` route and checked against the two explorers in the
+  verifier itself. Every outcome is a named status (CONFIRMED, PENDING, NONE,
+  UNAVAILABLE, INVALID); none of them changes a verdict, and none says
+  authentic.
 - **Tests never reach a real calendar or explorer.** The unit tests use the
   reference client's example proof and block 358391's header, recorded in
   `tests/fixtures/ots/` and the test; the job's tests use fake calendars and a

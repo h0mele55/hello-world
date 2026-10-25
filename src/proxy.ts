@@ -1,17 +1,19 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { appCsp, verifierCsp } from '@/lib/csp';
+import { EXPLORER_ORIGINS } from '@/lib/ots/explorers';
 import { clientAddressOf, takeLookup } from '@/lib/rate-limit';
 import { verifierRpcUrls } from '@/lib/verify-setup';
 
 /**
  * Every page gets a nonce-based CSP (#84). The public verifier's pages may
- * also reach their two RPC endpoints; every other page, this origin only. The
- * lookup page is rate-limited, since it reads the chain on the server for
- * every request.
+ * also reach their two RPC endpoints and the two Bitcoin explorers (#66);
+ * every other page, this origin only. The lookup page is rate-limited, since
+ * it reads the chain on the server for every request, and so is the public
+ * proof route, which reads the database.
  */
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  if (pathname.startsWith('/r/')) {
+  if (pathname.startsWith('/r/') || pathname.startsWith('/ots/')) {
     const taken = takeLookup(clientAddressOf(request.headers));
     if (!taken.ok) {
       return new NextResponse('Too many requests. Try again shortly.', {
@@ -26,7 +28,7 @@ export function proxy(request: NextRequest) {
   let csp: string;
   if (pathname === '/verify' || pathname.startsWith('/r/')) {
     const urls = verifierRpcUrls();
-    csp = verifierCsp({ nonce, rpcOrigins: typeof urls === 'string' ? [] : urls.map((url) => new URL(url).origin), dev });
+    csp = verifierCsp({ nonce, rpcOrigins: typeof urls === 'string' ? [] : urls.map((url) => new URL(url).origin), explorerOrigins: EXPLORER_ORIGINS, dev });
   } else {
     csp = appCsp({ nonce, dev });
   }

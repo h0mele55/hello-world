@@ -52,6 +52,8 @@ export type AuditAction =
   | 'revocation.scheduled'
   | 'revocation.in_effect'
   | 'revocation.cancelled'
+  | 'registry_watch.unjournaled'
+  | 'registry_watch.reviewed'
   | 'recipient.added'
   | 'recipient.removed'
   | 'notification.queued'
@@ -63,7 +65,7 @@ export interface AuditEventInput {
   /** The user, or null for the worker. */
   actorId: string | null;
   action: AuditAction;
-  subjectType: 'Engagement' | 'ReportVersion' | 'IssuerOrg' | 'ChainWrite' | 'User' | 'Revocation' | 'Recipient' | 'Notification';
+  subjectType: 'Engagement' | 'ReportVersion' | 'IssuerOrg' | 'ChainWrite' | 'User' | 'Revocation' | 'Recipient' | 'Notification' | 'UnjournaledWrite';
   subjectId: string;
   /** Plain JSON only: strings, safe integers, booleans, null, arrays and objects. */
   data: Record<string, unknown>;

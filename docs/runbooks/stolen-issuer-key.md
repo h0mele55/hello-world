@@ -21,11 +21,11 @@ and lets the firm ask again".
 - The issuer key may be stolen, or the worker's host was compromised.
 - A client or a recipient says the verifier calls a report **being withdrawn**
   (REVOCATION_PENDING), and nobody at the firm asked for that.
+- The registry watch reported one: a banner on every console page, the
+  watch's card on `/audit-log` with the time it takes effect, and an error
+  exit from `npm run watch:registry` (#93).
 - The worker logged `the record carries a revocation the console did not ask
   for`.
-
-Nothing watches the chain for these requests yet (#93). Until it does, someone
-has to look.
 
 ## What you need
 
@@ -42,8 +42,10 @@ has to look.
    Retiring it does **not** undo what it already asked; only step 4 does. In a
    Safe, put the retirement and the cancellations in one batch.
 
-2. **List the revocations asked for on chain**, from the registry's deploy
-   block (`deployBlock` in the deployment record):
+2. **List the revocations asked for on chain.** The registry watch's card on
+   `/audit-log` lists every revocation by the firm's keys that the console did
+   not make, the nearest deadline first. To check by hand, from the registry's
+   deploy block (`deployBlock` in the deployment record):
 
    ```sh
    cast logs --rpc-url "$SEPOLIA_RPC_URL" --address <registry> --from-block <deployBlock> \
@@ -83,7 +85,9 @@ has to look.
    into `/verify`: it must read authentic again once the cancellation is in a
    finalized block.
 
-6. Record what you found and did in the incident log.
+6. **Mark each finding reviewed** on `/audit-log` (an admin), once it is
+   cancelled or explained, and record what you found and did in the incident
+   log.
 
 ## If the owner cancels a revocation the firm did ask for
 

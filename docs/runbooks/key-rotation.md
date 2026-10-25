@@ -86,9 +86,9 @@ Do not wait for the drain: **retire the key first** (step 7, then steps 1–3
 for the new one). A transaction the old key signed but that is mined after
 that is refused by the registry. Then:
 
-- Look for writes the journal did not make: the key's transactions on the
-  explorer, compared with the `ChainWrite` rows of that issuer. Automatic
-  detection is #93.
+- Look for writes the journal did not make: run `npm run watch:registry` and
+  read the registry watch on `/audit-log`, which lists every anchor and
+  revocation by the firm's keys whose transaction no journal row holds.
 - A stolen key could have asked to revoke records. Each request waits out the
   registry's delay, and the owner cancels it in that time
   ([stolen-issuer-key.md](stolen-issuer-key.md)), right after retiring the key

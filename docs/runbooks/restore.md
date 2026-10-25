@@ -34,7 +34,9 @@ still verifies, but the console no longer knows it.
    - Their salts and manifests are lost with the database, so they cannot be
      re-linked in the console.
    - List them for the firm's records. Re-deriving every verdict from the
-     chain automatically is Phase 6 work; detecting unknown writes is #93.
+     chain automatically is Phase 6 work.
+   - The registry watch reports these writes too, since the restored journal
+     does not hold them: review each on `/audit-log` once it is explained.
 6. **Run the audit-chain check** (`npm run audit:check`). It must say intact.
    The backup runs after the nightly check, so the checks it restored match the
    chain it restored. Anything else is a damaged backup: stop, and restore the

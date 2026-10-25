@@ -74,7 +74,8 @@
     "clients": "Clients",
     "reports": "Reports",
     "auditLog": "Audit log",
-    "auditBroken": "The audit log failed its nightly check at event #{seq}. Its history may have been changed: find out why before relying on it."
+    "auditBroken": "The audit log failed its nightly check at event #{seq}. Its history may have been changed: find out why before relying on it.",
+    "unjournaled": "{count, plural, one {# write} other {# writes}} on chain by the firm’s issuer keys that the console did not make."
   },
   "login": {
     "title": "Sign in",
@@ -181,6 +182,7 @@
     "REVOCATION_OPEN": "This version already has an open revocation request.",
     "NOT_REQUESTED": "This request is no longer waiting for a decision. Reload the page.",
     "COPY_IN_FLIGHT": "The stamped copy is still on its way to the chain. Approve the revocation once it is final.",
+    "ALREADY_REVIEWED": "This write has already been marked as reviewed.",
     "RECIPIENT_EXISTS": "This address is already a recipient of this engagement.",
     "RECIPIENT_LIMIT": "This engagement already has 50 recipients. Remove one to add another."
   },
@@ -687,6 +689,31 @@
       "broken": "Run {when} UTC: broken at event #{seq}: {reason}.",
       "how": "Each night every hash is re-derived, and the chain is held to the last intact check: it may only have grown, and the event that was its head must still be there, unchanged."
     },
+    "watch": {
+      "title": "The registry watch",
+      "neverRun": "The registry watch has never run. Until it does, nothing notices a write by the firm’s issuer keys that the console did not make. Schedule `npm run watch:registry` every ten minutes.",
+      "current": "Read the chain up to finalized block {block}, at {when} UTC.",
+      "stale": "The registry watch last ran at {when} UTC. It should run every ten minutes: check its schedule.",
+      "none": "Every write by the firm’s issuer keys that it has read is in the journal.",
+      "open": "{count, plural, one {# write} other {# writes}} on chain by the firm’s issuer keys that the console did not make. Treat the key as stolen until you know otherwise.",
+      "kinds": {
+        "ANCHOR": "Anchor",
+        "ANCHOR_COPY": "Distribution copy",
+        "REVOCATION": "Revocation"
+      },
+      "record": "Record",
+      "transaction": "Transaction",
+      "block": "Block {block}",
+      "issuer": "Issuer key",
+      "found": "Found {when} UTC",
+      "deadline": "Takes effect {when} UTC, unless the registry’s owner cancels it before then (docs/runbooks/stolen-issuer-key.md).",
+      "more": "{count, plural, one {# more is} other {# more are}} not shown.",
+      "review": "Mark as reviewed",
+      "reviewTitle": "Mark this write as reviewed?",
+      "reviewBody": "Do this once someone has looked into it: the owner cancelled the revocation, the key was retired, or the write was the firm’s own and lost from the journal. It stays in the audit log.",
+      "reviewConfirm": "Mark as reviewed",
+      "how": "The watch runs outside the app (`npm run watch:registry`). It reads every anchor and revocation by the firm’s issuer keys up to the finalized block, and reports each whose transaction no journal row holds. It exits with an error while any write here is open."
+    },
     "reasons": {
       "SEQ_GAP": "an event is missing or out of order",
       "PREV_HASH_MISMATCH": "it does not link to the event before it",
@@ -702,7 +729,7 @@
       "action": "Action",
       "subject": "Subject"
     },
-    "worker": "The worker",
+    "worker": "Automatic (worker, mailer or watch)",
     "details": "Details",
     "hash": "Hash: {hash}",
     "older": "Older events",

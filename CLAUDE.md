@@ -32,7 +32,9 @@ mitigation, or the issue that tracks it, and `docs/runbooks/` says what to do
 when a key, an owner, an endpoint or the database must change. The issuer key
 can live in Cloud KMS (6b), the production candidates are measured for the
 owner's choice (6c, `docs/decision-production-chain.md`), and revocation is
-delayed so the owner can cancel a stolen key's (6d, #95).
+delayed so the owner can cancel a stolen key's (6d, #95), and the registry
+watch reports any write by the firm's keys that the journal did not make (6e,
+#93).
 
 ## Rules every phase keeps
 
@@ -91,6 +93,7 @@ npm run test:db                # intake and approval use cases against TEST_DATA
 npm run test:anchoring         # the worker against TEST_DATABASE_URL and a throwaway Anvil node
 npm run worker                 # the anchoring worker; add `-- --once` for one pass
 npm run audit:check            # the nightly audit-chain check; exit 1 on a break
+npm run watch:registry         # every 10 min: report chain writes by the firm's keys the journal did not make; exit 1 while one is unreviewed
 npm run mailer                 # sends the recipients' notices; add `-- --once` for one pass (SMTP_URL, MAIL_FROM)
 scripts/backup.sh              # database dump + encrypted store copy (docs/operations.md)
 npm run test:backup            # back up, restore into <db>_restore_test, check the copy
@@ -298,6 +301,15 @@ to one inflect-compliance commit.
   rotation drains the old key before switching (`docs/runbooks/key-rotation.md`,
   rehearsed in `tests/anchoring/worker.test.ts`). Certificates are made for an
   anchor-only version whichever key anchored it: a certificate signs nothing.
+- **The registry watch** (`src/lib/anchoring/registry-watch.ts`, run by
+  `scripts/watch-registry.ts`) reads every `Anchored` and
+  `RevocationRequested` event by the firm's issuer keys up to the finalized
+  block and matches it to the journal **by transaction hash**, current or
+  replaced. This works only because every hash is journalled before it is sent
+  (rule 3): a new path that sends a registry write without a journal row will
+  be reported as a stolen key. Findings (`UnjournaledWrite`) and the checkpoint
+  are written in one transaction per range; only an ADMIN marks a finding
+  reviewed (`reviewUnjournaledWrite`).
 - **The owner's acts go through `scripts/owner-call.ts`**, which checks the
   chain and the registry, simulates, and prints the transaction for the owner
   (the deployer key, later a Safe) to execute. It sends only an issuer change

@@ -18,6 +18,8 @@ export const CAN = {
   manageRecipients: ['PREPARER', 'ADMIN'],
   /** Move the firm's chain write mode. */
   setChainMode: ['APPROVER', 'ADMIN'],
+  /** Mark a write on chain that the journal did not make as reviewed, once someone has looked into it (#93). */
+  reviewUnjournaledWrite: ['ADMIN'],
   /** Set up a second factor: the roles that must sign in with one. */
   setUpMfa: ['APPROVER', 'ADMIN'],
 } as const satisfies Record<string, readonly Role[]>;

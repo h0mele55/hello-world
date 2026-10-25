@@ -34,8 +34,9 @@ worker. Write down what is done, by whom and when.
    day to day; destroying a key version takes it, and KMS keeps a destroyed
    version recoverable for the scheduled-destruction period.
 3. **Log every signature.** Turn on Data Access audit logs for Cloud KMS in
-   the project, so each signing request is recorded with its caller. Comparing
-   them with the journal is #93.
+   the project, so each signing request is recorded with its caller. The
+   registry watch (`npm run watch:registry`) compares what reached the chain
+   with the journal; these logs say who asked KMS to sign it.
 4. **Read the key's address.**
 
    ```sh

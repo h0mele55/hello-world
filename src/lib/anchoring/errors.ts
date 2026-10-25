@@ -16,7 +16,8 @@ export type AnchoringErrorCode =
   | 'CONFIRMATION_MISMATCH'
   | 'REVOCATION_OPEN'
   | 'NOT_REQUESTED'
-  | 'COPY_IN_FLIGHT';
+  | 'COPY_IN_FLIGHT'
+  | 'ALREADY_REVIEWED';
 
 export class AnchoringError extends Error {
   constructor(

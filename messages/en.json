@@ -75,6 +75,7 @@
     "reports": "Reports",
     "auditLog": "Audit log",
     "auditBroken": "The audit log failed its nightly check at event #{seq}. Its history may have been changed: find out why before relying on it.",
+    "auditBrokenNoEvent": "The audit log failed its nightly check: {reason}. Find out why before relying on it.",
     "unjournaled": "{count, plural, one {# write} other {# writes}} on chain by the firm’s issuer keys that the console did not make.",
     "rpcDisagree": "The worker's two RPC endpoints have disagreed about the chain since {since} UTC. Anchors and revocations they disagree about wait until they agree: find out which endpoint is wrong (docs/runbooks/rpc-outage.md)."
   },
@@ -686,9 +687,12 @@
       "title": "The nightly check",
       "neverRun": "The nightly check has never run. Schedule `npm run audit:check` once a day.",
       "intact": "Last run {when} UTC: intact, {count} events, and nothing earlier was cut or rewritten.",
+      "heads": "Held to {count, plural, one {# head} other {# heads}} of this log on chain; the latest was written {when} UTC.",
+      "noHeads": "No head of this log is on chain yet: one is written after a check once anchoring is live.",
       "stale": "The nightly check last ran {when} UTC, more than a day and a half ago. It has stopped running.",
       "broken": "Run {when} UTC: broken at event #{seq}: {reason}.",
-      "how": "Each night every hash is re-derived, and the chain is held to the last intact check: it may only have grown, and the event that was its head must still be there, unchanged."
+      "brokenNoEvent": "Run {when} UTC: broken: {reason}.",
+      "how": "Each night every hash is re-derived, and the chain is held to the last intact check: it may only have grown, and the event that was its head must still be there, unchanged. The check also writes the log’s latest hash to the registry, and every head there must still be in the log, so whoever owns the database cannot rewrite the log’s past and its checks together."
     },
     "watch": {
       "title": "The registry watch",
@@ -700,7 +704,8 @@
       "kinds": {
         "ANCHOR": "Anchor",
         "ANCHOR_COPY": "Distribution copy",
-        "REVOCATION": "Revocation"
+        "REVOCATION": "Revocation",
+        "AUDIT_HEAD": "Audit-log head"
       },
       "record": "Record",
       "transaction": "Transaction",
@@ -720,7 +725,9 @@
       "PREV_HASH_MISMATCH": "it does not link to the event before it",
       "HASH_MISMATCH": "its contents do not match its hash",
       "TRUNCATED": "events that an earlier check saw are gone",
-      "REWRITTEN": "an event that an earlier check saw has been replaced"
+      "REWRITTEN": "an event that an earlier check saw has been replaced",
+      "ANCHORED_HEAD_MISSING": "a head of this log written on chain is no longer in it: the log was rewritten or cut since",
+      "CHAIN_UNREADABLE": "the chain could not be read, so the log could not be held to its heads there"
     },
     "events": "Events, newest first",
     "empty": "No events yet",

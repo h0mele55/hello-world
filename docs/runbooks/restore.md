@@ -37,10 +37,14 @@ still verifies, but the console no longer knows it.
      chain automatically is Phase 6 work.
    - The registry watch reports these writes too, since the restored journal
      does not hold them: review each on `/audit-log` once it is explained.
-6. **Run the audit-chain check** (`npm run audit:check`). It must say intact.
-   The backup runs after the nightly check, so the checks it restored match the
-   chain it restored. Anything else is a damaged backup: stop, and restore the
-   one before it.
+6. **Run the audit-chain check** (`npm run audit:check`). It must say intact,
+   except for the audit-log heads written on chain after the backup was taken
+   (#94): their events were lost with the database, and the check names them
+   (`ANCHORED_HEAD_MISSING`, `missingHeads`). Confirm each was written after
+   the backup's time, then follow [audit-head-missing.md](audit-head-missing.md)
+   to have the owner void them. The backup runs after the nightly check, so the
+   checks it restored match the chain it restored. Anything else is a damaged
+   backup: stop, and restore the one before it.
 7. **Widen the write mode** (an approver, in Settings: DRY_RUN, then LIVE),
    start the mailer, and check `/audit-log` and `/dashboard`.
 

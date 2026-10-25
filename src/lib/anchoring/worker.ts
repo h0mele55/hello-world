@@ -15,6 +15,7 @@ import { Prisma, type PrismaClient } from '@/generated/prisma/client';
 import type { ChainWriteStatus } from '@/generated/prisma/enums';
 import { appendAuditEvent, type AuditAction } from '@/lib/audit';
 import { toRegistryError } from '@/lib/chain/adapter';
+import { agreedFinalizedBlock, sameOnBoth } from '@/lib/chain/agree';
 import type { Deployment } from '@/lib/chain/deployment';
 import { ChainError, RegistryRevertError } from '@/lib/chain/errors';
 import { createRegistryReader, type RegistryReader } from '@/lib/chain/reader';
@@ -170,6 +171,8 @@ export interface PassReport {
 }
 
 const writeInclude = {
+  // The firm's mode, read for every kind; an AUDIT_HEAD row has no version to read it through.
+  org: { select: { chainWriteMode: true } },
   reportVersion: {
     include: {
       storedFile: true,
@@ -180,7 +183,14 @@ const writeInclude = {
   },
 } satisfies Prisma.ChainWriteInclude;
 
-type Write = Prisma.ChainWriteGetPayload<{ include: typeof writeInclude }>;
+type Row = Prisma.ChainWriteGetPayload<{ include: typeof writeInclude }>;
+/** A write for a report version: every kind but AUDIT_HEAD (a CHECK holds it). */
+type Write = Row & { reportVersion: NonNullable<Row['reportVersion']> };
+
+function versionOf(row: Row): Write {
+  if (row.reportVersion === null) throw new ChainError('NO_VERSION', `write ${row.id} (${row.kind}) has no report version`);
+  return row as Write;
+}
 
 interface Context {
   prisma: PrismaClient;
@@ -218,7 +228,14 @@ export function errorName(error: unknown): string {
 }
 
 
-const stable = (value: unknown) => JSON.stringify(value, (_, v) => (typeof v === 'bigint' ? `${v}n` : v));
+/** Notes a disagreement for the pass's report and the console, then lets it stop the step. */
+function noteDisagreement(ctx: Context, error: unknown, what: string): never {
+  if (error instanceof ChainError && error.code === 'RPC_DISAGREE') {
+    ctx.disagreed = true;
+    ctx.log('error', 'the two RPC endpoints disagree; what depends on it waits until they agree', { what });
+  }
+  throw error;
+}
 
 /**
  * One read made on both endpoints, which must agree (#92, rule 7). A
@@ -228,25 +245,20 @@ const stable = (value: unknown) => JSON.stringify(value, (_, v) => (typeof v ===
 async function agree<T>(ctx: Context, what: string, read: (client: PublicClient, reader: RegistryReader) => Promise<T>): Promise<T> {
   if (ctx.check === ctx.publicClient) return read(ctx.publicClient, ctx.reader);
   const [first, second] = await Promise.all([read(ctx.publicClient, ctx.reader), read(ctx.check, ctx.checkReader)]);
-  if (stable(first) !== stable(second)) {
-    ctx.disagreed = true;
-    ctx.log('error', 'the two RPC endpoints disagree; what depends on it waits until they agree', { what });
-    throw new ChainError('RPC_DISAGREE', `the two RPC endpoints disagree about ${what}`);
+  try {
+    return sameOnBoth(what, first, second);
+  } catch (error) {
+    noteDisagreement(ctx, error, what);
   }
-  return first;
 }
 
-/**
- * The finalized block both endpoints have reached (the lower of the two), and
- * agree on: every read that settles a row is made at it. An endpoint that
- * lags is waited for, never mistaken for one that disagrees.
- */
+/** The finalized block both endpoints have reached and agree on: every read that settles a row is made at it. */
 async function agreedFinalized(ctx: Context): Promise<bigint> {
-  if (ctx.check === ctx.publicClient) return (await ctx.publicClient.getBlock({ blockTag: 'finalized' })).number;
-  const [first, second] = await Promise.all([ctx.publicClient, ctx.check].map(async (c) => (await c.getBlock({ blockTag: 'finalized' })).number));
-  const at = first < second ? first : second;
-  await agree(ctx, `finalized block ${at}`, async (c) => (await c.getBlock({ blockNumber: at })).hash);
-  return at;
+  try {
+    return await agreedFinalizedBlock([ctx.publicClient, ctx.check]);
+  } catch (error) {
+    noteDisagreement(ctx, error, 'the finalized block');
+  }
 }
 
 /** A record as both endpoints read it at one block. */
@@ -371,7 +383,7 @@ async function stepWrite(ctx: Context, id: string): Promise<StepReport> {
     case 'INTENT':
       // A hash was journalled but the step never learnt what the send did.
       if (write.txHash) return indeterminate(ctx, write, 'SEND_OUTCOME_UNKNOWN');
-      return startWrite(ctx, write);
+      return write.kind === 'AUDIT_HEAD' ? startAuditHead(ctx, write) : startWrite(ctx, versionOf(write));
     case 'BROADCAST':
       return trackBroadcast(ctx, write);
     case 'INDETERMINATE':
@@ -402,7 +414,7 @@ interface Effects {
 
 async function transition(
   ctx: Context,
-  write: Write,
+  write: Row,
   to: ChainWriteStatus,
   data: Prisma.ChainWriteUpdateManyMutationInput,
   effects: Effects,
@@ -414,63 +426,26 @@ async function transition(
       data: { ...data, status: to, leaseUntil: null },
     });
     if (count !== 1) return false;
-    const version = write.reportVersion;
-    const effect = effects.version;
     // Events about what the write caused, appended after the write's own event.
     const followUps: (() => Promise<unknown>)[] = [];
-    if (effect?.kind === 'REVERT_TO_CONFIRMED') {
-      await tx.reportVersion.updateMany({ where: { id: version.id, status: 'APPROVED' }, data: { status: 'CONFIRMED', approvedById: null, approvedAt: null } });
-    } else if (effect?.kind === 'ANCHORED') {
-      const anchored = await tx.reportVersion.updateMany({
-        where: { id: version.id, status: 'APPROVED' },
-        data: { status: 'ANCHORED', recordId: effect.recordId, anchorTxHash: effect.txHash, anchorBlock: effect.blockNumber },
-      });
-      if (anchored.count !== 1) throw new ChainError('VERSION_NOT_APPROVED', `version ${version.id} is not APPROVED`);
-      if (!version.anchorOnly) {
-        await tx.chainWrite.create({
-          data: { reportVersionId: version.id, kind: 'ANCHOR_COPY', mode: write.mode, chainId: write.chainId, registry: write.registry, issuer: write.issuer },
-        });
-      }
-    } else if (effect?.kind === 'COMPLETE') {
-      const completed = await tx.reportVersion.updateMany({
-        where: { id: version.id, status: 'ANCHORED', copyDocHash: { not: null } },
-        data: { status: 'COMPLETE', copyRecordId: effect.recordId, copyTxHash: effect.txHash, copyBlock: effect.blockNumber, completedAt: ctx.now() },
-      });
-      if (completed.count !== 1) throw new ChainError('VERSION_NOT_ANCHORED', `version ${version.id} is not ANCHORED with a copy`);
-      await queueSupersededNotices(tx, version, version.engagement.client.orgId, ctx.now());
-    } else if (effect?.kind === 'REVERT_REVOCATION') {
-      await tx.revocation.updateMany({ where: { reportVersionId: version.id, status: 'APPROVED' }, data: { status: 'REQUESTED', approvedById: null, approvedAt: null } });
-    } else if (effect?.kind === 'REVOCATION_SCHEDULED') {
-      const revocation = version.revocations[0];
-      if (!revocation) throw new ChainError('REVOCATION_NOT_APPROVED', `version ${version.id} has no approved revocation`);
-      const effectiveAt = new Date(effect.effectiveAt * 1000);
-      const scheduled = await tx.revocation.updateMany({ where: { id: revocation.id, status: 'APPROVED' }, data: { status: 'SCHEDULED', effectiveAt } });
-      if (scheduled.count !== 1) throw new ChainError('REVOCATION_NOT_APPROVED', `revocation ${revocation.id} is not APPROVED`);
-      followUps.push(() =>
-        appendAuditEvent(
-          tx,
-          {
-            orgId: version.engagement.client.orgId,
-            actorId: null,
-            action: 'revocation.scheduled',
-            subjectType: 'Revocation',
-            subjectId: revocation.id,
-            data: { reportVersionId: version.id, chainWriteId: write.id, recordId: effect.recordId, effectiveAt: effectiveAt.toISOString() },
-          },
-          ctx.now(),
-        ),
-      );
-    }
+    if (effects.version) await applyVersionEffect(tx, ctx, versionOf(write), effects.version, followUps);
     if (effects.audit) {
       await appendAuditEvent(
         tx,
         {
-          orgId: version.engagement.client.orgId,
+          orgId: write.orgId,
           actorId: null,
-          action: effects.audit.action,
+          // An audit-log head's events carry their own prefix, so the check can
+          // tell them from the activity they record, and no count of anchors includes them.
+          action: write.kind === 'AUDIT_HEAD' ? headAction(effects.audit.action) : effects.audit.action,
           subjectType: 'ChainWrite',
           subjectId: write.id,
-          data: { reportVersionId: version.id, kind: write.kind, mode: write.mode, ...effects.audit.data },
+          data: {
+            ...(write.kind === 'AUDIT_HEAD' ? { auditHead: write.auditHead } : { reportVersionId: write.reportVersionId }),
+            kind: write.kind,
+            mode: write.mode,
+            ...effects.audit.data,
+          },
         },
         ctx.now(),
       );
@@ -482,35 +457,91 @@ async function transition(
   return { writeId: write.id, from: write.status, to, note };
 }
 
+/** An anchor.* step of an audit-log head's row, under its own prefix. */
+function headAction(action: AuditAction): AuditAction {
+  const named = action.replace(/^anchor\./, 'audit_head.');
+  if (!(AUDIT_HEAD_ACTIONS as readonly string[]).includes(named)) throw new ChainError('ACTION_UNKNOWN', `no audit-head action for ${action}`);
+  return named as AuditAction;
+}
+const AUDIT_HEAD_ACTIONS = ['audit_head.simulated', 'audit_head.broadcast', 'audit_head.replaced', 'audit_head.indeterminate', 'audit_head.final', 'audit_head.failed'] as const;
+
+/** What a version write's transition does to its version, in the same transaction. */
+async function applyVersionEffect(tx: Prisma.TransactionClient, ctx: Context, write: Write, effect: VersionEffect, followUps: (() => Promise<unknown>)[]) {
+  const version = write.reportVersion;
+  if (effect.kind === 'REVERT_TO_CONFIRMED') {
+    await tx.reportVersion.updateMany({ where: { id: version.id, status: 'APPROVED' }, data: { status: 'CONFIRMED', approvedById: null, approvedAt: null } });
+  } else if (effect.kind === 'ANCHORED') {
+    const anchored = await tx.reportVersion.updateMany({
+      where: { id: version.id, status: 'APPROVED' },
+      data: { status: 'ANCHORED', recordId: effect.recordId, anchorTxHash: effect.txHash, anchorBlock: effect.blockNumber },
+    });
+    if (anchored.count !== 1) throw new ChainError('VERSION_NOT_APPROVED', `version ${version.id} is not APPROVED`);
+    if (!version.anchorOnly) {
+      await tx.chainWrite.create({
+        data: { orgId: write.orgId, reportVersionId: version.id, kind: 'ANCHOR_COPY', mode: write.mode, chainId: write.chainId, registry: write.registry, issuer: write.issuer },
+      });
+    }
+  } else if (effect.kind === 'COMPLETE') {
+    const completed = await tx.reportVersion.updateMany({
+      where: { id: version.id, status: 'ANCHORED', copyDocHash: { not: null } },
+      data: { status: 'COMPLETE', copyRecordId: effect.recordId, copyTxHash: effect.txHash, copyBlock: effect.blockNumber, completedAt: ctx.now() },
+    });
+    if (completed.count !== 1) throw new ChainError('VERSION_NOT_ANCHORED', `version ${version.id} is not ANCHORED with a copy`);
+    await queueSupersededNotices(tx, version, version.engagement.client.orgId, ctx.now());
+  } else if (effect.kind === 'REVERT_REVOCATION') {
+    await tx.revocation.updateMany({ where: { reportVersionId: version.id, status: 'APPROVED' }, data: { status: 'REQUESTED', approvedById: null, approvedAt: null } });
+  } else if (effect.kind === 'REVOCATION_SCHEDULED') {
+    const revocation = version.revocations[0];
+    if (!revocation) throw new ChainError('REVOCATION_NOT_APPROVED', `version ${version.id} has no approved revocation`);
+    const effectiveAt = new Date(effect.effectiveAt * 1000);
+    const scheduled = await tx.revocation.updateMany({ where: { id: revocation.id, status: 'APPROVED' }, data: { status: 'SCHEDULED', effectiveAt } });
+    if (scheduled.count !== 1) throw new ChainError('REVOCATION_NOT_APPROVED', `revocation ${revocation.id} is not APPROVED`);
+    followUps.push(() =>
+      appendAuditEvent(
+        tx,
+        {
+          orgId: version.engagement.client.orgId,
+          actorId: null,
+          action: 'revocation.scheduled',
+          subjectType: 'Revocation',
+          subjectId: revocation.id,
+          data: { reportVersionId: version.id, chainWriteId: write.id, recordId: effect.recordId, effectiveAt: effectiveAt.toISOString() },
+        },
+        ctx.now(),
+      ),
+    );
+  }
+}
+
 /** Lets go of the row without changing its status. */
-async function release(ctx: Context, write: Write, data: Prisma.ChainWriteUpdateManyMutationInput, note: string): Promise<StepReport> {
+async function release(ctx: Context, write: Row, data: Prisma.ChainWriteUpdateManyMutationInput, note: string): Promise<StepReport> {
   await ctx.prisma.chainWrite.updateMany({ where: { id: write.id, status: write.status, txHash: write.txHash }, data: { ...data, leaseUntil: null } });
   return { writeId: write.id, from: write.status, to: write.status, note };
 }
 
 /** What a write that will not happen undoes: the approval it was made under. A copy needs none, so it waits to be queued again. */
-function revertApproval(write: Write): VersionEffect | undefined {
+function revertApproval(write: Row): VersionEffect | undefined {
   if (write.kind === 'ANCHOR') return { kind: 'REVERT_TO_CONFIRMED' };
   if (write.kind === 'REVOKE') return { kind: 'REVERT_REVOCATION' };
   return undefined;
 }
 
 /** A failed ANCHOR or REVOKE returns its approval; a failed ANCHOR_COPY leaves the version ANCHORED, to retry. */
-function fail(ctx: Context, write: Write, reason: string, data: Prisma.ChainWriteUpdateManyMutationInput = {}) {
+function fail(ctx: Context, write: Row, reason: string, data: Prisma.ChainWriteUpdateManyMutationInput = {}) {
   return transition(ctx, write, 'FAILED', { ...data, error: reason }, {
     version: revertApproval(write),
     audit: { action: 'anchor.failed', data: { reason, txHash: (data.txHash as string | undefined) ?? write.txHash } },
   }, reason);
 }
 
-function indeterminate(ctx: Context, write: Write, reason: string, data: Prisma.ChainWriteUpdateManyMutationInput = {}) {
+function indeterminate(ctx: Context, write: Row, reason: string, data: Prisma.ChainWriteUpdateManyMutationInput = {}) {
   ctx.log('warn', 'write is INDETERMINATE; it will be settled from chain state, never resent', { writeId: write.id, reason });
   return transition(ctx, write, 'INDETERMINATE', { ...data, error: reason }, {
     audit: { action: 'anchor.indeterminate', data: { reason, txHash: write.txHash, nonce: write.nonce } },
   }, reason);
 }
 
-function simulated(ctx: Context, write: Write, outcome: string | null) {
+function simulated(ctx: Context, write: Row, outcome: string | null) {
   return transition(ctx, write, 'SIMULATED', { error: outcome }, {
     version: revertApproval(write),
     audit: { action: 'anchor.simulated', data: { outcome: outcome ?? 'WOULD_SUCCEED' } },
@@ -543,8 +574,10 @@ function revocationCodeOf(write: Write): number | null {
   return revocation ? REVOCATION_CODES[revocation.reason] : null;
 }
 
-/** The registry call a built write makes. Needs `parentId` (ANCHOR), the copy's hash (ANCHOR_COPY) or an approved revocation (REVOKE). */
-function callOf(write: Write) {
+/** The registry call a built write makes. Needs `parentId` (ANCHOR), the copy's hash (ANCHOR_COPY), an approved revocation (REVOKE) or the head (AUDIT_HEAD). */
+function callOf(row: Row) {
+  if (row.kind === 'AUDIT_HEAD') return { functionName: 'recordAuditHead', args: [row.auditHead as Hex] } as const;
+  const write = versionOf(row);
   const version = write.reportVersion;
   if (write.kind === 'ANCHOR') {
     return {
@@ -1116,7 +1149,7 @@ async function send(ctx: Context, serializedTransaction: Hex): Promise<SendOutco
   }
 }
 
-async function signAndSend(ctx: Context, write: Write): Promise<StepReport> {
+async function signAndSend(ctx: Context, write: Row): Promise<StepReport> {
   const call = callOf(write);
   const [nonce, gasEstimate, fees] = await Promise.all([
     nextNonce(ctx),
@@ -1147,7 +1180,7 @@ async function signAndSend(ctx: Context, write: Write): Promise<StepReport> {
     if (isUniqueViolation(error)) return release(ctx, write, {}, `nonce ${nonce} is journalled by another write; retrying next pass`);
     throw error;
   }
-  const sent: Write = { ...write, nonce, txHash };
+  const sent: Row = { ...write, nonce, txHash };
   await ctx.faults.beforeSend?.(write.id);
   const outcome = await send(ctx, serialized);
   await ctx.faults.afterSend?.(write.id);
@@ -1163,9 +1196,58 @@ async function signAndSend(ctx: Context, write: Write): Promise<StepReport> {
   }
 }
 
+// ── AUDIT_HEAD: the firm's audit-log head (#94) ──
+
+/**
+ * Writes the head the nightly check queued, as it was queued. The firm's mode
+ * when it was queued is the row's; a narrowed mode stops it, as it stops any
+ * write. No approval: a head is a hash of the firm's own log, not a report.
+ */
+async function startAuditHead(ctx: Context, write: Row): Promise<StepReport> {
+  const orgMode = write.org.chainWriteMode;
+  if (orgMode === 'DISABLED' || rungOf(orgMode) < rungOf(write.mode)) return fail(ctx, write, 'MODE_NARROWED');
+  if (!write.auditHead || !/^0x[0-9a-f]{64}$/.test(write.auditHead)) return fail(ctx, write, 'HEAD_INVALID');
+  const live = write.mode === 'LIVE';
+  if (live && (await issuerBlocked(ctx))) return release(ctx, write, { error: 'ISSUER_BLOCKED' }, 'waiting: an INDETERMINATE write must be settled first');
+  try {
+    await ctx.publicClient.simulateContract(contractCall(ctx, callOf(write)));
+  } catch (error) {
+    const named = toRegistryError(error);
+    if (named instanceof RegistryRevertError) return live ? fail(ctx, write, named.errorName) : simulated(ctx, write, named.errorName);
+    throw named;
+  }
+  if (!live) return simulated(ctx, write, null);
+  return signAndSend(ctx, write);
+}
+
+/** Final once its own transaction's event, as both endpoints read it, names this head and this key. */
+function settleAuditHead(
+  ctx: Context,
+  write: Row,
+  receipt: NonNullable<ReturnType<typeof receiptSummary>>,
+  settled: { txHash: Hash; replacedTxHashes: string[]; blockNumber: bigint },
+): Promise<StepReport> {
+  let index: number | null = null;
+  for (const log of receipt.logs) {
+    if (getAddress(log.address) !== ctx.registry) continue;
+    try {
+      const event = decodeEventLog({ abi: registryAbi, data: log.data, topics: log.topics as [Hex, ...Hex[]] });
+      if (event.eventName === 'AuditHeadRecorded' && event.args.head.toLowerCase() === write.auditHead?.toLowerCase() && getAddress(event.args.issuer) === ctx.issuer) {
+        index = Number(event.args.index);
+      }
+    } catch {
+      // Not one of the registry's events.
+    }
+  }
+  if (index === null) return indeterminate(ctx, write, 'RECORD_MISMATCH', settled);
+  return transition(ctx, write, 'FINAL', { txHash: settled.txHash, replacedTxHashes: settled.replacedTxHashes, blockNumber: settled.blockNumber, error: null }, {
+    audit: { action: 'anchor.final', data: { head: write.auditHead, index, txHash: settled.txHash, blockNumber: Number(settled.blockNumber) } },
+  });
+}
+
 // ── BROADCAST: wait for finality, replace when stuck ──
 
-const hashesOf = (write: Write) => hashesOfWrite(write);
+const hashesOf = (write: Row) => hashesOfWrite(write);
 
 function recordMatches(record: RegistryRecord | null, write: Write, issuer: Address, blockNumber: bigint): boolean {
   return (
@@ -1178,7 +1260,8 @@ function recordMatches(record: RegistryRecord | null, write: Write, issuer: Addr
   );
 }
 
-async function trackBroadcast(ctx: Context, write: Write): Promise<StepReport> {
+async function trackBroadcast(ctx: Context, row: Row): Promise<StepReport> {
+  const write = row;
   const hashes = hashesOf(write);
   const receipt = await firstReceipt(ctx.publicClient, hashes);
   if (!receipt) {
@@ -1201,7 +1284,20 @@ async function trackBroadcast(ctx: Context, write: Write): Promise<StepReport> {
   // only once final and agreed: a revert in a block later reorged out may be
   // mined again, and succeed.
   if (again.status !== 'success') return fail(ctx, write, 'TX_REVERTED', settled);
+  if (row.kind === 'AUDIT_HEAD') return settleAuditHead(ctx, row, again, settled);
+  return settleVersionWrite(ctx, versionOf(row), again, receipt.blockNumber, finalized, settled);
+}
 
+async function settleVersionWrite(
+  ctx: Context,
+  write: Write,
+  again: NonNullable<ReturnType<typeof receiptSummary>>,
+  blockNumber: bigint,
+  finalized: bigint,
+  settled: { txHash: Hash; replacedTxHashes: string[]; blockNumber: bigint },
+): Promise<StepReport> {
+  const landed = settled.txHash;
+  const receipt = { blockNumber };
   const record = write.recordId ? await recordAt(ctx, write.recordId as Hex, finalized) : null;
   if (write.kind === 'REVOKE') {
     // The request is judged by the transaction's own event: the owner may have cancelled it since.
@@ -1214,8 +1310,8 @@ async function trackBroadcast(ctx: Context, write: Write): Promise<StepReport> {
 }
 
 /** The same call at the same nonce with both fee caps raised: only one of the two can ever be mined. */
-async function replace(ctx: Context, write: Write): Promise<StepReport> {
-  const built = write.kind === 'REVOKE' ? write.recordId !== null : write.parentId !== null;
+async function replace(ctx: Context, write: Row): Promise<StepReport> {
+  const built = write.kind === 'REVOKE' ? write.recordId !== null : write.kind === 'AUDIT_HEAD' ? write.auditHead !== null : write.parentId !== null;
   if (write.nonce === null || !write.txHash || !built || !write.gasLimit || !write.maxFeePerGas || !write.maxPriorityFeePerGas) {
     return indeterminate(ctx, write, 'CANNOT_REPLACE');
   }
@@ -1247,7 +1343,7 @@ async function replace(ctx: Context, write: Write): Promise<StepReport> {
     },
   });
   if (journalled.count !== 1) return { writeId: write.id, from: 'BROADCAST', to: 'BROADCAST', note: 'changed by another writer; left alone' };
-  const replacing: Write = { ...write, txHash, replacedTxHashes: [...write.replacedTxHashes, write.txHash], broadcastAt: now };
+  const replacing: Row = { ...write, txHash, replacedTxHashes: [...write.replacedTxHashes, write.txHash], broadcastAt: now };
   const outcome = await send(ctx, serialized);
   switch (outcome.kind) {
     case 'SENT':
@@ -1270,7 +1366,7 @@ async function replace(ctx: Context, write: Write): Promise<StepReport> {
 
 // ── INDETERMINATE: settle from chain state only ──
 
-async function reconcile(ctx: Context, write: Write): Promise<StepReport> {
+async function reconcile(ctx: Context, write: Row): Promise<StepReport> {
   if (write.nonce === null || !write.txHash) return release(ctx, write, {}, 'nothing to reconcile');
   // A record that does not match what was sent needs a person, not another loop.
   if (write.error === 'RECORD_MISMATCH') return release(ctx, write, {}, 'held for a person: the record does not match the write');
@@ -1290,29 +1386,9 @@ async function reconcile(ctx: Context, write: Write): Promise<StepReport> {
     const at = await agreedFinalized(ctx);
     const used = await agree(ctx, 'the issuer key’s finalized nonce', (client) => client.getTransactionCount({ address: ctx.issuer, blockNumber: at }));
     if (used <= write.nonce) return release(ctx, write, {}, 'waiting for both endpoints to finalize the nonce');
-    if (write.kind === 'REVOKE') {
-      const record = write.recordId ? await recordAt(ctx, write.recordId as Hex, at) : null;
-      if (revocationRequested(record, write)) {
-        const request = await agree(ctx, `the request to revoke ${record.recordId}`, (client) => requestTxOf(client, ctx.registry, record, at));
-        if (!request) return release(ctx, write, {}, 'requested on chain; waiting for finality');
-        return finalize(ctx, write, {
-          txHash: request.txHash,
-          blockNumber: request.blockNumber,
-          recordId: record.recordId,
-          linked: true,
-          revokeEffectiveAt: record.revokeEffectiveAt,
-          data: { nonce: null },
-        });
-      }
-      return fail(ctx, write, 'NONCE_CONSUMED', { nonce: null });
-    }
-    const doc = docOf(write);
-    const record = doc ? await agree(ctx, `the record of document ${doc}`, (_, reader) => reader.findByDocHash(doc, { blockNumber: at })) : null;
-    if (record && recordIsThisVersion(record, write)) {
-      const txHash = await agree(ctx, `the transaction that anchored ${record.recordId}`, (client) => anchoringTxOf(client, ctx.registry, record));
-      return finalize(ctx, write, { txHash, blockNumber: BigInt(record.blockNumber), recordId: record.recordId, linked: true, data: { nonce: null } });
-    }
-    return fail(ctx, write, 'NONCE_CONSUMED', { nonce: null });
+    // An audit-log head that did not land is not chased: the next nightly check queues another.
+    if (write.kind === 'AUDIT_HEAD') return fail(ctx, write, 'NONCE_CONSUMED', { nonce: null });
+    return settleConsumedNonce(ctx, versionOf(write), at);
   }
   // Not mined, not pending, nonce unused: the outcome cannot be read yet.
   ctx.log('error', 'INDETERMINATE write cannot be settled from chain state; the issuer key is held until it is', {
@@ -1321,4 +1397,31 @@ async function reconcile(ctx: Context, write: Write): Promise<StepReport> {
     finalizedNonce,
   });
   return release(ctx, write, {}, 'unsettled: transaction unknown and its nonce unused');
+}
+
+/** A version write whose nonce another transaction used: linked if what it was to write is on chain as it would have written it, else failed. */
+async function settleConsumedNonce(ctx: Context, write: Write, at: bigint): Promise<StepReport> {
+  if (write.kind === 'REVOKE') {
+    const record = write.recordId ? await recordAt(ctx, write.recordId as Hex, at) : null;
+    if (revocationRequested(record, write)) {
+      const request = await agree(ctx, `the request to revoke ${record.recordId}`, (client) => requestTxOf(client, ctx.registry, record, at));
+      if (!request) return release(ctx, write, {}, 'requested on chain; waiting for finality');
+      return finalize(ctx, write, {
+        txHash: request.txHash,
+        blockNumber: request.blockNumber,
+        recordId: record.recordId,
+        linked: true,
+        revokeEffectiveAt: record.revokeEffectiveAt,
+        data: { nonce: null },
+      });
+    }
+    return fail(ctx, write, 'NONCE_CONSUMED', { nonce: null });
+  }
+  const doc = docOf(write);
+  const record = doc ? await agree(ctx, `the record of document ${doc}`, (_, reader) => reader.findByDocHash(doc, { blockNumber: at })) : null;
+  if (record && recordIsThisVersion(record, write)) {
+    const txHash = await agree(ctx, `the transaction that anchored ${record.recordId}`, (client) => anchoringTxOf(client, ctx.registry, record));
+    return finalize(ctx, write, { txHash, blockNumber: BigInt(record.blockNumber), recordId: record.recordId, linked: true, data: { nonce: null } });
+  }
+  return fail(ctx, write, 'NONCE_CONSUMED', { nonce: null });
 }

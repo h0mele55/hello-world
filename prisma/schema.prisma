@@ -57,6 +57,9 @@ enum ChainWriteKind {
   ANCHOR
   ANCHOR_COPY
   REVOKE
+  /// The hash of the firm's latest audit event, written nightly so the log's
+  /// history is held to something outside the database (#94).
+  AUDIT_HEAD
 }
 
 enum ChainWriteStatus {
@@ -137,6 +140,7 @@ model IssuerOrg {
   auditChecks       AuditChainCheck[]
   registryWatches   RegistryWatch[]
   unjournaledWrites UnjournaledWrite[]
+  chainWrites       ChainWrite[]
 }
 
 model User {
@@ -296,9 +300,14 @@ model ReportVersion {
 /// issuer key, so two workers can never journal the same nonce.
 model ChainWrite {
   id                   String           @id @default(cuid())
-  reportVersionId      String
-  reportVersion        ReportVersion    @relation(fields: [reportVersionId], references: [id])
+  orgId                String
+  org                  IssuerOrg        @relation(fields: [orgId], references: [id])
+  /// Every kind but AUDIT_HEAD writes for a report version (a CHECK holds it).
+  reportVersionId      String?
+  reportVersion        ReportVersion?   @relation(fields: [reportVersionId], references: [id], onDelete: Restrict)
   kind                 ChainWriteKind
+  /// AUDIT_HEAD: the hash of the firm's audit event the check found last (#94).
+  auditHead            String?
   status               ChainWriteStatus @default(INTENT)
   /// The org's mode when the row was written: a DRY_RUN row is never broadcast.
   mode                 ChainWriteMode
@@ -329,6 +338,7 @@ model ChainWrite {
   @@index([status, leaseUntil])
   @@index([reportVersionId])
   @@index([chainId, issuer])
+  @@index([orgId, kind])
 }
 
 /// Append-only, hash-chained per organisation: each row's hash is
@@ -435,17 +445,21 @@ model Revocation {
 /// last intact check, so history that was cut short or rewritten, and then
 /// re-hashed so the chain verifies, is still caught.
 model AuditChainCheck {
-  id        String    @id @default(cuid())
-  orgId     String
-  org       IssuerOrg @relation(fields: [orgId], references: [id])
-  checkedAt DateTime
-  ok        Boolean
+  id          String    @id @default(cuid())
+  orgId       String
+  org         IssuerOrg @relation(fields: [orgId], references: [id])
+  checkedAt   DateTime
+  ok          Boolean
   /// Events in the chain, and its last hash, when intact.
-  count     Int
-  head      String?
+  count       Int
+  head        String?
   /// The first event that did not verify, and why.
-  brokenSeq Int?
-  reason    String?
+  brokenSeq   Int?
+  reason      String?
+  /// The firm's audit-log heads on chain that the check held the log to (#94),
+  /// and when the latest was written; null when the chain was not read.
+  chainHeads  Int?
+  chainHeadAt DateTime?
 
   @@index([orgId, checkedAt])
 }
@@ -506,6 +520,7 @@ enum UnjournaledKind {
   ANCHOR
   ANCHOR_COPY
   REVOCATION
+  AUDIT_HEAD
 }
 
 /// How far the registry watch (#93, scripts/watch-registry.ts) has read the

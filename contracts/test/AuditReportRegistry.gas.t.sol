@@ -22,6 +22,9 @@ contract AuditReportRegistryGasTest is Test {
     // effect) and reads the deployment's delay.
     uint256 internal constant REVOKE_CEILING = 80_000;
     uint256 internal constant CANCEL_CEILING = 40_000;
+    // An audit-log head writes two fresh slots (#94); the firm's first also
+    // writes its list's length, which this measures. Later ones cost less.
+    uint256 internal constant AUDIT_HEAD_CEILING = 110_000;
 
     function setUp() public {
         registry = new AuditReportRegistry(address(this), 1 days);
@@ -48,10 +51,15 @@ contract AuditReportRegistryGasTest is Test {
         registry.cancelRevocation(copy);
         uint256 cancelGas = vm.snapshotGasLastCall("cancel_revocation");
 
+        vm.prank(issuer);
+        registry.recordAuditHead(keccak256("head"));
+        uint256 auditHeadGas = vm.snapshotGasLastCall("record_audit_head");
+
         assertLt(anchorV1, ANCHOR_CEILING, "anchor v1");
         assertLt(anchorV2, ANCHOR_CEILING, "anchor v2");
         assertLt(copyGas, COPY_CEILING, "copy");
         assertLt(revokeGas, REVOKE_CEILING, "revoke");
         assertLt(cancelGas, CANCEL_CEILING, "cancel");
+        assertLt(auditHeadGas, AUDIT_HEAD_CEILING, "audit head");
     }
 }

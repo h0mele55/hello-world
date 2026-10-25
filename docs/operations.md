@@ -9,14 +9,15 @@ on a public testnet; none of this makes its anchors legally binding (rule 9).
 | --- | --- | --- | --- |
 | The anchoring worker | `npm run worker` | continuously, a pass every 15 s | error log lines; the console's low-balance and endpoint-disagreement banners |
 | The mailer | `npm run mailer` | continuously, a pass every 30 s (`MAILER_INTERVAL_MS`) | an error line naming notices that failed for good |
-| The audit-chain check | `npm run audit:check` | nightly, e.g. `17 2 * * *` | exit code 1 and an `AUDIT CHAIN BROKEN` error line; the console's banner |
+| The audit-chain check | `npm run audit:check` | nightly, e.g. `17 2 * * *` | exit code 1 and an `AUDIT CHAIN BROKEN` error line, naming any head on chain the log lacks; the console's banner |
 | The registry watch | `npm run watch:registry` | every ten minutes, e.g. `*/10 * * * *` | exit code 1 while any write the journal did not make is unreviewed, an error line for each new one; the console's banner |
 | The backup | `scripts/backup.sh` | nightly, after the check, e.g. `37 2 * * *` | a non-zero exit code |
 
 Run the check, the watch and the backup from the app's directory with the
-app's environment. The check reads `DATABASE_URL` only. The watch also reads
-`ANCHOR_NETWORK`, its `<NETWORK>_RPC_URL` and the deployment record, and holds
-no key. The backup also needs `FILE_STORAGE_DIR` and `BACKUP_DIR`.
+app's environment. The check reads `DATABASE_URL` and the chain (see below).
+The watch reads `ANCHOR_NETWORK`, its `<NETWORK>_RPC_URL` and the deployment
+record. Neither holds a key. The backup also needs `FILE_STORAGE_DIR` and
+`BACKUP_DIR`.
 
 The watch must run often, not nightly: a revocation it reports takes effect
 after the registry's delay (24 hours by default), and the owner must cancel it
@@ -64,6 +65,20 @@ the chain to the last check that found it intact:
 A chain that verifies on its own can still have had its tail cut off. It can
 also have had history rewritten and re-hashed by someone who controls the
 database. The check names either case: `TRUNCATED` or `REWRITTEN`.
+
+The last intact check is in the same database, so it is also held to the
+chain (#94). The check reads the firm's audit-log heads in the registry, on
+both endpoints at one finalized block, and every head the registry's owner
+has not voided must still be the hash of one of its events
+(`ANCHORED_HEAD_MISSING` otherwise, naming the heads;
+`docs/runbooks/audit-head-missing.md`). A chain it cannot read is
+`CHAIN_UNREADABLE`, never a pass. When the log has moved on since the last
+head, it queues the new head in the journal, and the worker writes it like
+any other write. It therefore reads `ANCHOR_NETWORK`, `ISSUER_ADDRESS`, the
+deployment record and both `<NETWORK>_RPC_URL` and `<NETWORK>_RPC_URL_2`, and
+refuses to start without them. A firm writes at most one head a day, and
+none on a day it did nothing; nothing is queued while its write mode is
+DISABLED.
 
 Every run is recorded (`AuditChainCheck`), and `/audit-log` shows the latest
 result. A broken check puts a banner on every console page. A check older than

@@ -13,8 +13,8 @@ import { startAnvil, type AnvilHandle } from './anvil';
 import { deployOn, ISSUER_ORG, type Registry } from './registry-harness';
 
 /**
- * scripts/owner-call.ts (#67, #68, #95): it prints what the owner must execute
- * and sends nothing, except an issuer change or a cancellation with --send
+ * scripts/owner-call.ts (#67, #68, #94, #95): it prints what the owner must execute
+ * and sends nothing, except an issuer change, a cancellation or a void with --send
  * from an owner that is a single key; it never sends an ownership move; it
  * refuses, by name, a call that would fail.
  */
@@ -156,6 +156,28 @@ describe('the owner’s calls', () => {
     await registry.testClient.mine({ blocks: 1 });
     expect((await recordOf()).revoked).toBe(true);
     await expect(ownerCall(['cancel-revocation', recordId])).resolves.toMatchObject({ code: 2, error: expect.stringContaining('already in effect') });
+  });
+
+  it('voids an audit-log head a stolen key wrote, and refuses one that is unknown or already voided (#94)', async () => {
+    const { address } = registry.deployment;
+    const key = privateKeyToAccount(generatePrivateKey());
+    expect((await ownerCall(['add-issuer', key.address, '--send'], { OWNER_PRIVATE_KEY: ownerKey })).code).toBe(0);
+    await registry.testClient.setBalance({ address: key.address, value: parseEther('1') });
+    const issuerWallet = createWalletClient({ chain: foundry, transport: http(anvil.url), account: key });
+    const forged = keccak256(toBytes('a head no log of the firm holds'));
+    const hash = await issuerWallet.writeContract({ address, abi: registryAbi, functionName: 'recordAuditHead', args: [forged] });
+    await registry.publicClient.waitForTransactionReceipt({ hash });
+    const headsOf = () => registry.publicClient.readContract({ address, abi: registryAbi, functionName: 'auditHeads', args: [orgIdFor(ISSUER_ORG), 0n, 10n] });
+    const index = (await headsOf()).length - 1;
+
+    await expect(ownerCall(['void-audit-head', String(index + 1)])).resolves.toMatchObject({ code: 2, error: expect.stringContaining(`has no audit-log head ${index + 1}`) });
+    await expect(ownerCall(['void-audit-head', 'the-last-one'])).resolves.toMatchObject({ code: 2, error: expect.stringContaining('whole number') });
+    const printed = await ownerCall(['void-audit-head', String(index)]);
+    expect(printed.out!.transaction).toMatchObject({ from: owner.address, to: address, data: encodeFunctionData({ abi: registryAbi, functionName: 'voidAuditHead', args: [orgIdFor(ISSUER_ORG), BigInt(index)] }) });
+    expect((await headsOf())[index].voided).toBe(false);
+    expect(await ownerCall(['void-audit-head', String(index), '--send'], { OWNER_PRIVATE_KEY: ownerKey })).toMatchObject({ code: 0, out: { message: 'sent' } });
+    expect((await headsOf())[index]).toMatchObject({ head: forged, voided: true });
+    await expect(ownerCall(['void-audit-head', String(index)])).resolves.toMatchObject({ code: 2, error: expect.stringContaining('already voided') });
   });
 
   it('refuses, by name, what would fail or what is not this registry', async () => {

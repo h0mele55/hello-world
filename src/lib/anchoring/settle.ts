@@ -54,10 +54,9 @@ export async function releaseStuckNonce(deps: ReleaseDeps, input: { chainWriteId
   try {
     const write = await prisma.chainWrite.findUnique({
       where: { id: input.chainWriteId },
-      include: { reportVersion: { select: { id: true, engagement: { select: { client: { select: { orgId: true } } } } } } },
     });
     if (!write) throw new ReleaseError('NOT_FOUND');
-    const orgId = write.reportVersion.engagement.client.orgId;
+    const orgId = write.orgId;
     const operator = await prisma.user.findUnique({ where: { email: input.operatorEmail.toLowerCase() } });
     if (!operator || operator.role !== 'APPROVER' || operator.orgId !== orgId) throw new ReleaseError('OPERATOR_NOT_APPROVER');
     if (write.chainId !== deployment.chainId || getAddress(write.registry) !== getAddress(deployment.address) || getAddress(write.issuer) !== account.address) {

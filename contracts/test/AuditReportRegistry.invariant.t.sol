@@ -26,6 +26,11 @@ contract RegistryHandler is Test {
     uint256 public replacedRevocations;
     uint256 public nonOwnerCancels;
     uint256 public lateCancels;
+    /// The org's audit-log heads as written, and which the owner voided (#94).
+    bytes32[] public ghostHeads;
+    mapping(uint256 index => bool) public ghostVoided;
+    uint256 public nonOwnerVoids;
+    uint256 public revoids;
     uint256 private nonce;
 
     constructor(
@@ -136,6 +141,34 @@ contract RegistryHandler is Test {
         } catch {}
     }
 
+    /// An issuer key writes an audit-log head.
+    function recordHead(uint256 keySeed) external atCurrentTime {
+        bytes32 head = _fresh();
+        vm.prank(_key(keySeed));
+        try registry.recordAuditHead(head) returns (uint256 index) {
+            assertEq(index, ghostHeads.length);
+            ghostHeads.push(head);
+        } catch {}
+    }
+
+    /// The owner, an issuer key or a stranger tries to void a head.
+    function voidHead(uint256 indexSeed, uint256 callerSeed) external atCurrentTime {
+        if (ghostHeads.length == 0) return;
+        uint256 index = indexSeed % ghostHeads.length;
+        uint256 pick = callerSeed % 4;
+        address caller = pick == 0 ? owner : pick == 1 ? stranger : _key(callerSeed / 4);
+        vm.prank(caller);
+        try registry.voidAuditHead(keccak256("org"), index) {
+            if (caller != owner) nonOwnerVoids++;
+            if (ghostVoided[index]) revoids++;
+            ghostVoided[index] = true;
+        } catch {}
+    }
+
+    function headCount() external view returns (uint256) {
+        return ghostHeads.length;
+    }
+
     function strangerAttempts(uint256 seed) external atCurrentTime {
         bytes32 target = recordIds.length == 0 ? _fresh() : recordIds[seed % recordIds.length];
         vm.startPrank(stranger);
@@ -149,6 +182,9 @@ contract RegistryHandler is Test {
             strangerWrites++;
         } catch {}
         try registry.cancelRevocation(target) {
+            strangerWrites++;
+        } catch {}
+        try registry.recordAuditHead(_fresh()) {
             strangerWrites++;
         } catch {}
         vm.stopPrank();
@@ -237,5 +273,20 @@ contract AuditReportRegistryInvariantTest is Test {
     /// A reissue naming anything but the current latest never lands.
     function invariant_staleParentNeverAccepted() public view {
         assertEq(handler.staleAccepted(), 0);
+    }
+
+    /// Audit-log heads are append-only: each reads as written, in order, and
+    /// only its voided flag ever changes, once, by the owner (#94).
+    function invariant_auditHeadsAppendOnly() public view {
+        uint256 count = handler.headCount();
+        assertEq(registry.auditHeadCount(keccak256("org")), count);
+        AuditReportRegistry.AuditHead[] memory heads =
+            registry.auditHeads(keccak256("org"), 0, count);
+        for (uint256 i = 0; i < count; i++) {
+            assertEq(heads[i].head, handler.ghostHeads(i));
+            assertEq(heads[i].voided, handler.ghostVoided(i));
+        }
+        assertEq(handler.nonOwnerVoids(), 0);
+        assertEq(handler.revoids(), 0);
     }
 }

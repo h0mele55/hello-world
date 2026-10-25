@@ -67,10 +67,17 @@ export default async function AuditLogPage({ searchParams }: { searchParams: Pro
           <Heading level={2}>{t('nightly.title')}</Heading>
           {nightly.state === 'NEVER_RUN' ? <p className="text-content-warning">{t('nightly.neverRun')}</p> : null}
           {nightly.state === 'INTACT' ? <p>{t('nightly.intact', { when: when(nightly.checkedAt), count: nightly.count })}</p> : null}
+          {nightly.state === 'INTACT' || nightly.state === 'STALE' ? (
+            <p data-testid="chain-heads" data-count={nightly.chainHeads ?? ''}>
+              {nightly.chainHeads ? t('nightly.heads', { count: nightly.chainHeads, when: when(nightly.chainHeadAt!) }) : t('nightly.noHeads')}
+            </p>
+          ) : null}
           {nightly.state === 'STALE' ? <p className="text-content-warning">{t('nightly.stale', { when: when(nightly.checkedAt) })}</p> : null}
           {nightly.state === 'BROKEN' ? (
             <p role="alert" className="text-content-error">
-              {t('nightly.broken', { when: when(nightly.checkedAt), seq: nightly.seq, reason: t(`reasons.${nightly.reason}`) })}
+              {nightly.seq === null
+                ? t('nightly.brokenNoEvent', { when: when(nightly.checkedAt), reason: t(`reasons.${nightly.reason}`) })
+                : t('nightly.broken', { when: when(nightly.checkedAt), seq: nightly.seq, reason: t(`reasons.${nightly.reason}`) })}
             </p>
           ) : null}
           <p className="text-sm text-content-muted">{t('nightly.how')}</p>

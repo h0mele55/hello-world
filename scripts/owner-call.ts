@@ -1,19 +1,20 @@
 /**
  * The registry owner's acts: registering and retiring issuer keys, cancelling
- * a revocation before it takes effect, and moving ownership to a Safe
- * (docs/runbooks/key-rotation.md, docs/runbooks/stolen-issuer-key.md, #67,
- * #68, #95).
+ * a revocation before it takes effect, voiding an audit-log head a stolen key
+ * wrote, and moving ownership to a Safe (docs/runbooks/key-rotation.md,
+ * docs/runbooks/stolen-issuer-key.md, #67, #68, #94, #95).
  *
  *   npx tsx scripts/owner-call.ts <network> add-issuer <address>          setIssuer(address, firm, true)
  *   npx tsx scripts/owner-call.ts <network> remove-issuer <address>       setIssuer(address, firm, false)
  *   npx tsx scripts/owner-call.ts <network> cancel-revocation <recordId>  cancelRevocation(recordId), before it takes effect
+ *   npx tsx scripts/owner-call.ts <network> void-audit-head <index>       voidAuditHead(firm, index): a head the firm's log never held
  *   npx tsx scripts/owner-call.ts <network> transfer-owner <safe>         transferOwnership(safe), by the current owner
  *   npx tsx scripts/owner-call.ts <network> accept-owner                  acceptOwnership(), by the new owner
  *
  * Options:
  *   --deployment <file>  instead of deployments/<network>.json
  *   --send               send it with OWNER_PRIVATE_KEY. Only for the issuer
- *                        calls and a cancellation, and only while the owner is
+ *                        calls, a cancellation and a void, and only while the owner is
  *                        a single key (Anvil, a testnet rehearsal). Moving
  *                        ownership is never sent from here: the owner
  *                        executes it.
@@ -46,15 +47,15 @@ function refuse(message: string): never {
 
 const IssuerRecord = z.object({ issuer: z.object({ orgId: z.string().regex(/^0x[0-9a-fA-F]{64}$/), orgName: z.string().min(1) }) });
 
-type Action = 'add-issuer' | 'remove-issuer' | 'cancel-revocation' | 'transfer-owner' | 'accept-owner';
-const ACTIONS: readonly Action[] = ['add-issuer', 'remove-issuer', 'cancel-revocation', 'transfer-owner', 'accept-owner'];
+type Action = 'add-issuer' | 'remove-issuer' | 'cancel-revocation' | 'void-audit-head' | 'transfer-owner' | 'accept-owner';
+const ACTIONS: readonly Action[] = ['add-issuer', 'remove-issuer', 'cancel-revocation', 'void-audit-head', 'transfer-owner', 'accept-owner'];
 /** A cancellation that lands after the revocation takes effect reverts; below this, say so. */
 const CANCEL_MARGIN_SECONDS = 15 * 60;
 
 async function main() {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: { deployment: { type: 'string' }, send: { type: 'boolean', default: false } } });
   const [network, action, argument] = positionals;
-  if (!isNetworkName(network) || !ACTIONS.includes(action as Action)) refuse(`usage: owner-call <${Object.keys(NETWORKS).join('|')}> <${ACTIONS.join('|')}> [address | record id] [--deployment <file>] [--send]`);
+  if (!isNetworkName(network) || !ACTIONS.includes(action as Action)) refuse(`usage: owner-call <${Object.keys(NETWORKS).join('|')}> <${ACTIONS.join('|')}> [address | record id | head index] [--deployment <file>] [--send]`);
   const act = action as Action;
   if (values.send && (act === 'transfer-owner' || act === 'accept-owner')) refuse('moving ownership is the owner’s own act: run without --send and execute the printed transaction');
 
@@ -79,6 +80,7 @@ async function main() {
   let call:
     | { functionName: 'setIssuer'; args: readonly [Address, Hex, boolean] }
     | { functionName: 'cancelRevocation'; args: readonly [Hex] }
+    | { functionName: 'voidAuditHead'; args: readonly [Hex, bigint] }
     | { functionName: 'transferOwnership'; args: readonly [Address] }
     | { functionName: 'acceptOwnership'; args: readonly [] };
   let from: Address = owner;
@@ -110,6 +112,16 @@ async function main() {
     if (left < CANCEL_MARGIN_SECONDS) console.error(JSON.stringify({ level: 'warn', message: `the revocation takes effect in ${Math.max(left, 0)} s, at ${effectiveAt}; a cancellation mined after that reverts` }));
     call = { functionName: 'cancelRevocation', args: [recordId] };
     description = `cancel the pending revocation of record ${recordId} (reason code ${record.revokeReason}), which would take effect at ${effectiveAt}`;
+  } else if (act === 'void-audit-head') {
+    // The index the console's registry-watch card and the check's error name (#94).
+    if (!argument || !/^\d+$/.test(argument)) refuse('give the head’s index (a whole number) in the firm’s list');
+    const index = BigInt(argument);
+    const [head] = await publicClient.readContract({ ...registry, functionName: 'auditHeads', args: [orgId, index, 1n] });
+    if (!head) refuse(`${firm.data.issuer.orgName} has no audit-log head ${index}`);
+    if (head.voided) refuse(`audit-log head ${index} is already voided`);
+    const recordedAt = new Date(head.recordedAt * 1000).toISOString();
+    call = { functionName: 'voidAuditHead', args: [orgId, index] };
+    description = `void audit-log head ${index} of ${firm.data.issuer.orgName} (${head.head}, written by ${head.issuer} at ${recordedAt}): the nightly check stops holding the log to it. Only for a head the firm's log never held, never to make a rewritten log pass`;
   } else if (act === 'transfer-owner') {
     if (!argument || !isAddress(argument) || argument === ZERO) refuse('give the Safe’s address');
     const safe = getAddress(argument);

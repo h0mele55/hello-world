@@ -1079,7 +1079,7 @@ script (#61, #67, #68):
   - nothing detects writes the journal did not make (#93, since built as the
     registry watch, 6e);
   - a database owner can rewrite the audit log and its last check together
-    (#94);
+    (#94, since built as the audit-log head on chain, 6h);
   - one stolen key can revoke every record for good, a decision before
     production (#95, since built as delayed revocation, 6d);
   - recipients are not told of a revocation (#96, since built, 6f).
@@ -1246,6 +1246,33 @@ that issue: one issuer key may no longer withdraw a firm's records at once.
 - **Tested** with a second endpoint over the same Anvil that lies about a
   receipt, forgets a revocation, or lags; disabling the comparison fails the
   first two.
+
+6h keeps the audit log's head on chain (#94; the owner chose the chain over a
+locked bucket or a mailbox):
+
+- **The registry keeps each firm's audit-log heads**: `recordAuditHead(head)`
+  by an issuer key appends the hash of the firm's latest audit event, and
+  nothing else, not even its number, so the firm's activity stays private.
+  Only the owner can void one (`voidAuditHead`), for a head a stolen key wrote.
+- **The nightly check queues the head** as a journal row of a new kind,
+  `AUDIT_HEAD`, with no report version; the worker writes it like any other
+  write and settles it on its own event, read on both endpoints. A firm writes
+  at most one a day, and none on a day it did nothing.
+- **The check holds the log to every head on chain** that is not voided, read
+  at one finalized block on both endpoints: each must still be the hash of an
+  event (`ANCHORED_HEAD_MISSING`, naming the heads). Every head, not only the
+  latest: whoever owns the database can queue rows, so could have the worker
+  write the head of a rewritten log, but cannot remove the earlier ones. A
+  chain it cannot read is `CHAIN_UNREADABLE`.
+- **The registry watch reports a head** the journal did not make, and
+  `scripts/owner-call.ts void-audit-head` prints the owner's void.
+  `docs/runbooks/audit-head-missing.md` says what to do; a restore from a
+  backup older than a head is the expected case.
+- **Tested** on Anvil and Postgres (queued, written, held to; a rewrite of the
+  log and its checks found; a stolen key's head found and voided; endpoints
+  that disagree refused), in the database tests, and in CI after the
+  end-to-end tests, where the check queues the day's head, the worker writes
+  it and the next check holds the log to it.
 
 **Prompt**
 

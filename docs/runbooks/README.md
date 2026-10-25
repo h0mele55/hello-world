@@ -14,6 +14,7 @@ never to do. `docs/operations.md` says what runs day to day, and
 | [stuck-writes.md](stuck-writes.md) | A write that does not reach FINAL, an issuer key held by an INDETERMINATE write, a low balance |
 | [rpc-outage.md](rpc-outage.md) | An RPC endpoint that is down, slow or disagrees, for the worker or the verifier |
 | [restore.md](restore.md) | The database or the file store is lost or damaged |
+| [audit-head-missing.md](audit-head-missing.md) | The nightly check finds a head of the audit log on chain that the log no longer holds (#94) |
 | [mail.md](mail.md) | Recipients are not getting their email |
 | [sepolia-sunset.md](sepolia-sunset.md) | Sepolia is being shut down |
 

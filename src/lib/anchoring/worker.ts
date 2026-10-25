@@ -24,6 +24,7 @@ import { docHashOf } from '@/lib/commitments';
 import { explorerTxUrl, networkNameOf } from '@/lib/chain/explorer';
 import type { FileStore } from '@/lib/file-store';
 import { NORMALISER_VERSION } from '@/lib/opinion/normalise';
+import { queueSupersededNotices } from '@/lib/notifications/queue';
 import { REVOCATION_CODES } from '@/lib/revocation-reasons';
 import { checkStampedCopy, stampPdf, StampError } from '@/lib/stamp';
 import { STAMP_VERSION, type StampFields } from '@/lib/stamp-fields';
@@ -64,6 +65,10 @@ import { classifySendError, type SendOutcome } from './send';
  * it as the original's DISTRIBUTION_COPY; when that is FINAL the version is
  * COMPLETE. An anchor-only version (signed or edit-protected, never rewritten)
  * gets a verification certificate instead, after its ANCHOR is FINAL.
+ *
+ * A version that becomes COMPLETE and supersedes an earlier one queues an
+ * email to each of the engagement's recipients in the same transaction
+ * (src/lib/notifications/queue.ts); the mailer sends them.
  *
  * REVOKE withdraws a version's original record, with the reason of the
  * revocation an approver approved (src/lib/anchoring/revocation.ts). When it
@@ -346,6 +351,7 @@ async function transition(
         data: { status: 'COMPLETE', copyRecordId: effect.recordId, copyTxHash: effect.txHash, copyBlock: effect.blockNumber, completedAt: ctx.now() },
       });
       if (completed.count !== 1) throw new ChainError('VERSION_NOT_ANCHORED', `version ${version.id} is not ANCHORED with a copy`);
+      await queueSupersededNotices(tx, version, version.engagement.client.orgId, ctx.now());
     } else if (effect?.kind === 'REVERT_REVOCATION') {
       await tx.revocation.updateMany({ where: { reportVersionId: version.id, status: 'APPROVED' }, data: { status: 'REQUESTED', approvedById: null, approvedAt: null } });
     } else if (effect?.kind === 'REVOKED') {
@@ -765,6 +771,7 @@ async function certifyAnchorOnly(ctx: Context, report: PassReport) {
           data: { status: 'COMPLETE', certificateStoredFileId: file.id, completedAt: ctx.now() },
         });
         if (count !== 1) throw new ChainError('VERSION_NOT_ANCHORED', `version ${version.id} is no longer waiting for a certificate`);
+        await queueSupersededNotices(tx, version, version.engagement.client.orgId, ctx.now());
         await appendAuditEvent(
           tx,
           {

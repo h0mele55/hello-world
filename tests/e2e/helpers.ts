@@ -49,28 +49,43 @@ export function uniquePdf(name: string, tag: string): Buffer {
   return Buffer.concat([bytes, Buffer.from(`%e2e ${tag}\n`)]);
 }
 
-const addressed = new WeakSet<BrowserContext>();
+interface Addresses {
+  current: string;
+  byPerson: Map<string, string>;
+}
+const addresses = new WeakMap<BrowserContext, Addresses>();
 
 /**
- * Gives the browser context a client address of its own on requests to the
- * app, as a trusted proxy would set it (the test server trusts
- * X-Forwarded-For): sign-in is limited per address, and parallel tests are
- * different people, not one office signing in a dozen times a minute.
+ * Gives requests to the app a client address, as a trusted proxy would set it
+ * (the test server trusts X-Forwarded-For): sign-in is limited per address,
+ * and parallel tests are different people, not one office signing in a dozen
+ * times a minute. Within one test each person signs in from an address of
+ * their own, as they would from their own machine; the browser keeps using
+ * the address of whoever signed in last.
  */
-export async function fromOwnAddress(page: Page) {
+export async function fromOwnAddress(page: Page, person = '') {
   const context = page.context();
-  if (addressed.has(context)) return;
-  addressed.add(context);
-  const address = `198.18.${randomInt(256)}.${randomInt(1, 255)}`;
-  const app = new URL(test.info().project.use.baseURL ?? 'http://127.0.0.1:3100').origin;
-  await context.route(
-    (url) => url.origin === app,
-    (route) => route.continue({ headers: { ...route.request().headers(), 'x-forwarded-for': address } }),
-  );
+  let state = addresses.get(context);
+  if (!state) {
+    const created: Addresses = { current: '', byPerson: new Map() };
+    addresses.set(context, created);
+    state = created;
+    const app = new URL(test.info().project.use.baseURL ?? 'http://127.0.0.1:3100').origin;
+    await context.route(
+      (url) => url.origin === app,
+      (route) => route.continue({ headers: { ...route.request().headers(), 'x-forwarded-for': created.current } }),
+    );
+  }
+  let address = state.byPerson.get(person);
+  if (!address) {
+    address = `198.18.${randomInt(256)}.${randomInt(1, 255)}`;
+    state.byPerson.set(person, address);
+  }
+  state.current = address;
 }
 
 export async function signIn(page: Page, user: TestUser) {
-  await fromOwnAddress(page);
+  await fromOwnAddress(page, user.email);
   await page.goto('/login');
   await page.getByRole('textbox', { name: 'Email' }).fill(user.email);
   await page.getByRole('textbox', { name: 'Password' }).fill(user.password);
@@ -96,9 +111,13 @@ export async function createEngagement(page: Page, tag: string) {
   await expect(page.getByRole('heading', { level: 1, name: 'Example Manufacturing AD' })).toBeVisible();
 }
 
-/** Uploads a fixture on the engagement page and confirms its found opinion; leaves the page on the version. */
-export async function uploadAndConfirm(page: Page, fixture: string, tag: string) {
+/**
+ * Uploads a fixture on the engagement page and confirms its found opinion;
+ * leaves the page on the version. A version after the first needs its reason.
+ */
+export async function uploadAndConfirm(page: Page, fixture: string, tag: string, reason?: 'CORRECTION' | 'SUBSEQUENT_EVENT' | 'OTHER') {
   await page.getByTestId('upload-file').setInputFiles({ name: 'report.pdf', mimeType: 'application/pdf', buffer: uniquePdf(fixture, tag) });
+  if (reason) await page.getByTestId(`reason-${reason}`).click();
   await page.getByRole('button', { name: 'Upload' }).click();
   await expect(page).toHaveURL(/\/reports\/versions\//);
   await expect(page.getByTestId('extraction-found')).toBeVisible();

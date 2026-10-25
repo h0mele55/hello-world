@@ -10,21 +10,49 @@ import { admin, approver, createEngagement, preparer, runTag, signIn, uniquePdf,
  * live anchor that the worker sends and settles once its block is finalized;
  * the worker then stamps and anchors the distribution copy, which can be
  * downloaded once the version is complete. A signed report gets a
- * verification certificate instead. Last, an admin asks for the first version
- * to be revoked, an approver approves, and the verifier then reports every
- * copy of it as revoked.
+ * verification certificate instead. Then the Phase 5 exit gate (#60): a
+ * recipient is listed, version 2 supersedes version 1, the recipient is
+ * emailed a link to the latest record and nothing else, an admin asks for
+ * version 1 to be revoked, a different approver approves, and the verifier
+ * reports every copy of version 1 as revoked and version 2 as the latest.
  *
  * Needs, besides the seeded database: Anvil at LOCAL_RPC_URL started with
  * `--slots-in-an-epoch 1`, the registry deployed there (deployments/local.json),
  * ANCHOR_NETWORK=local and ISSUER_ADDRESS for the app, and ISSUER_PRIVATE_KEY
  * for the worker, which this test runs as a process of its own. The app's
- * server is started without the key (playwright.config.ts). See the CI job.
+ * server is started without the key (playwright.config.ts). The recipients'
+ * email needs Mailpit: SMTP_URL and MAIL_FROM for the mailer, MAILPIT_URL to
+ * read what it sent. See the CI job.
  */
 
 test.skip(!process.env.ANCHOR_NETWORK && !process.env.CI, 'needs a local chain (ANCHOR_NETWORK=local; see CI)');
 
 function runWorkerOnce() {
   execFileSync(path.join(process.cwd(), 'node_modules', '.bin', 'tsx'), ['scripts/worker.ts', '--once'], { env: process.env, stdio: 'pipe' });
+}
+
+/** The mailer, as its own process too: it holds no issuer key. */
+function runMailerOnce() {
+  const env = { ...process.env };
+  delete env.ISSUER_PRIVATE_KEY;
+  execFileSync(path.join(process.cwd(), 'node_modules', '.bin', 'tsx'), ['scripts/mailer.ts', '--once'], { env, stdio: 'pipe' });
+}
+
+interface MailpitMessage {
+  ID: string;
+  To: { Address: string }[];
+  Subject: string;
+  Text: string;
+  HTML: string;
+  Attachments: unknown[];
+  Inline: unknown[];
+}
+
+/** Every message Mailpit holds for one address, read through its API. */
+async function mailTo(address: string): Promise<MailpitMessage[]> {
+  const base = process.env.MAILPIT_URL ?? 'http://127.0.0.1:8025';
+  const found = (await (await fetch(`${base}/api/v1/search?query=${encodeURIComponent(`to:"${address}"`)}`)).json()) as { messages: { ID: string }[] };
+  return Promise.all(found.messages.map(async (m) => (await (await fetch(`${base}/api/v1/message/${m.ID}`)).json()) as MailpitMessage));
 }
 
 async function mine(blocks: number) {
@@ -61,10 +89,11 @@ async function approve(page: Page, label: string) {
   await expect(page.getByTestId('anchor-queued')).toBeVisible();
 }
 
-test('a dry run is only simulated; a live anchor is sent, final, then stamped, copied and downloadable', async ({ page }) => {
-  test.setTimeout(240_000);
+test('a dry run is simulated; a live anchor is final, copied and downloadable; version 2 supersedes, recipients are told, and version 1 is revoked', async ({ page }) => {
+  test.setTimeout(360_000);
   const tag = runTag();
   let versionUrl = '';
+  let engagementUrl = '';
   let copy: Buffer = Buffer.alloc(0);
 
   await test.step('the preparer uploads a report and confirms its opinion', async () => {
@@ -73,6 +102,7 @@ test('a dry run is only simulated; a live anchor is sent, final, then stamped, c
     await uploadAndConfirm(page, 'en-unmodified.pdf', tag);
     versionUrl = page.url();
     await expect(page.getByTestId('anchoring-panel')).toContainText('Waiting for an approver');
+    await expect(page.getByTestId('commitments-hint')).toContainText('Nothing has been anchored yet.');
     await expect(page.getByTestId('approve-anchor')).toHaveCount(0);
   });
 
@@ -120,6 +150,7 @@ test('a dry run is only simulated; a live anchor is sent, final, then stamped, c
     runWorkerOnce();
     await page.reload();
     await expect(page.getByTestId('complete')).toBeVisible();
+    await expect(page.getByTestId('commitments-hint')).toHaveText('Only these values went on chain, in the record below.');
     await expect(page.getByTestId('copy-record-id')).toHaveText(/^0x[0-9a-f]{64}$/);
     await expect(page.getByText('Complete', { exact: true })).toBeVisible();
     const response = await page.request.get(await page.getByTestId('download-copy').getAttribute('href') ?? '');
@@ -134,6 +165,8 @@ test('a dry run is only simulated; a live anchor is sent, final, then stamped, c
     const block = await page.getByTestId('anchor-block').textContent();
     const recordId = await page.getByTestId('anchor-record-id').textContent();
     await page.getByRole('link', { name: /Example Manufacturing AD/ }).click();
+    await page.waitForURL(/\/reports\/(?!versions\/)[^/]+$/);
+    engagementUrl = page.url();
     const version = page.getByTestId('timeline-version');
     await expect(version).toHaveCount(1);
     await expect(version).toHaveAttribute('data-status', 'COMPLETE');
@@ -198,6 +231,81 @@ test('a dry run is only simulated; a live anchor is sent, final, then stamped, c
     expect((await response.body()).subarray(0, 5).toString()).toBe('%PDF-');
   });
 
+  const recipients = { en: `maria-${tag}@lender.example`, bg: `georgi-${tag}@regulator.example` };
+
+  await test.step('the preparer lists who holds the report', async () => {
+    await page.context().clearCookies();
+    await signIn(page, preparer);
+    await page.goto(engagementUrl);
+    await expect(page.getByTestId('no-recipients')).toBeVisible();
+    for (const [locale, name, email] of [
+      ['en', 'Maria Petrova', recipients.en],
+      ['bg', 'Георги Иванов', recipients.bg],
+    ] as const) {
+      await page.getByTestId('recipient-name').fill(name);
+      await page.getByTestId('recipient-email').fill(email.toUpperCase());
+      await page.getByTestId(`recipientLocale-${locale}`).click();
+      await page.getByTestId('add-recipient').click();
+      await expect(page.locator(`[data-testid=recipient][data-email="${email}"]`)).toBeVisible();
+    }
+    // Nothing is sent for version 1: it supersedes nothing.
+    await expect(page.getByTestId('recipient-last')).toHaveCount(0);
+  });
+
+  await test.step('version 2 supersedes version 1: issued, approved by someone else, anchored and complete', async () => {
+    await uploadAndConfirm(page, 'en-qualified.pdf', tag, 'CORRECTION');
+    const v2Url = page.url();
+    await page.context().clearCookies();
+    await signIn(page, approver);
+    await page.goto(v2Url);
+    await approve(page, 'Approve anchor');
+    runWorkerOnce();
+    await mine(3);
+    runWorkerOnce();
+    await mine(3);
+    runWorkerOnce();
+    await page.reload();
+    await expect(page.getByTestId('complete')).toBeVisible();
+  });
+
+  await test.step('each recipient is emailed a link to the latest record, in their language, and nothing else', async () => {
+    // Locally without Mailpit, only this step is left out; in CI the mailer refuses to start without it.
+    if (!process.env.SMTP_URL && !process.env.CI) return;
+    runMailerOnce();
+    const [english] = await mailTo(recipients.en);
+    const [bulgarian] = await mailTo(recipients.bg);
+    expect(english.Subject).toContain('a newer version of the audit report for Example Manufacturing AD');
+    expect(bulgarian.Subject).toContain('нова версия на одиторския доклад');
+    for (const message of [english, bulgarian]) {
+      // Plain text, no attachment, nothing inline: never the PDF.
+      expect(message.Attachments).toEqual([]);
+      expect(message.Inline).toEqual([]);
+      expect(message.HTML).toBe('');
+      expect(message.Text).toContain(`E2E-${tag}`);
+      expect(message.Text).toMatch(/\/r\/0x[0-9a-f]{64}\/latest/);
+      expect(message.Text).toContain('/verify');
+      // No opinion text, and none of the report's figures or wording.
+      for (const text of ['In our opinion', 'except for', 'Qualified', 'IFRS', 'financial position', '31 December']) {
+        expect(message.Text).not.toContain(text);
+      }
+    }
+    // Sent once each: a second pass finds nothing to send.
+    runMailerOnce();
+    expect(await mailTo(recipients.en)).toHaveLength(1);
+
+    // The link leads to version 2, read from the chain, signed out.
+    const latest = new URL(english.Text.match(/https?:\/\/\S+\/r\/0x[0-9a-f]{64}\/latest/)![0]);
+    await page.context().clearCookies();
+    await page.goto(latest.pathname);
+    await expect(page.getByTestId('latest-page')).toHaveAttribute('data-status', 'FOUND');
+    await expect(page.getByTestId('record-latest-version')).toHaveText('Version 2');
+
+    await signIn(page, preparer);
+    await page.goto(engagementUrl);
+    await expect(page.getByTestId('recipient-last')).toHaveCount(2);
+    for (const badge of await page.getByTestId('recipient-last').all()) await expect(badge).toContainText('Version 2: sent');
+  });
+
   await test.step('an admin asks for the first version to be revoked, and an approver approves', async () => {
     test.skip(!admin.email, 'needs SEED_ADMIN_* (see CI)');
     await page.context().clearCookies();
@@ -237,7 +345,7 @@ test('a dry run is only simulated; a live anchor is sent, final, then stamped, c
     await expect(page.getByTestId('revocation-final')).toContainText('Issued in error (code 2)');
   });
 
-  await test.step('the verifier reports the copy and the original as revoked', async () => {
+  await test.step('the verifier reports version 1’s copy and original as revoked, and version 2 as the latest', async () => {
     test.skip(!admin.email, 'needs SEED_ADMIN_* (see CI)');
     await page.context().clearCookies();
     await page.goto('/verify');
@@ -247,5 +355,8 @@ test('a dry run is only simulated; a live anchor is sent, final, then stamped, c
       await page.getByTestId('verify-another').click();
       await expect(page.getByTestId('verdict')).toHaveCount(0);
     }
+    // Version 2 stands: revoking version 1 says nothing about it.
+    await page.getByTestId('verify-file').setInputFiles({ name: 'report.pdf', mimeType: 'application/pdf', buffer: uniquePdf('en-qualified.pdf', tag) });
+    await expect(page.getByTestId('verdict')).toHaveAttribute('data-kind', 'AUTHENTIC_LATEST', { timeout: 30_000 });
   });
 });

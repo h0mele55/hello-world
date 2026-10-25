@@ -22,11 +22,11 @@ and the certificate for anchor-only reports) is done and tested on Anvil; its
 Sepolia run waits on #4. Phase 4 (the shared verification code, `/verify`,
 `/r/<familyId>/latest`, the single-file verifier and CLI, the tamper suite,
 CSP and rate limits) is done on Anvil, which completes the prototype; its
-Sepolia run waits on #4 too. Phase 5, the issuer console, is under way: roles,
-two-step sign-in and rate limits (5a), the client list, version timeline
-and dashboard (5b), revocation (5c), and the audit-log viewer, nightly
-chain check and backups (5d) are done; recipients and the two-person exit gate
-(5e) are next. `docs/operations.md` says what runs besides the app.
+Sepolia run waits on #4 too. Phase 5, the issuer console, is done on Anvil:
+roles, two-step sign-in and rate limits (5a), the client list, version
+timeline and dashboard (5b), revocation (5c), the audit-log viewer, nightly
+chain check and backups (5d), and recipients with the two-person exit gate
+(5e). `docs/operations.md` says what runs besides the app.
 
 ## Rules every phase keeps
 
@@ -82,6 +82,7 @@ npm run test:db                # intake and approval use cases against TEST_DATA
 npm run test:anchoring         # the worker against TEST_DATABASE_URL and a throwaway Anvil node
 npm run worker                 # the anchoring worker; add `-- --once` for one pass
 npm run audit:check            # the nightly audit-chain check; exit 1 on a break
+npm run mailer                 # sends the recipients' notices; add `-- --once` for one pass (SMTP_URL, MAIL_FROM)
 scripts/backup.sh              # database dump + encrypted store copy (docs/operations.md)
 npm run test:backup            # back up, restore into <db>_restore_test, check the copy
 
@@ -308,8 +309,8 @@ to one inflect-compliance commit.
 - **E2E**: the seeded approver and admin have two-step sign-in on with
   `SEED_APPROVER_TOTP_SECRET` and `SEED_ADMIN_TOTP_SECRET`, and
   `tests/e2e/helpers.ts` computes their codes;
-  sign-ins use their own client address (`fromOwnAddress`), since the per-address
-  limit is real.
+  each person in a test signs in from a client address of their own
+  (`fromOwnAddress`), since the per-address limit is real.
 
 ## The console
 
@@ -334,6 +335,28 @@ to one inflect-compliance commit.
   `/r/<familyId>/latest` response is sent, and never throws. No family id, no
   address, no time of day is stored. `/verify` runs in the visitor's browser
   and is not counted.
+
+## Recipients and the mailer
+
+- **Recipients belong to an engagement** (`src/lib/reports/recipients.ts`): a
+  PREPARER or ADMIN keeps the list (`manageRecipients`), one live entry per
+  lower-cased address (a partial unique index). Removing someone keeps the
+  row and cancels what was not yet sent to them.
+- **Notices are an outbox.** When a version 2 or later becomes COMPLETE, the
+  worker queues one `Notification` per live recipient in the same transaction
+  (`queueSupersededNotices`, `src/lib/notifications/queue.ts`). Do not send
+  mail from a use case or the worker: only the mailer sends
+  (`src/lib/notifications/mailer.ts`, run by `scripts/mailer.ts`), at least
+  once, under a lease, giving up after five attempts (FAILED).
+- **The email carries no PDF, no opinion and no figure** (decision #8):
+  names, the engagement's reference, the period end, the version number and
+  two links, as plain text with no attachment (`supersededEmail`,
+  `src/lib/notifications/email.ts`). Every value from the database passes
+  through `oneLine`. Never add a field from the report or the opinion, and
+  never store or log what an SMTP server said: only a name for the error.
+- **`SMTP_URL` can hold credentials** and is never logged. Development and CI
+  send to Mailpit (`docker-compose.yml`; a service container in CI), and the
+  end-to-end test reads what was sent through Mailpit's API.
 
 ## The audit log and backups
 

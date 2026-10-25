@@ -180,7 +180,9 @@
     "CONFIRMATION_MISMATCH": "The engagement reference you typed does not match.",
     "REVOCATION_OPEN": "This version already has an open revocation request.",
     "NOT_REQUESTED": "This request is no longer waiting for a decision. Reload the page.",
-    "COPY_IN_FLIGHT": "The stamped copy is still on its way to the chain. Approve the revocation once it is final."
+    "COPY_IN_FLIGHT": "The stamped copy is still on its way to the chain. Approve the revocation once it is final.",
+    "RECIPIENT_EXISTS": "This address is already a recipient of this engagement.",
+    "RECIPIENT_LIMIT": "This engagement already has 50 recipients. Remove one to add another."
   },
   "viewer": {
     "failed": "The PDF could not be shown.",
@@ -240,6 +242,7 @@
     "reportDate": "Report date",
     "commitments": "Commitments",
     "commitmentsHint": "Only these values will go on chain. Nothing has been anchored yet.",
+    "commitmentsOnChain": "Only these values went on chain, in the record below.",
     "docHash": "Document hash",
     "opinionCommitment": "Opinion commitment",
     "manifestHash": "Manifest hash"
@@ -693,5 +696,40 @@
     "hash": "Hash: {hash}",
     "older": "Older events",
     "newest": "Newest events"
+  },
+  "email": {
+    "superseded": {
+      "subject": "{firm}: a newer version of the audit report for {client}",
+      "greeting": "Dear {name},",
+      "body": "{firm} has issued version {version} of the audit report for {client} (period ending {periodEnd}, engagement {engagementRef}). It supersedes the version you were given.",
+      "latest": "The latest version’s record, read from the public chain: {latestUrl}",
+      "verify": "To check a copy you hold, open {verifyUrl} and choose the file. It is checked in your browser and never uploaded.",
+      "ask": "For the report itself, ask {firm}.",
+      "noReport": "This message carries no report, no opinion and no figures.",
+      "prototype": "Prototype: records on a public test network are prototype evidence, not a legally binding record."
+    }
+  },
+  "recipients": {
+    "title": "Recipients",
+    "intro": "People who hold a copy of this report, such as a lender, a regulator or a shareholder. When a newer version supersedes it, each is emailed a link to the latest version’s record: never the report, the opinion or a figure. They ask the firm for the report itself.",
+    "none": "No recipients yet.",
+    "name": "Name",
+    "email": "Email",
+    "locale": "Language of the email",
+    "locales": {
+      "en": "English",
+      "bg": "Bulgarian"
+    },
+    "add": "Add recipient",
+    "remove": "Remove",
+    "removeTitle": "Remove {name}?",
+    "removeBody": "They will not be told about later versions, and anything not yet sent to them is cancelled.",
+    "removeConfirm": "Remove recipient",
+    "last": {
+      "PENDING": "Version {version}: waiting to be sent",
+      "SENT": "Version {version}: sent {when}",
+      "FAILED": "Version {version}: could not be sent",
+      "CANCELLED": "Version {version}: cancelled"
+    }
   }
 }

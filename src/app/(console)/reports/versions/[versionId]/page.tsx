@@ -90,7 +90,9 @@ export default async function VersionPage({ params }: { params: Promise<{ versio
                 {version.confirmedOpinion}
               </blockquote>
               <Heading level={3}>{t('commitments')}</Heading>
-              <p className="text-content-muted">{t('commitmentsHint')}</p>
+              <p className="text-content-muted" data-testid="commitments-hint">
+                {version.status === 'ANCHORED' || version.status === 'COMPLETE' || version.status === 'REVOKED' ? t('commitmentsOnChain') : t('commitmentsHint')}
+              </p>
               <Commitment label={t('docHash')} value={version.docHash} />
               <Commitment label={t('opinionCommitment')} value={version.opinionCommitment!} />
               <Commitment label={t('manifestHash')} value={version.manifestHash!} />

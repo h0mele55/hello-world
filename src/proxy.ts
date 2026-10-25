@@ -1,15 +1,17 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { verifierCsp } from '@/lib/csp';
+import { appCsp, verifierCsp } from '@/lib/csp';
 import { clientAddressOf, takeLookup } from '@/lib/rate-limit';
 import { verifierRpcUrls } from '@/lib/verify-setup';
 
 /**
- * The public verifier's pages: a nonce-based CSP that lets the page reach
- * only this origin and its two RPC endpoints, and a rate limit on the lookup
- * page, which reads the chain on the server for every request.
+ * Every page gets a nonce-based CSP (#84). The public verifier's pages may
+ * also reach their two RPC endpoints; every other page, this origin only. The
+ * lookup page is rate-limited, since it reads the chain on the server for
+ * every request.
  */
 export function proxy(request: NextRequest) {
-  if (request.nextUrl.pathname.startsWith('/r/')) {
+  const { pathname } = request.nextUrl;
+  if (pathname.startsWith('/r/')) {
     const taken = takeLookup(clientAddressOf(request.headers));
     if (!taken.ok) {
       return new NextResponse('Too many requests. Try again shortly.', {
@@ -20,12 +22,14 @@ export function proxy(request: NextRequest) {
   }
 
   const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
-  const urls = verifierRpcUrls();
-  const csp = verifierCsp({
-    nonce,
-    rpcOrigins: typeof urls === 'string' ? [] : urls.map((url) => new URL(url).origin),
-    dev: process.env.NODE_ENV === 'development',
-  });
+  const dev = process.env.NODE_ENV === 'development';
+  let csp: string;
+  if (pathname === '/verify' || pathname.startsWith('/r/')) {
+    const urls = verifierRpcUrls();
+    csp = verifierCsp({ nonce, rpcOrigins: typeof urls === 'string' ? [] : urls.map((url) => new URL(url).origin), dev });
+  } else {
+    csp = appCsp({ nonce, dev });
+  }
   // Next.js reads the nonce from the request's CSP and puts it on its own scripts.
   const headers = new Headers(request.headers);
   headers.set('Content-Security-Policy', csp);
@@ -34,4 +38,9 @@ export function proxy(request: NextRequest) {
   return response;
 }
 
-export const config = { matcher: ['/verify', '/r/:path*'] };
+/**
+ * Every page; not the API (JSON, and PDFs a browser may open in its own
+ * viewer), Next.js's static files, or a file in public/ (any path with a dot,
+ * such as /pdf.worker.min.mjs).
+ */
+export const config = { matcher: ['/((?!api/|_next/|.*\\.[^/]+$).*)'] };

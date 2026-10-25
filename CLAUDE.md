@@ -364,11 +364,15 @@ to one inflect-compliance commit.
   with the tool a person would use (an incremental save, a re-render keeping
   the reference, qpdf, Chromium's print) and must get the same verdict from
   verify-core and from the CLI. A change to a verdict changes this table.
-- **`src/proxy.ts` guards the verifier's pages**: a per-request nonce CSP
-  (`src/lib/csp.ts`) whose `connect-src` is the origin and the two endpoints,
-  and the lookup page's rate limit (`src/lib/rate-limit.ts`: 60 a minute per
-  address, 600 in all; the address only behind a proxy that sets it,
-  `TRUST_PROXY_HEADERS=1`). Neither covers the signed-in app.
+- **`src/proxy.ts` gives every page a per-request nonce CSP** (`src/lib/csp.ts`,
+  #84): `verifierCsp` on `/verify` and `/r/*`, whose `connect-src` is the
+  origin and the two endpoints; `appCsp` everywhere else, `connect-src 'self'`.
+  The API and files in `public/` get none. A nonce needs a page rendered per
+  request: every page is, because the root layout reads the theme cookie, and
+  `tests/e2e/csp.spec.ts` walks every page from git and fails on a script
+  without its response's nonce. The proxy also holds the lookup page's rate
+  limit (`src/lib/rate-limit.ts`: 60 a minute per address, 600 in all; the
+  address only behind a proxy that sets it, `TRUST_PROXY_HEADERS=1`).
 
 ## Roles and two-step sign-in
 

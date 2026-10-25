@@ -32,9 +32,10 @@ mitigation, or the issue that tracks it, and `docs/runbooks/` says what to do
 when a key, an owner, an endpoint or the database must change. The issuer key
 can live in Cloud KMS (6b), the production candidates are measured for the
 owner's choice (6c, `docs/decision-production-chain.md`), and revocation is
-delayed so the owner can cancel a stolen key's (6d, #95), and the registry
+delayed so the owner can cancel a stolen key's (6d, #95), the registry
 watch reports any write by the firm's keys that the journal did not make (6e,
-#93).
+#93), recipients are told of a withdrawal (6f, #96), and the worker settles a
+row only on what two endpoints agree on (6g, #92).
 
 ## Rules every phase keeps
 
@@ -240,6 +241,18 @@ to one inflect-compliance commit.
 - **Journal before the bytes leave.** The worker signs, writes the nonce and
   hash to the row, then sends. Every transition is one transaction,
   conditional on the row being as it was read, and writes its audit event.
+- **A row is settled only on what two endpoints agree on** (#92). The worker
+  sends through `<NETWORK>_RPC_URL` and also reads `<NETWORK>_RPC_URL_2`, from
+  another provider (`secondRpcUrlFor` refuses a missing one or one on the same
+  host). Every read that settles what happened on chain (a write FINAL,
+  reverted or linked; a revocation SCHEDULED, REVOKED or CANCELLED; a nonce
+  used by another transaction) goes through `agree` (both answers identical,
+  or `RPC_DISAGREE`) at `agreedFinalized` (the lower of the two finalized
+  blocks, whose hash both must give). A disagreement leaves the row as it was,
+  frees its lease so the next pass compares again, and sets
+  `IssuerKeyStatus.rpcDisagreedAt` for the console's banner. A refusal before
+  sending rests on the first endpoint: it sends nothing and returns the
+  approval. A new settling read that skips `agree` reopens T-W5.
 - **Unknown is INDETERMINATE, and INDETERMINATE is never resent.** It is
   settled only by reading the chain: receipts for every hash, the node's
   pool, the issuer's finalized nonce, the record for the document. While one

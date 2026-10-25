@@ -54,6 +54,13 @@ import { classifySendError, type SendOutcome } from './send';
  * A partial unique index on (chainId, issuer, nonce) backs that up: a second
  * writer that picked the same nonce cannot journal it, so never sends it.
  *
+ * Every read that settles a row (FINAL, linked, REVOKED or CANCELLED, or an
+ * INDETERMINATE row's outcome) is made on two endpoints, from different
+ * providers, at the finalized block both have reached, and must agree (#92,
+ * rule 7). When they disagree the row stays where it is, the pass reports
+ * RPC_DISAGREE, and the console says so until they agree again. Broadcasting
+ * and tracking a pending transaction use the first endpoint only.
+ *
  * A row keeps its nonce while its transaction may still land, or once its own
  * transaction used it. When the nonce was never used by this row's
  * transaction (refused by the node, or used by another), the nonce is cleared
@@ -120,6 +127,12 @@ export interface WorkerDeps {
   /** A dedicated session for the issuer's advisory lock; never a pooled connection. */
   lockClient: PgClient;
   publicClient: PublicClient;
+  /**
+   * The second endpoint, from another provider (#92): every read that settles
+   * a row must agree on both. Defaults to `publicClient`, one endpoint, which
+   * only a local chain should use.
+   */
+  checkClient?: PublicClient;
   /** The issuer key. */
   account: LocalAccount;
   deployment: Deployment;
@@ -150,6 +163,8 @@ export interface PassReport {
   errors: { writeId: string; error: string }[];
   /** Anchor-only versions made COMPLETE with a certificate in this pass. */
   certified: string[];
+  /** The two endpoints disagreed about something in this pass; what they disagreed about waits. */
+  rpcDisagreed: boolean;
   /** Scheduled revocations found in effect, or cancelled by the registry's owner, in this pass. */
   revocations: { revocationId: string; outcome: 'REVOKED' | 'CANCELLED' }[];
 }
@@ -171,6 +186,11 @@ interface Context {
   prisma: PrismaClient;
   publicClient: PublicClient;
   reader: RegistryReader;
+  /** The second endpoint, and its reader; the same as the first when there is only one. */
+  check: PublicClient;
+  checkReader: RegistryReader;
+  /** Set when the two endpoints disagree, for the pass's report and the console. */
+  disagreed: boolean;
   account: LocalAccount;
   chainId: number;
   registry: Address;
@@ -198,11 +218,54 @@ export function errorName(error: unknown): string {
 }
 
 
+const stable = (value: unknown) => JSON.stringify(value, (_, v) => (typeof v === 'bigint' ? `${v}n` : v));
+
+/**
+ * One read made on both endpoints, which must agree (#92, rule 7). A
+ * disagreement throws RPC_DISAGREE: the step stops, and its row stays as it
+ * was until the endpoints agree. With one endpoint, one read.
+ */
+async function agree<T>(ctx: Context, what: string, read: (client: PublicClient, reader: RegistryReader) => Promise<T>): Promise<T> {
+  if (ctx.check === ctx.publicClient) return read(ctx.publicClient, ctx.reader);
+  const [first, second] = await Promise.all([read(ctx.publicClient, ctx.reader), read(ctx.check, ctx.checkReader)]);
+  if (stable(first) !== stable(second)) {
+    ctx.disagreed = true;
+    ctx.log('error', 'the two RPC endpoints disagree; what depends on it waits until they agree', { what });
+    throw new ChainError('RPC_DISAGREE', `the two RPC endpoints disagree about ${what}`);
+  }
+  return first;
+}
+
+/**
+ * The finalized block both endpoints have reached (the lower of the two), and
+ * agree on: every read that settles a row is made at it. An endpoint that
+ * lags is waited for, never mistaken for one that disagrees.
+ */
+async function agreedFinalized(ctx: Context): Promise<bigint> {
+  if (ctx.check === ctx.publicClient) return (await ctx.publicClient.getBlock({ blockTag: 'finalized' })).number;
+  const [first, second] = await Promise.all([ctx.publicClient, ctx.check].map(async (c) => (await c.getBlock({ blockTag: 'finalized' })).number));
+  const at = first < second ? first : second;
+  await agree(ctx, `finalized block ${at}`, async (c) => (await c.getBlock({ blockNumber: at })).hash);
+  return at;
+}
+
+/** A record as both endpoints read it at one block. */
+const recordAt = (ctx: Context, recordId: Hex, blockNumber: bigint) => agree(ctx, `record ${recordId}`, (_, reader) => reader.getRecord(recordId, { blockNumber }));
+
+/** What a receipt says, as both endpoints must say it. */
+const receiptSummary = (r: Awaited<ReturnType<typeof receiptOf>>) =>
+  r && { blockHash: r.blockHash, blockNumber: r.blockNumber, status: r.status, logs: r.logs.map((l) => ({ address: l.address, data: l.data, topics: l.topics })) };
+
 export async function runWorkerPass(deps: WorkerDeps): Promise<PassReport> {
+  const reader = createRegistryReader(deps.publicClient, deps.deployment);
+  const check = deps.checkClient ?? deps.publicClient;
   const ctx: Context = {
     prisma: deps.prisma,
     publicClient: deps.publicClient,
-    reader: createRegistryReader(deps.publicClient, deps.deployment),
+    reader,
+    check,
+    checkReader: check === deps.publicClient ? reader : createRegistryReader(check, deps.deployment),
+    disagreed: false,
     account: deps.account,
     chainId: deps.deployment.chainId,
     registry: getAddress(deps.deployment.address),
@@ -214,13 +277,15 @@ export async function runWorkerPass(deps: WorkerDeps): Promise<PassReport> {
     files: deps.files,
     verifyUrl: `${deps.verifyBaseUrl.replace(/\/+$/, '')}/verify`,
   };
-  const report: PassReport = { ran: false, steps: [], errors: [], certified: [], revocations: [] };
+  const report: PassReport = { ran: false, steps: [], errors: [], certified: [], revocations: [], rpcDisagreed: false };
   const lockArgs = issuerLockArgs(ctx.chainId, ctx.issuer);
   const { rows } = await deps.lockClient.query<{ locked: boolean }>('SELECT pg_try_advisory_lock($1::int, hashtext($2)) AS locked', lockArgs);
   if (!rows[0]?.locked) return { ...report, reason: 'ISSUER_LOCKED' };
   try {
     try {
+      // Both endpoints must be on the chain and hold the registry, each on its own.
       await ctx.reader.assertDeployment();
+      if (ctx.checkReader !== ctx.reader) await ctx.checkReader.assertDeployment();
     } catch (error) {
       if (!(error instanceof ChainError)) throw error;
       ctx.log('error', 'refusing to work: the chain does not hold the expected registry', { code: error.code, registry: ctx.registry, chainId: ctx.chainId });
@@ -242,11 +307,22 @@ export async function runWorkerPass(deps: WorkerDeps): Promise<PassReport> {
         ctx.log('info', 'step', { ...step });
       } catch (error) {
         report.errors.push({ writeId: id, error: errorName(error) });
+        if (error instanceof ChainError && error.code === 'RPC_DISAGREE') {
+          // Not a crash: the row is as it was, and the next pass compares again,
+          // so the console's banner says whether the endpoints still disagree.
+          await ctx.prisma.chainWrite.updateMany({ where: { id }, data: { leaseUntil: null } });
+          continue;
+        }
         ctx.log('error', 'step failed; the row is retried when its lease runs out', { writeId: id, error: errorName(error) });
       }
     }
     await certifyAnchorOnly(ctx, report);
     await settleScheduledRevocations(ctx, report);
+    report.rpcDisagreed = ctx.disagreed;
+    // The time the endpoints first disagreed, kept while they go on disagreeing.
+    const key = { chainId: ctx.chainId, address: ctx.issuer };
+    if (ctx.disagreed) await ctx.prisma.issuerKeyStatus.updateMany({ where: { ...key, rpcDisagreedAt: null }, data: { rpcDisagreedAt: ctx.now() } });
+    else await ctx.prisma.issuerKeyStatus.updateMany({ where: { ...key, rpcDisagreedAt: { not: null } }, data: { rpcDisagreedAt: null } });
     return report;
   } finally {
     await deps.lockClient.query('SELECT pg_advisory_unlock($1::int, hashtext($2))', lockArgs);
@@ -660,30 +736,34 @@ function revocationRequested(record: RegistryRecord | null, write: Write): recor
  * by its RevocationRequested event with the same reason and time (a cancelled
  * request may have come before it); null until one is final.
  */
-async function requestTxOf(ctx: Context, record: RegistryRecord): Promise<{ txHash: Hash; blockNumber: bigint } | null> {
-  const events = await ctx.publicClient.getContractEvents({
-    address: ctx.registry,
+async function requestTxOf(client: PublicClient, registry: Address, record: RegistryRecord, toBlock: bigint): Promise<{ txHash: Hash; blockNumber: bigint } | null> {
+  const events = await client.getContractEvents({
+    address: registry,
     abi: registryAbi,
     eventName: 'RevocationRequested',
     args: { recordId: record.recordId },
     fromBlock: BigInt(record.blockNumber),
-    toBlock: 'finalized',
+    toBlock,
   });
   const event = events.filter((e) => e.args.reasonCode === record.revokeReason && Number(e.args.effectiveAt) === record.revokeEffectiveAt).at(-1);
   return event?.transactionHash && event.blockNumber !== null ? { txHash: event.transactionHash, blockNumber: event.blockNumber } : null;
 }
 
-/** The record already carries a revocation: settle on it, sending nothing, once its request is final. */
+/** The record already carries a revocation: settle on it, sending nothing, once both endpoints read its request as final (#92). */
 async function linkRevocation(ctx: Context, write: Write, record: RegistryRecord): Promise<StepReport> {
   if (!revocationRequested(record, write)) return fail(ctx, write, 'REVOCATION_EXISTS_WITH_OTHER_REASON');
-  const request = await requestTxOf(ctx, record);
-  if (!request) return release(ctx, write, { recordId: record.recordId }, 'already requested on chain; waiting for finality');
+  const finalized = await agreedFinalized(ctx);
+  const agreed = await recordAt(ctx, record.recordId, finalized);
+  const request = revocationRequested(agreed, write)
+    ? await agree(ctx, `the request to revoke ${record.recordId}`, (client) => requestTxOf(client, ctx.registry, agreed, finalized))
+    : null;
+  if (!agreed || !request) return release(ctx, write, { recordId: record.recordId }, 'already requested on chain; waiting for finality');
   return finalize(ctx, write, {
     txHash: request.txHash,
     blockNumber: request.blockNumber,
-    recordId: record.recordId,
+    recordId: agreed.recordId,
     linked: true,
-    revokeEffectiveAt: record.revokeEffectiveAt,
+    revokeEffectiveAt: agreed.revokeEffectiveAt,
     data: { nonce: null },
   });
 }
@@ -706,17 +786,22 @@ function requestedEffectiveAt(receipt: { logs: readonly { address: string; data:
 
 const hexOf = (bytes: Uint8Array) => `0x${Buffer.from(bytes).toString('hex')}` as Hex;
 
-/** The original's record on chain must be this version's, final, and with no revocation pending or in effect, before anything is written about it. */
+/**
+ * The original's record on chain must be this version's, final, and with no
+ * revocation pending or in effect, before anything is written about it: as
+ * both endpoints read it at one finalized block (#92).
+ */
 async function originalRecordOk(ctx: Context, version: { recordId: string | null; anchorBlock: bigint | null; docHash: string }): Promise<boolean> {
   if (!version.recordId || version.anchorBlock === null) return false;
-  const [record, finalized] = await Promise.all([ctx.reader.getRecord(version.recordId as Hex), ctx.publicClient.getBlock({ blockTag: 'finalized' })]);
+  const finalized = await agreedFinalized(ctx);
+  if (finalized < version.anchorBlock) return false;
+  const record = await recordAt(ctx, version.recordId as Hex, finalized);
   return (
     record !== null &&
     record.kind === 'ORIGINAL' &&
     record.docHash === version.docHash &&
     record.revokeReason === 0 &&
-    BigInt(record.blockNumber) === version.anchorBlock &&
-    finalized.number >= version.anchorBlock
+    BigInt(record.blockNumber) === version.anchorBlock
   );
 }
 
@@ -883,18 +968,24 @@ async function settleScheduledRevocations(ctx: Context, report: PassReport) {
     take: 50,
   });
   if (scheduled.length === 0) return;
-  const finalized = await ctx.publicClient.getBlock({ blockTag: 'finalized' });
+  let finalized: bigint;
+  try {
+    finalized = await agreedFinalized(ctx);
+  } catch (error) {
+    report.errors.push({ writeId: 'scheduled-revocations', error: errorName(error) });
+    return;
+  }
   for (const revocation of scheduled) {
     const version = revocation.reportVersion;
     try {
       if (!version.recordId || !revocation.effectiveAt) throw new ChainError('REVOCATION_INCOMPLETE', `revocation ${revocation.id} has no record or time`);
-      const record = await ctx.reader.getRecord(version.recordId as Hex, { blockNumber: finalized.number });
+      const record = await recordAt(ctx, version.recordId as Hex, finalized);
       if (!record || record.docHash !== version.docHash) throw new ChainError('ORIGINAL_RECORD_MISMATCH', `the record of version ${version.id} is not on chain as anchored`);
       const effectiveAt = Math.floor(revocation.effectiveAt.getTime() / 1000);
       const ours = record.revokeReason === REVOCATION_CODES[revocation.reason] && record.revokeEffectiveAt === effectiveAt;
       if (ours && !record.revoked) continue;
       const outcome = ours ? 'REVOKED' : 'CANCELLED';
-      const cancelTx = ours ? null : await cancellingTxOf(ctx, record, finalized.number);
+      const cancelTx = ours ? null : await agree(ctx, `the cancellation of ${record.recordId}`, (client) => cancellingTxOf(client, ctx.registry, record, finalized));
       if (!ours && record.revokeReason !== 0) {
         // Ours was cancelled and another request, which this firm did not make through the console, stands in its place.
         ctx.log('error', 'the record carries a revocation the console did not ask for', {
@@ -929,7 +1020,7 @@ async function settleScheduledRevocations(ctx: Context, report: PassReport) {
               reportVersionId: version.id,
               recordId: record.recordId,
               effectiveAt: revocation.effectiveAt!.toISOString(),
-              finalizedBlock: Number(finalized.number),
+              finalizedBlock: Number(finalized),
               ...(outcome === 'CANCELLED' ? { cancelTxHash: cancelTx, otherRevocationOnChain: record.revokeReason !== 0 } : {}),
             },
           },
@@ -946,9 +1037,9 @@ async function settleScheduledRevocations(ctx: Context, report: PassReport) {
 }
 
 /** The final transaction in which the owner cancelled a record's revocation, if one is found. */
-async function cancellingTxOf(ctx: Context, record: RegistryRecord, toBlock: bigint): Promise<Hash | null> {
-  const events = await ctx.publicClient.getContractEvents({
-    address: ctx.registry,
+async function cancellingTxOf(client: PublicClient, registry: Address, record: RegistryRecord, toBlock: bigint): Promise<Hash | null> {
+  const events = await client.getContractEvents({
+    address: registry,
     abi: registryAbi,
     eventName: 'RevocationCancelled',
     args: { recordId: record.recordId },
@@ -974,10 +1065,10 @@ function recordIsThisVersion(record: RegistryRecord, write: Write): boolean {
 }
 
 /** The transaction that created a record, found by its Anchored event. */
-async function anchoringTxOf(ctx: Context, record: RegistryRecord): Promise<Hash | null> {
+async function anchoringTxOf(client: PublicClient, registry: Address, record: RegistryRecord): Promise<Hash | null> {
   const block = BigInt(record.blockNumber);
-  const events = await ctx.publicClient.getContractEvents({
-    address: ctx.registry,
+  const events = await client.getContractEvents({
+    address: registry,
     abi: registryAbi,
     eventName: 'Anchored',
     args: { recordId: record.recordId },
@@ -987,16 +1078,19 @@ async function anchoringTxOf(ctx: Context, record: RegistryRecord): Promise<Hash
   return events[0]?.transactionHash ?? null;
 }
 
-/** The document is already anchored as this version: settle on that record, sending nothing. */
+/** The document is already anchored as this version: settle on that record, sending nothing, once both endpoints read it as final (#92). */
 async function linkExisting(ctx: Context, write: Write, record: RegistryRecord): Promise<StepReport> {
   if (!recordIsThisVersion(record, write)) return fail(ctx, write, 'DOC_ANCHORED_ELSEWHERE');
-  const finalized = await ctx.publicClient.getBlock({ blockTag: 'finalized' });
-  if (finalized.number < BigInt(record.blockNumber)) {
-    return release(ctx, write, { recordId: record.recordId, parentId: record.parentId }, 'already on chain; waiting for finality');
-  }
-  const txHash = await anchoringTxOf(ctx, record);
-  if (!txHash) ctx.log('warn', 'record is final but its Anchored event was not found', { writeId: write.id, recordId: record.recordId });
-  return finalize(ctx, write, { txHash, blockNumber: BigInt(record.blockNumber), recordId: record.recordId, linked: true, data: { parentId: record.parentId, nonce: null } });
+  const waiting = () => release(ctx, write, { recordId: record.recordId, parentId: record.parentId }, 'already on chain; waiting for finality');
+  const finalized = await agreedFinalized(ctx);
+  if (finalized < BigInt(record.blockNumber)) return waiting();
+  const doc = record.docHash;
+  const agreed = await agree(ctx, `the record of document ${doc}`, (_, reader) => reader.findByDocHash(doc, { blockNumber: finalized }));
+  if (!agreed) return waiting();
+  if (!recordIsThisVersion(agreed, write)) return fail(ctx, write, 'DOC_ANCHORED_ELSEWHERE');
+  const txHash = await agree(ctx, `the transaction that anchored ${agreed.recordId}`, (client) => anchoringTxOf(client, ctx.registry, agreed));
+  if (!txHash) ctx.log('warn', 'record is final but its Anchored event was not found', { writeId: write.id, recordId: agreed.recordId });
+  return finalize(ctx, write, { txHash, blockNumber: BigInt(agreed.blockNumber), recordId: agreed.recordId, linked: true, data: { parentId: agreed.parentId, nonce: null } });
 }
 
 async function nextNonce(ctx: Context): Promise<number> {
@@ -1096,16 +1190,19 @@ async function trackBroadcast(ctx: Context, write: Write): Promise<StepReport> {
 
   const landed = receipt.transactionHash;
   const settled = { txHash: landed, replacedTxHashes: hashes.filter((h) => h !== landed), blockNumber: receipt.blockNumber };
-  // A reverted transaction still used its nonce, so the row keeps it.
-  if (receipt.status !== 'success') return fail(ctx, write, 'TX_REVERTED', settled);
 
-  const finalized = await ctx.publicClient.getBlock({ blockTag: 'finalized' });
-  if (finalized.number < receipt.blockNumber) return release(ctx, write, settled, `in block ${receipt.blockNumber}; waiting for finality`);
-  // Read again after finality: a receipt seen before a reorg may name another block.
-  const again = await receiptOf(ctx.publicClient, landed);
+  const finalized = await agreedFinalized(ctx);
+  if (finalized < receipt.blockNumber) return release(ctx, write, settled, `in block ${receipt.blockNumber}; waiting for finality`);
+  // Read again after finality, on both endpoints: a receipt seen before a
+  // reorg may name another block, and one endpoint's word is not enough (#92).
+  const again = await agree(ctx, `the receipt of ${landed}`, async (client) => receiptSummary(await receiptOf(client, landed)));
   if (!again || again.blockHash !== receipt.blockHash) return release(ctx, write, {}, 'block changed; checking again next pass');
+  // A reverted transaction still used its nonce, so the row keeps it. Judged
+  // only once final and agreed: a revert in a block later reorged out may be
+  // mined again, and succeed.
+  if (again.status !== 'success') return fail(ctx, write, 'TX_REVERTED', settled);
 
-  const record = write.recordId ? await ctx.reader.getRecord(write.recordId as Hex) : null;
+  const record = write.recordId ? await recordAt(ctx, write.recordId as Hex, finalized) : null;
   if (write.kind === 'REVOKE') {
     // The request is judged by the transaction's own event: the owner may have cancelled it since.
     const effectiveAt = isRevokeTarget(record, write) ? requestedEffectiveAt(again, ctx, write) : null;
@@ -1188,11 +1285,15 @@ async function reconcile(ctx: Context, write: Write): Promise<StepReport> {
     }, 'found on chain');
   }
   if (finalizedNonce > write.nonce) {
-    // Another transaction used this nonce, so ours can never be mined.
+    // Another transaction used this nonce, so ours can never be mined. What
+    // used it is settled on what both endpoints read at one finalized block (#92).
+    const at = await agreedFinalized(ctx);
+    const used = await agree(ctx, 'the issuer key’s finalized nonce', (client) => client.getTransactionCount({ address: ctx.issuer, blockNumber: at }));
+    if (used <= write.nonce) return release(ctx, write, {}, 'waiting for both endpoints to finalize the nonce');
     if (write.kind === 'REVOKE') {
-      const record = write.recordId ? await ctx.reader.getRecord(write.recordId as Hex) : null;
+      const record = write.recordId ? await recordAt(ctx, write.recordId as Hex, at) : null;
       if (revocationRequested(record, write)) {
-        const request = await requestTxOf(ctx, record);
+        const request = await agree(ctx, `the request to revoke ${record.recordId}`, (client) => requestTxOf(client, ctx.registry, record, at));
         if (!request) return release(ctx, write, {}, 'requested on chain; waiting for finality');
         return finalize(ctx, write, {
           txHash: request.txHash,
@@ -1206,9 +1307,9 @@ async function reconcile(ctx: Context, write: Write): Promise<StepReport> {
       return fail(ctx, write, 'NONCE_CONSUMED', { nonce: null });
     }
     const doc = docOf(write);
-    const record = doc ? await ctx.reader.findByDocHash(doc) : null;
+    const record = doc ? await agree(ctx, `the record of document ${doc}`, (_, reader) => reader.findByDocHash(doc, { blockNumber: at })) : null;
     if (record && recordIsThisVersion(record, write)) {
-      const txHash = await anchoringTxOf(ctx, record);
+      const txHash = await agree(ctx, `the transaction that anchored ${record.recordId}`, (client) => anchoringTxOf(client, ctx.registry, record));
       return finalize(ctx, write, { txHash, blockNumber: BigInt(record.blockNumber), recordId: record.recordId, linked: true, data: { nonce: null } });
     }
     return fail(ctx, write, 'NONCE_CONSUMED', { nonce: null });

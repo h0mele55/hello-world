@@ -1076,7 +1076,7 @@ script (#61, #67, #68):
   and its key, the verifier, the console, the PDF pipeline, the mailer and the
   supply chain. Each threat names its mitigation and the test that proves it,
   or the issue that tracks it. Writing it found five gaps, filed as issues:
-  - the worker trusts one RPC endpoint (#92);
+  - the worker trusts one RPC endpoint (#92, since built, 6g);
   - nothing detects writes the journal did not make (#93, since built as the
     registry watch, 6e);
   - a database owner can rewrite the audit log and its last check together
@@ -1228,6 +1228,25 @@ that issue: one issuer key may no longer withdraw a firm's records at once.
 - **Tested** by a worker test (scheduled, then cancelled, then in effect), a
   mailer test, email unit tests, and the end-to-end flow, which reads the
   withdrawal from Mailpit.
+
+6g has the worker read two RPC endpoints, as the verifier does (#92):
+
+- **A row is settled only on what both endpoints read** at one finalized
+  block: the lower of the two, whose hash they must agree on. That covers a
+  receipt, a record, the issuer's finalized nonce, and the events of a
+  revocation's request or cancellation. A difference is `RPC_DISAGREE`: the
+  row stays as it was and is compared again next pass. An endpoint that is
+  merely behind is waited for, not called a liar.
+- **A reverted transaction is judged at finality too**, on the agreed receipt:
+  a revert in a block later reorged out could have been mined again.
+- **The second endpoint is `<NETWORK>_RPC_URL_2`**, refused when missing,
+  malformed or on the first one's host. A local chain may use one.
+- **The console shows a banner** while the two disagree, with the time they
+  first did (`IssuerKeyStatus.rpcDisagreedAt`); the first pass in which they
+  agree clears it. `docs/runbooks/rpc-outage.md` says what to do.
+- **Tested** with a second endpoint over the same Anvil that lies about a
+  receipt, forgets a revocation, or lags; disabling the comparison fails the
+  first two.
 
 **Prompt**
 

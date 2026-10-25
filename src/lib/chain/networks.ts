@@ -68,6 +68,27 @@ export function loadDeploymentFile(network: NetworkName, file: string, root = pr
 /** The variable that holds a network's endpoint: SEPOLIA_RPC_URL, BASE_SEPOLIA_RPC_URL, … and LOCAL_RPC_URL. */
 export const rpcUrlVariable = (network: NetworkName) => `${network.toUpperCase().replace(/-/g, '_')}_RPC_URL`;
 
+/**
+ * The worker's second endpoint (#92): `<NETWORK>_RPC_URL_2`, from another
+ * provider than the first, since two endpoints that must agree are worth
+ * something only if different parties run them. A local chain may use one
+ * (LOCAL_RPC_URL_2, or the first).
+ */
+export function secondRpcUrlFor(network: NetworkName, env: NodeJS.ProcessEnv = process.env): string {
+  if (network === 'local') return env.LOCAL_RPC_URL_2 || rpcUrlFor(network, env);
+  const name = `${rpcUrlVariable(network)}_2`;
+  const url = env[name];
+  if (!url) throw new ChainError('ENV_MISSING', `${name} is not set: the worker reads a second endpoint, from another provider (#92)`);
+  let hosts: string[];
+  try {
+    hosts = [rpcUrlFor(network, env), url].map((u) => new URL(u).hostname);
+  } catch {
+    throw new ChainError('ENV_INVALID', `${rpcUrlVariable(network)} or ${name} is not a URL`);
+  }
+  if (hosts[0] === hosts[1]) throw new ChainError('RPC_NOT_INDEPENDENT', `${name} must be another provider than ${rpcUrlVariable(network)}`);
+  return url;
+}
+
 export function rpcUrlFor(network: NetworkName, env: NodeJS.ProcessEnv = process.env): string {
   if (network === 'local') return env.LOCAL_RPC_URL || 'http://127.0.0.1:8545';
   const name = rpcUrlVariable(network);

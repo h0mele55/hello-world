@@ -16,3 +16,5 @@ contracts/cache/
 contracts/broadcast/
 deployments/local.json
 .cache/
+src/generated/
+storage/

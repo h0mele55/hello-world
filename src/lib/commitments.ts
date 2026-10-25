@@ -2,7 +2,7 @@ import { createHash, createHmac, randomBytes } from 'node:crypto';
 import type { Hex } from 'viem';
 import { strictCanonicalJson } from './canonical-json';
 import { normaliseText } from './opinion/normalise';
-import { OPINION_TYPES, type OpinionType } from './opinion/types';
+import { CommitmentInputError, SALT_BYTES } from './verify-core/commitment';
 
 /**
  * The commitments a report version is anchored with. Only these 32-byte values
@@ -14,24 +14,8 @@ import { OPINION_TYPES, type OpinionType } from './opinion/types';
  *   manifestHash       SHA-256 of the canonical manifest (see manifest.ts)
  */
 
-export const SALT_BYTES = 32;
+export { CommitmentInputError, opinionCommitmentOf, SALT_BYTES } from './verify-core/commitment';
 export const MIN_FAMILY_SECRET_BYTES = 32;
-
-export class CommitmentInputError extends Error {
-  constructor(
-    readonly code:
-      | 'FAMILY_SECRET_TOO_SHORT'
-      | 'FAMILY_KEY_INVALID'
-      | 'SALT_INVALID'
-      | 'OPINION_TYPE_INVALID'
-      | 'OPINION_TEXT_EMPTY'
-      | 'OPINION_TEXT_NOT_NORMALISED',
-    message: string,
-  ) {
-    super(message);
-    this.name = 'CommitmentInputError';
-  }
-}
 
 function hex(bytes: Uint8Array): Hex {
   return `0x${Buffer.from(bytes).toString('hex')}`;
@@ -111,31 +95,4 @@ export function familyIdOf(secret: Uint8Array, key: FamilyKey): Hex {
   }
   const preimage = strictCanonicalJson({ v: 1, ...canonicalFamilyKey(key) });
   return hex(createHmac('sha256', secret).update(preimage, 'utf8').digest());
-}
-
-// ── Opinion commitment ──
-
-const UNIT_SEPARATOR = new Uint8Array([0x1f]);
-
-/**
- * opinionCommitment = SHA-256(salt ‖ utf8(type) ‖ 0x1F ‖ utf8(text)).
- * The salt has a fixed length and no type contains 0x1F, so the encoding is
- * unambiguous. The text must already be normalised (normaliser v1): what is
- * committed is exactly what the person confirmed, with no hidden step.
- */
-export function opinionCommitmentOf(input: { salt: Uint8Array; type: OpinionType; text: string }): Hex {
-  if (input.salt.length !== SALT_BYTES) throw new CommitmentInputError('SALT_INVALID', `the salt must be ${SALT_BYTES} bytes`);
-  if (!OPINION_TYPES.includes(input.type)) throw new CommitmentInputError('OPINION_TYPE_INVALID', 'unknown opinion type');
-  if (input.text === '') throw new CommitmentInputError('OPINION_TEXT_EMPTY', 'the opinion text is empty');
-  if (normaliseText(input.text) !== input.text) {
-    throw new CommitmentInputError('OPINION_TEXT_NOT_NORMALISED', 'normalise the opinion text before committing to it');
-  }
-  return hex(
-    createHash('sha256')
-      .update(input.salt)
-      .update(input.type, 'utf8')
-      .update(UNIT_SEPARATOR)
-      .update(input.text, 'utf8')
-      .digest(),
-  );
 }

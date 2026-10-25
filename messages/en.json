@@ -5,7 +5,8 @@
     "prototypeNotice": "Prototype. Testnet anchors are not legal evidence.",
     "kitchenSinkLink": "See the UI kit",
     "roadmapLink": "Read the roadmap",
-    "signInLink": "Sign in"
+    "signInLink": "Sign in",
+    "verifyLink": "Verify a report"
   },
   "preferences": {
     "theme": "Theme",
@@ -345,5 +346,113 @@
     "checkedAt": "checked {at}",
     "balanceUnknown": "The worker has not checked the issuer balance yet.",
     "notConfigured": "Anchoring is not configured on this server: set ANCHOR_NETWORK and ISSUER_ADDRESS, and deploy the registry."
+  },
+  "verify": {
+    "title": "Verify an audit report",
+    "intro": "Choose or drop a PDF. It is checked here, in your browser, and never uploaded: the page computes the file's fingerprint and reads the public registry directly.",
+    "dropTitle": "Drop a PDF here",
+    "dropOr": "or",
+    "choose": "Choose a file",
+    "fileLabel": "PDF to verify",
+    "checking": "Checking {name}…",
+    "another": "Check another file",
+    "checksAgainst": "Checked against the registry {contract} on {network}, read through two endpoints whose answers must agree.",
+    "disclaimer": "Records on a public test network are prototype evidence, not a legally binding record.",
+    "notConfigured": "The verifier is not configured on this server.",
+    "setupRefusal": {
+      "NOT_CONFIGURED": "No network is set (VERIFY_NETWORK or ANCHOR_NETWORK).",
+      "NETWORK_INVALID": "VERIFY_NETWORK must be sepolia or local.",
+      "DEPLOYMENT_UNAVAILABLE": "The registry's deployment record is missing or does not match this build.",
+      "RPC_URLS_MISSING": "VERIFY_RPC_URL_1 and VERIFY_RPC_URL_2 must both be set.",
+      "RPC_URLS_INVALID": "The verifier's RPC endpoints must be https URLs without credentials.",
+      "RPC_URLS_NOT_INDEPENDENT": "The verifier's two RPC endpoints must be on different hosts."
+    },
+    "verdict": {
+      "AUTHENTIC_LATEST": {
+        "title": "Authentic, latest version",
+        "body": "This file is byte for byte the file the issuer anchored, and no newer version has been issued."
+      },
+      "AUTHENTIC_SUPERSEDED": {
+        "title": "Authentic, superseded",
+        "body": "This file is byte for byte the file the issuer anchored, but the issuer has since anchored version {latest} of this report. Rely on the latest version."
+      },
+      "REVOKED": {
+        "title": "Revoked",
+        "body": "This file was anchored by the issuer and later revoked. Do not rely on it."
+      },
+      "ALTERED_OPINION_CHANGED": {
+        "title": "Altered: the opinion differs",
+        "body": "This is not the file the issuer anchored. It refers to an anchored report, but the audit opinion in it does not match that report's opinion. This is strong evidence that the opinion was edited."
+      },
+      "ALTERED_OPINION_APPEARS_UNCHANGED": {
+        "title": "Not the registered file; the opinion text matches",
+        "body": "This is not the file the issuer anchored. It refers to an anchored report, and the opinion text in it matches that report's opinion. That shows only that the opinion wording is the same: anything else in the file may have changed. Ask the issuer for the registered file."
+      },
+      "ALTERED_OPINION_NOT_CHECKABLE": {
+        "title": "Not the registered file; the opinion could not be checked",
+        "body": "This is not the file the issuer anchored. It refers to an anchored report, but the opinion could not be found in its text, so it could not be compared."
+      },
+      "UNKNOWN_REGISTRY": {
+        "title": "Refers to another registry",
+        "body": "This file refers to a record on chain {chainId} at {contract}, which this verifier does not check. Nothing has been verified."
+      },
+      "NOT_REGISTERED": {
+        "title": "Not registered",
+        "body": "{note}"
+      },
+      "CANNOT_VERIFY": {
+        "title": "Cannot verify right now",
+        "body": "No verdict was reached. {reason} Try again later."
+      }
+    },
+    "notRegistered": {
+      "NO_REFERENCE": "No report anchored in this registry is this exact file, and the file carries no anchor reference. This says nothing either way about where the file came from.",
+      "REFERENCE_UNREADABLE": "No report anchored in this registry is this exact file. The file carries an anchor reference, but it is not well formed.",
+      "NAMES_UNKNOWN_RECORD": "No report anchored in this registry is this exact file. The file refers to a record that this registry does not hold.",
+      "PDF_UNREADABLE": "No report anchored in this registry is this exact file, and the file could not be read as a PDF to look for an anchor reference."
+    },
+    "cannotVerify": {
+      "RPC_UNREACHABLE": "A blockchain endpoint could not be reached.",
+      "WRONG_CHAIN": "A blockchain endpoint is on a different network than this verifier expects.",
+      "WRONG_CONTRACT": "The contract at the registry address is not the expected registry.",
+      "RPC_DISAGREE": "The two blockchain endpoints gave different answers.",
+      "CHAIN_INCONSISTENT": "The registry returned records that do not fit together.",
+      "FILE_TOO_LARGE": "The file is larger than 25 MB.",
+      "UNEXPECTED": "Something went wrong while checking."
+    },
+    "details": {
+      "heading": "Details",
+      "fileHash": "File fingerprint (SHA-256)",
+      "issuer": "Issuer",
+      "unknownIssuer": "Unknown issuer ({orgId})",
+      "noIssuer": "Not a registered issuer",
+      "registry": "Registry contract",
+      "network": "Network",
+      "matched": "Matched record",
+      "claimed": "Record the file refers to",
+      "original": "Original record",
+      "latest": "Latest version",
+      "kind": {
+        "ORIGINAL": "Original",
+        "DISTRIBUTION_COPY": "Distribution copy"
+      },
+      "version": "Version {version}",
+      "block": "Block {block}",
+      "transaction": "Transaction",
+      "revokedReason": "Revoked, reason code {code}",
+      "latestLink": "Latest version of this report",
+      "asOf": "Read at finalized block {block}.",
+      "noExplorer": "local chain, no block explorer"
+    }
+  },
+  "latest": {
+    "title": "Latest version of a report",
+    "invalidId": "This is not a report id.",
+    "notFound": "No anchored report has this id.",
+    "status": "Status",
+    "current": "Current",
+    "revoked": "Revoked, reason code {code}",
+    "noPdf": "This page shows the record only. Get the file from the issuer, then check it on the verify page.",
+    "verifyLink": "Verify a file"
   }
 }

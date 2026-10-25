@@ -19,6 +19,9 @@ export default async function HomePage() {
           <Link href="/reports" className={buttonVariants({ variant: 'primary' })} data-testid="sign-in-link">
             {t('signInLink')}
           </Link>
+          <Link href="/verify" className={buttonVariants({ variant: 'secondary' })} data-testid="verify-link">
+            {t('verifyLink')}
+          </Link>
           <Link href="/kitchen-sink" className={buttonVariants({ variant: 'secondary' })}>
             {t('kitchenSinkLink')}
           </Link>

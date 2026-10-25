@@ -1275,6 +1275,20 @@ locked bucket or a mailbox):
   end-to-end tests, where the check queues the day's head, the worker writes
   it and the next check holds the log to it.
 
+6i is the monitor (#68):
+
+- **`npm run monitor`** reads the database and prints one `ALERT` line, with
+  ids, codes and times, for each thing that needs a person: a failed write, an
+  INDETERMINATE one, one not final an hour after it was sent, a worker that
+  stopped while work waits for its key, a low balance, endpoints that
+  disagree, a broken or stopped audit check, a stopped registry watch or an
+  unreviewed write it found, a notice the mailer gave up on. It exits 1 while
+  there is any, for the host's scheduler to page whoever is on call;
+  `docs/operations.md` lists each code with its runbook.
+- **CI runs it last**, after the end-to-end tests, the check and the watch:
+  the tests must leave nothing for a person.
+- **Still open on #68:** walking each runbook once on Sepolia, after #4.
+
 **Prompt**
 
 ```text

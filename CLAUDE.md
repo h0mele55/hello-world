@@ -14,8 +14,9 @@ that starts each phase. The decisions behind the design are in `docs/adr/`.
 Phase 0 (the Next.js scaffold rendering Inflect's UI primitives in its own
 theme) and Phase 1 (the `AuditReportRegistry` contract and the viem chain
 adapter, tested on Anvil) are done. The Sepolia deployment waits on funded keys
-(#4). Phase 2a (PDF parsing, the opinion locator and the commitments, with no
-database or UI) is done; 2b adds storage, sign-in and the confirmation screen.
+(#4). Phase 2 (PDF parsing, the opinion locator, the commitments, encrypted
+storage, sign-in and the confirmation screen) is done. Nothing touches a chain
+from the app yet; that is Phase 3.
 
 ## Rules every phase keeps
 
@@ -63,6 +64,11 @@ node scripts/sync-inflect-ui.mjs --check   # re-derive the vendored tree from up
 npm run contracts:artifact     # regenerate src/lib/chain/registry-artifact.ts after a contract change
 npm run test:integration       # chain adapter against a throwaway Anvil node
 npx tsx scripts/deploy-registry.ts <sepolia|local>       # deploy; reads keys from env only
+
+# Database (Postgres 16: `docker compose up -d`, or any local server; Prisma 7 does not read .env)
+npm run db:migrate             # create and apply a migration in development
+npm run db:seed                # the firm and two users, from SEED_* in the environment
+npm run test:db                # intake use cases against TEST_DATABASE_URL (name must end in _test)
 
 # PDFs
 npm run test:pdf               # parser, golden hashes, fuzzing (forks the real parser)
@@ -150,6 +156,22 @@ to one inflect-compliance commit.
   Real reports are listed by URL and SHA-256 in
   `tests/fixtures/public-corpus.json` and downloaded into `.cache/`, never
   committed.
+
+## Sign-in, storage and the database
+
+- **Every page and route checks the user itself.** Pages call
+  `requireUser()` (`src/lib/page-auth.ts`): Next.js renders a layout and its
+  page in parallel, so a layout's check does not protect the page. Route
+  handlers wrap in `handler()` (`src/lib/http.ts`), which also refuses a
+  cross-origin write and turns an `IntakeError` into a status and a code.
+- **Use cases scope every query to the caller's firm** (`orgId`) and check the
+  role. A record from another firm is `NOT_FOUND`, never `FORBIDDEN`.
+- **Confidential data is sealed, never stored in clear**: use `seal`/`open`
+  from `src/lib/sealed.ts` with a context naming the row and field, and
+  `storeFile`/`readStoredFile` for PDFs. Never log a file, an opinion or a
+  manifest.
+- **Never run `prisma migrate reset` or anything that drops data** without the
+  owner's explicit consent. Tests use `migrate deploy` on a `_test` database.
 
 ## Conventions
 

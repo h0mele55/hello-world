@@ -35,7 +35,8 @@ let cached: ServerEnvironment | undefined;
 
 export function serverEnv(): ServerEnvironment {
   if (cached) return cached;
-  const parsed = ServerEnv.safeParse(process.env);
+  // An empty value (a copied .env.example line) counts as unset, so defaults apply.
+  const parsed = ServerEnv.safeParse(Object.fromEntries(Object.entries(process.env).filter(([, value]) => value !== '')));
   if (!parsed.success) {
     // Names only; never echo a value.
     const names = parsed.error.issues.map((issue) => `${issue.path.join('.')}: ${issue.message}`).join('; ');

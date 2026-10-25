@@ -321,8 +321,8 @@ every miss shows as "not found", never as a wrong passage.
 
 - [x] Golden tests pin `docHash`, `manifestHash` and `opinionCommitment` for fixed fixtures
 - [x] Malformed-PDF fuzzing (truncated files, looping cross-references, decompression bombs) never crashes or hangs the server
-- [ ] PDFs and manifests are encrypted at rest with AES-256-GCM; opinion text never reaches a log (2b)
-- [ ] Salts come from a CSPRNG, fresh per version, and are never reused (CSPRNG in 2a; uniqueness is a database constraint in 2b)
+- [x] PDFs and manifests are encrypted at rest with AES-256-GCM; opinion text never reaches a log
+- [x] Salts come from a CSPRNG, fresh per version, and are never reused
 - [x] A scanned PDF with no text layer is refused for the opinion check with a named reason, not OCR'd silently
 - [x] The manifest carries a schema version, and readers refuse a version they do not know
 - [x] Only synthetic PDFs are committed; public reports are fetched into a git-ignored cache by URL and expected hash
@@ -371,6 +371,35 @@ Postgres, sign-in, upload with encrypted storage and the confirmation screen
 - **Canonical JSON** is Inflect's function copied verbatim, behind a strict
   guard that refuses `undefined`, non-integer numbers, `Date` and other
   non-plain values, which the copied function would silently coerce.
+
+2b, in the same spirit:
+
+- **Sign-in is NextAuth v4 with credentials and JWT sessions**, the version
+  Inflect pins, with the same Next 16 route shim. Two roles, `PREPARER` and
+  `APPROVER`. Five failed sign-ins lock an email for 15 minutes; the address
+  limit applies only behind a proxy that sets `X-Forwarded-For`
+  (`TRUST_PROXY_HEADERS=1`), since a client can forge that header.
+- **Every sealed value names what it protects.** Files, the extracted
+  opinion, the confirmed opinion and the manifest are AES-256-GCM encrypted
+  with the field and the version's `docHash` (or the file's path) as
+  additional authenticated data, so a ciphertext moved to another row fails
+  to open. Each stored file is also re-hashed on every read.
+- **Salt uniqueness is a database constraint** (`opinionSalt` and
+  `manifestSalt` are unique columns).
+- **`CONFIRMED` is reachable only through `confirmOpinion`**, whose update is
+  conditional on the row still being a draft, so two racing confirmations
+  produce one. The screen asks again in a dialog that says the text becomes
+  part of the commitment.
+- **One draft per engagement at a time**, and a draft can be discarded (file
+  included). Version n+1 needs a reason code (`CORRECTION`,
+  `SUBSEQUENT_EVENT`, `OTHER`); anchoring it to its parent is Phase 3.
+- **The upload is the raw PDF body** (`Content-Type: application/pdf`), read
+  with a 25 MB cap that stops reading at the limit. A PDF that is signed or
+  edit-protected (#74) is stored `anchorOnly`.
+- **Database tests run against real Postgres**, migrated from scratch with
+  `prisma migrate deploy`, and refuse any database whose name does not end
+  in `_test`. Prisma refuses `migrate reset` from a coding agent without the
+  owner's consent; the tests never need it.
 
 **Prompt**
 

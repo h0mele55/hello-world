@@ -1,0 +1,22 @@
+# Local Postgres for development and the database tests.
+#   POSTGRES_PASSWORD=<choose one> docker compose up -d
+# Creates two databases: anchor (the app) and anchor_test (npm run test:db).
+services:
+  postgres:
+    image: postgres:16.15-alpine@sha256:f4610795587492cd4fb887c2dc3de301b813278bb6f616992061141b5f15ac36
+    environment:
+      POSTGRES_USER: anchor
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: anchor
+    ports:
+      - '127.0.0.1:5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U anchor -d anchor']
+      interval: 5s
+      retries: 12
+
+volumes:
+  pgdata: {}

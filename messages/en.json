@@ -72,7 +72,9 @@
     "label": "Console",
     "dashboard": "Dashboard",
     "clients": "Clients",
-    "reports": "Reports"
+    "reports": "Reports",
+    "auditLog": "Audit log",
+    "auditBroken": "The audit log failed its nightly check at event #{seq}. Its history may have been changed: find out why before relying on it."
   },
   "login": {
     "title": "Sign in",
@@ -652,5 +654,44 @@
       "WITHDRAWN": "Taken back"
     },
     "closed": "by {who}, {when} UTC"
+  },
+  "auditLog": {
+    "title": "Audit log",
+    "intact": "Intact",
+    "broken": "Broken",
+    "head": "Head hash",
+    "now": {
+      "title": "The chain, re-derived now",
+      "intact": "Every one of the {count} events hashes to the next. The newest event’s hash:",
+      "broken": "The chain breaks at event #{seq}: {reason}."
+    },
+    "nightly": {
+      "title": "The nightly check",
+      "neverRun": "The nightly check has never run. Schedule `npm run audit:check` once a day.",
+      "intact": "Last run {when} UTC: intact, {count} events, and nothing earlier was cut or rewritten.",
+      "stale": "The nightly check last ran {when} UTC, more than a day and a half ago. It has stopped running.",
+      "broken": "Run {when} UTC: broken at event #{seq}: {reason}.",
+      "how": "Each night every hash is re-derived, and the chain is held to the last intact check: it may only have grown, and the event that was its head must still be there, unchanged."
+    },
+    "reasons": {
+      "SEQ_GAP": "an event is missing or out of order",
+      "PREV_HASH_MISMATCH": "it does not link to the event before it",
+      "HASH_MISMATCH": "its contents do not match its hash",
+      "TRUNCATED": "events that an earlier check saw are gone",
+      "REWRITTEN": "an event that an earlier check saw has been replaced"
+    },
+    "events": "Events, newest first",
+    "empty": "No events yet",
+    "columns": {
+      "at": "Time (UTC)",
+      "actor": "Who",
+      "action": "Action",
+      "subject": "Subject"
+    },
+    "worker": "The worker",
+    "details": "Details",
+    "hash": "Hash: {hash}",
+    "older": "Older events",
+    "newest": "Newest events"
   }
 }

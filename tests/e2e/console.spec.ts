@@ -145,6 +145,20 @@ test('the dashboard counts a lookup of the firm’s family and draws it, in both
   }
 });
 
+test('the audit log lists the firm’s events and re-derives its chain on every view', async ({ page }) => {
+  await signIn(page, preparer);
+  await createEngagement(page, runTag());
+  await page.getByTestId('nav-audit-log').click();
+  await expect(page).toHaveURL(/\/audit-log$/);
+  await expect(page.getByTestId('chain-now')).toHaveAttribute('data-ok', 'true');
+  await expect(page.getByTestId('chain-head')).toHaveText(/^0x[0-9a-f]{64}$/);
+  await expect(page.getByTestId('chain-nightly')).toHaveAttribute('data-state', /^(NEVER_RUN|INTACT|STALE)$/);
+  await expect(page.locator('[data-testid=audit-event][data-action="engagement.created"]').first()).toBeVisible();
+  // Newest first: sequence numbers only go down the page.
+  const seqs = (await page.getByTestId('audit-event').evaluateAll((rows) => rows.map((r) => Number(r.getAttribute('data-seq')))));
+  expect(seqs).toEqual([...seqs].sort((a, b) => b - a));
+});
+
 test('the console pages pass WCAG 2.2 AA in both themes', async ({ page }) => {
   const tag = runTag();
   await signIn(page, preparer);
@@ -158,7 +172,7 @@ test('the console pages pass WCAG 2.2 AA in both themes', async ({ page }) => {
 
   for (const theme of ['light', 'dark'] as const) {
     await chooseTheme(page, theme);
-    for (const url of ['/clients', clientUrl, engagementUrl]) {
+    for (const url of ['/clients', clientUrl, engagementUrl, '/audit-log', '/dashboard']) {
       await page.goto(url);
       await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
       expect(await violations(page), `${url} (${theme})`).toEqual([]);

@@ -682,12 +682,58 @@ This phase completes the prototype.
 **Hardening**
 
 - [ ] Tamper suite: one-byte flip, metadata-only edit, opinion paragraph edit, opinion type flip, re-save in another tool, print to PDF, appended incremental update, hidden text overlay, stripped XMP, forged XMP naming another record
-- [ ] A network-capture test proves no request carries PDF bytes
+- [x] A network-capture test proves no request carries PDF bytes
 - [ ] Strict CSP: no inline script, `connect-src` limited to the two RPC hosts and the app's origin, no third-party scripts
-- [ ] Disagreeing RPC endpoints or a wrong chain id return "cannot verify right now", never a verdict
-- [ ] One opinion normaliser bundle serves server and browser, with golden tests run in both
-- [ ] Wording reviewed against overclaiming, in English and Bulgarian; axe accessibility checks pass (WCAG 2.2 AA)
-- [ ] The app's lookup API is rate-limited, and the verifier works without it
+- [x] Disagreeing RPC endpoints or a wrong chain id return "cannot verify right now", never a verdict
+- [x] One opinion normaliser bundle serves server and browser, with golden tests run in both
+- [ ] Wording reviewed against overclaiming, in English and Bulgarian; axe accessibility checks pass (WCAG 2.2 AA) (the wording guard is in; axe arrives with #50)
+- [ ] The app's lookup API is rate-limited, and the verifier works without it (it works without it; the rate limit is #51)
+
+**As built: Phase 4 ships in two pull requests.** 4a is the shared
+verification code, `/verify`, the wording and `/r/{familyId}/latest` (#44,
+#45, #46, #47). 4b is the standalone verifier and CLI, the tamper suite, the
+privacy, resilience and accessibility tests, the CSP and the rate limit (#48,
+#49, #50, #51). Departures from the prompt below, and decisions it left open:
+
+- **One implementation, two runtimes.** `src/lib/verify-core/` holds line
+  grouping, page and metadata reading, the opinion commitment, the
+  two-endpoint registry view and the verdict; the server's isolated parser
+  imports the same line, page and metadata readers. It imports only `viem`,
+  `zod` and plain modules (`tests/unit/verify-core-imports.test.ts`), and the
+  Phase 2 golden values are recomputed in Chromium by an esbuild bundle of it
+  (`tests/e2e/golden-browser.spec.ts`).
+- **The file is hashed with viem's SHA-256, not WebCrypto**: the same code
+  gives the golden values in Node and the browser, and it needs no secure
+  context, which a verifier opened from disk (4b) may not have.
+- **The endpoints are `VERIFY_RPC_URL_1` and `VERIFY_RPC_URL_2`**, read by the
+  server at request time and handed to the page, not `NEXT_PUBLIC_*` values
+  baked in at build. They are public by definition, so they are separate from
+  `SEPOLIA_RPC_URL`, which may carry a key; on Sepolia they must be https, on
+  different hosts, without credentials. `VERIFY_NETWORK` defaults to
+  `ANCHOR_NETWORK`. Choosing the two providers is part of the Sepolia run
+  (#4).
+- **Two endpoints, one block.** Each endpoint must report the chain id and
+  hold the deployment's runtime bytecode; every read is made on both at the
+  older of their two finalized blocks and must agree, or the answer is
+  CANNOT_VERIFY with a named reason (`RPC_UNREACHABLE`, `WRONG_CHAIN`,
+  `WRONG_CONTRACT`, `RPC_DISAGREE`, `CHAIN_INCONSISTENT`). Reading at a
+  finalized block is also rule 2: a record whose block is not finalized is
+  not found.
+- **The issuer's name comes from the deployment record** (`issuer.orgName`,
+  written by `scripts/deploy-registry.ts` from `ISSUER_ORG_NAME`), not from a
+  separate `public/issuers.json`; an org id it does not name reads "unknown
+  issuer".
+- **Revocation** is judged on the matched record and its original: a revoked
+  copy does not revoke the original it was made from. For an altered file the
+  original's and the latest version's status are shown beside the verdict.
+- **The verdict says what it proves.** Only AUTHENTIC_* say "authentic"
+  (`tests/unit/verify-wording.test.ts`, both languages); every altered verdict
+  opens with "This is not the file the issuer anchored"; NOT_REGISTERED names
+  why (no reference, an unreadable one, one naming no record, an unreadable
+  PDF). An error the verifier did not expect is shown as "cannot verify right
+  now", never as a verdict.
+- **`/r/{familyId}/latest` reads the chain on the server**, through the same
+  two agreeing endpoints, and shows the record only.
 
 **Prompt**
 

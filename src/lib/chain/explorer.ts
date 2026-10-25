@@ -2,6 +2,7 @@
 const EXPLORERS: Record<number, string> = { 11155111: 'https://sepolia.etherscan.io' };
 
 export const explorerTxUrl = (chainId: number, txHash: string) => (EXPLORERS[chainId] ? `${EXPLORERS[chainId]}/tx/${txHash}` : null);
+export const explorerBlockUrl = (chainId: number, block: number | bigint) => (EXPLORERS[chainId] ? `${EXPLORERS[chainId]}/block/${block}` : null);
 export const explorerAddressUrl = (chainId: number, address: string) => (EXPLORERS[chainId] ? `${EXPLORERS[chainId]}/address/${address}` : null);
 
 const NETWORK_NAMES: Record<number, string> = { 11155111: 'Ethereum Sepolia', 31337: 'Local test chain (Anvil)' };

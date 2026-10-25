@@ -1,7 +1,8 @@
 import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { approver, createEngagement, preparer, runTag, signIn, uploadAndConfirm } from './helpers';
+import { approver, createEngagement, preparer, runTag, signIn, uniquePdf, uploadAndConfirm } from './helpers';
 
 /**
  * Phase 3 end to end, on a local Anvil chain: an approver widens the write
@@ -62,6 +63,7 @@ test('a dry run is only simulated; a live anchor is sent, final, then stamped, c
   test.setTimeout(240_000);
   const tag = runTag();
   let versionUrl = '';
+  let copy: Buffer = Buffer.alloc(0);
 
   await test.step('the preparer uploads a report and confirms its opinion', async () => {
     await signIn(page, preparer);
@@ -123,6 +125,39 @@ test('a dry run is only simulated; a live anchor is sent, final, then stamped, c
     const pdf = await response.body();
     expect(pdf.subarray(0, 5).toString()).toBe('%PDF-');
     expect(pdf.toString('latin1')).toContain('https://github.com/h0mele55/hello-world/ns/audit-anchor/1.0/');
+    copy = pdf;
+  });
+
+  await test.step('anyone verifies the copy and the original in a browser, signed out', async () => {
+    await page.context().clearCookies();
+    const issuerName = (JSON.parse(fs.readFileSync(path.join(process.cwd(), 'deployments', 'local.json'), 'utf8')) as { issuer: { orgName: string } }).issuer.orgName;
+    const verify = async (buffer: Buffer) => {
+      await page.getByTestId('verify-file').setInputFiles({ name: 'report.pdf', mimeType: 'application/pdf', buffer });
+      await expect(page.getByTestId('verdict')).toBeVisible({ timeout: 30_000 });
+    };
+    await page.goto('/verify');
+    await verify(copy);
+    await expect(page.getByTestId('verdict')).toHaveAttribute('data-kind', 'AUTHENTIC_LATEST');
+    await expect(page.getByTestId('record-matched')).toContainText('Distribution copy');
+    await expect(page.getByTestId('record-matched-issuer')).toHaveText(issuerName);
+
+    await page.getByTestId('verify-another').click();
+    await expect(page.getByTestId('verdict')).toHaveCount(0);
+    await verify(uniquePdf('en-unmodified.pdf', tag));
+    await expect(page.getByTestId('verdict')).toHaveAttribute('data-kind', 'AUTHENTIC_LATEST');
+    await expect(page.getByTestId('record-matched')).toContainText('Original');
+
+    // Bytes appended after the end of the file: not the registered file, though its opinion reads the same.
+    await page.getByTestId('verify-another').click();
+    await expect(page.getByTestId('verdict')).toHaveCount(0);
+    await verify(Buffer.concat([copy, Buffer.from('\n%appended\n')]));
+    await expect(page.getByTestId('verdict')).toHaveAttribute('data-kind', 'ALTERED_OPINION_APPEARS_UNCHANGED');
+    await expect(page.getByTestId('verdict-body')).toContainText('This is not the file the issuer anchored');
+
+    await page.getByTestId('latest-link').click();
+    await expect(page.getByTestId('latest-page')).toHaveAttribute('data-status', 'FOUND');
+    await expect(page.getByTestId('latest-status')).toHaveText('Current');
+    await expect(page.getByTestId('record-latest-version')).toHaveText('Version 1');
   });
 
   await test.step('a signed report is anchored as issued and gets a certificate', async () => {

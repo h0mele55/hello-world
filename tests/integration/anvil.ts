@@ -23,10 +23,10 @@ function freePort(): Promise<number> {
  * Fails loudly if Foundry is not installed rather than skipping: a skipped
  * integration test reads as a passing one.
  */
-export async function startAnvil(): Promise<AnvilHandle> {
+export async function startAnvil(options: { chainId?: number } = {}): Promise<AnvilHandle> {
   const port = await freePort();
   const url = `http://127.0.0.1:${port}`;
-  const child: ChildProcess = spawn('anvil', ['--port', String(port), '--chain-id', '31337', '--slots-in-an-epoch', '1', '--silent'], {
+  const child: ChildProcess = spawn('anvil', ['--port', String(port), '--chain-id', String(options.chainId ?? 31337), '--slots-in-an-epoch', '1', '--silent'], {
     stdio: 'ignore',
   });
   const spawnError = new Promise<never>((_, reject) =>

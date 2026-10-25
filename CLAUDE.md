@@ -19,7 +19,9 @@ storage, sign-in and the confirmation screen) is done. Phase 3 (the write
 ladder, four-eyes approval, the ChainWrite journal and its worker, new
 versions, the audit log, the balance alert, stamping, the distribution copy
 and the certificate for anchor-only reports) is done and tested on Anvil; its
-Sepolia run waits on #4.
+Sepolia run waits on #4. Phase 4a (the shared verification code, `/verify` and
+`/r/<familyId>/latest`) is done; 4b (the standalone verifier and CLI, the
+tamper suite, CSP and rate limits) is next.
 
 ## Rules every phase keeps
 
@@ -65,7 +67,7 @@ node scripts/sync-inflect-ui.mjs --check   # re-derive the vendored tree from up
 (cd contracts && FORGE_SNAPSHOT_CHECK=true forge test)   # unit, fuzz, invariant and gas tests
 (cd contracts && forge fmt --check && forge lint --deny notes)
 npm run contracts:artifact     # regenerate src/lib/chain/registry-artifact.ts after a contract change
-npm run test:integration       # chain adapter against a throwaway Anvil node
+npm run test:integration       # chain adapter and verifier against throwaway Anvil nodes
 npx tsx scripts/deploy-registry.ts <sepolia|local>       # deploy; reads keys from env only
 
 # Database (Postgres 16: `docker compose up -d`, or any local server; Prisma 7 does not read .env)
@@ -219,6 +221,28 @@ to one inflect-compliance commit.
   chain says whether the record it names is this file.
 - **The worker runs from the app's directory** (the PDF parser is found from
   there) and needs `FILE_*` and `APP_PUBLIC_URL` besides its chain settings.
+
+## The verifier
+
+- **Verification code lives in `src/lib/verify-core/`** and runs unchanged in
+  the browser and in Node: no server imports, only `viem`, `zod` and plain
+  modules. `tests/unit/verify-core-imports.test.ts` walks its imports. The
+  server's isolated parser uses its line, page and metadata readers, so both
+  read the same text from the same file.
+- **`/verify` decides in the browser** (rule 5). The server hands the page
+  only public settings (`verifierSetupFromEnv`, `src/lib/verify-setup.ts`):
+  the registry, its bytecode hash, the issuer names from the deployment record
+  and `VERIFY_RPC_URL_1/2`, which every visitor receives, so never a keyed
+  URL. The page must not call the app's API; the end-to-end test answers
+  `/api/*` with 503 and checks that no request carries the file.
+- **Any doubt about the chain is a `CannotVerify`** with a named reason,
+  raised by the registry view (`openRegistryView`), which checks chain id and
+  bytecode on both endpoints and reads both at one finalized block. Do not
+  turn one into a verdict, and do not catch unexpected errors inside
+  `verifyFile`: the page shows them as "cannot verify right now".
+- **Wording**: only AUTHENTIC_* verdicts say authentic or genuine, in either
+  language, and every altered verdict says the file is not the registered
+  file (`tests/unit/verify-wording.test.ts`).
 
 ## Conventions
 

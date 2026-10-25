@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { explorerTxUrl, networkNameOf } from '@/lib/chain/explorer';
-import { NETWORKS, PRODUCTION_NETWORKS, rpcUrlFor, rpcUrlVariable, type NetworkName } from '@/lib/chain/networks';
+import { NETWORKS, PRODUCTION_NETWORKS, rpcUrlFor, rpcUrlVariable, secondRpcUrlFor, type NetworkName } from '@/lib/chain/networks';
 
 /**
  * The networks every part of the system knows (#63): one table, so the worker,
@@ -40,6 +40,23 @@ describe('the networks', () => {
     expect(rpcUrlFor('base-sepolia', env({ BASE_SEPOLIA_RPC_URL: 'https://b.example' }))).toBe('https://b.example');
     expect(() => rpcUrlFor('arbitrum-sepolia', env())).toThrow('ARBITRUM_SEPOLIA_RPC_URL is not set');
     expect(rpcUrlFor('local', env())).toBe('http://127.0.0.1:8545');
+  });
+
+  it('read the worker’s second endpoint, refusing a missing one, a malformed one, and one from the same provider (#92)', () => {
+    const first = { SEPOLIA_RPC_URL: 'https://ethereum-sepolia-rpc.publicnode.com' };
+    expect(secondRpcUrlFor('sepolia', env({ ...first, SEPOLIA_RPC_URL_2: 'https://sepolia.drpc.org' }))).toBe('https://sepolia.drpc.org');
+    expect(() => secondRpcUrlFor('sepolia', env(first))).toThrow(expect.objectContaining({ code: 'ENV_MISSING', message: expect.stringContaining('SEPOLIA_RPC_URL_2 is not set') }));
+    expect(() => secondRpcUrlFor('sepolia', env({ ...first, SEPOLIA_RPC_URL_2: 'not a url' }))).toThrow(expect.objectContaining({ code: 'ENV_INVALID' }));
+    // Another path or key on the same host is the same provider.
+    expect(() => secondRpcUrlFor('sepolia', env({ ...first, SEPOLIA_RPC_URL_2: 'https://ethereum-sepolia-rpc.publicnode.com/?key=2' }))).toThrow(
+      expect.objectContaining({ code: 'RPC_NOT_INDEPENDENT' }),
+    );
+    // A refusal never repeats a URL, which may carry a key.
+    expect(() => secondRpcUrlFor('sepolia', env({ SEPOLIA_RPC_URL: 'https://a.example/k3y', SEPOLIA_RPC_URL_2: 'https://a.example/s3cret' }))).toThrow(
+      expect.objectContaining({ code: 'RPC_NOT_INDEPENDENT', message: expect.not.stringMatching(/k3y|s3cret|a\.example/) }),
+    );
+    expect(secondRpcUrlFor('local', env())).toBe('http://127.0.0.1:8545');
+    expect(secondRpcUrlFor('local', env({ LOCAL_RPC_URL_2: 'http://127.0.0.1:8546' }))).toBe('http://127.0.0.1:8546');
   });
 
   it('link every public chain to an explorer and name it for a reader; a local chain gets no link', () => {

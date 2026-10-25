@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
+import pg from 'pg';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import { admin, approver, createEngagement, preparer, runTag, signIn, uniquePdf, uploadAndConfirm, type TestUser } from './helpers';
 
@@ -29,6 +30,16 @@ test.skip(!process.env.ANCHOR_NETWORK && !process.env.CI, 'needs a local chain (
 
 function runWorkerOnce() {
   execFileSync(path.join(process.cwd(), 'node_modules', '.bin', 'tsx'), ['scripts/worker.ts', '--once'], { env: process.env, stdio: 'pipe' });
+}
+
+async function withDb<T>(run: (client: pg.Client) => Promise<T>): Promise<T> {
+  const client = new pg.Client({ connectionString: process.env.DATABASE_URL });
+  await client.connect();
+  try {
+    return await run(client);
+  } finally {
+    await client.end();
+  }
 }
 
 /** The mailer, as its own process too: it holds no issuer key. */
@@ -411,5 +422,16 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     // Version 2 stands: revoking version 1 says nothing about it.
     await visitor.getByTestId('verify-file').setInputFiles({ name: 'report.pdf', mimeType: 'application/pdf', buffer: uniquePdf('en-qualified.pdf', tag) });
     await expect(visitor.getByTestId('verdict')).toHaveAttribute('data-kind', 'AUTHENTIC_LATEST', { timeout: 30_000 });
+  });
+
+  await test.step('the console says while the worker’s two endpoints disagree, and the worker clears it once they agree (#92)', async () => {
+    // As a pass in which they disagreed leaves it.
+    await withDb((db) => db.query('UPDATE "IssuerKeyStatus" SET "rpcDisagreedAt" = $1', [new Date('2026-01-02T03:04:00Z')]));
+    await prepared.goto('/dashboard');
+    await expect(prepared.getByTestId('rpc-disagree')).toContainText('have disagreed about the chain since Jan 2, 2026');
+    // The worker reads both (here the one local node, twice), they agree, and the banner goes.
+    runWorkerOnce();
+    await prepared.reload();
+    await expect(prepared.getByTestId('rpc-disagree')).toHaveCount(0);
   });
 });

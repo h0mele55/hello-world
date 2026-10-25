@@ -75,7 +75,8 @@
     "reports": "Reports",
     "auditLog": "Audit log",
     "auditBroken": "The audit log failed its nightly check at event #{seq}. Its history may have been changed: find out why before relying on it.",
-    "unjournaled": "{count, plural, one {# write} other {# writes}} on chain by the firm’s issuer keys that the console did not make."
+    "unjournaled": "{count, plural, one {# write} other {# writes}} on chain by the firm’s issuer keys that the console did not make.",
+    "rpcDisagree": "The worker's two RPC endpoints have disagreed about the chain since {since} UTC. Anchors and revocations they disagree about wait until they agree: find out which endpoint is wrong (docs/runbooks/rpc-outage.md)."
   },
   "login": {
     "title": "Sign in",

@@ -11,11 +11,14 @@ import {
   createPublicClient,
   createTestClient,
   createWalletClient,
+  custom,
+  encodeFunctionData,
   getAddress,
   http,
   keccak256,
   parseEther,
   toBytes,
+  toHex,
   type Address,
   type Hex,
   type PublicClient,
@@ -1100,5 +1103,123 @@ describe('an issuer key in Cloud KMS (#62)', () => {
     advance(120_001);
     await pass({ account: sound });
     expect(await writeOf(chainWriteId)).toMatchObject({ status: 'BROADCAST', nonce: 0 });
+  });
+});
+
+describe('two RPC endpoints (#92)', () => {
+  /**
+   * A second endpoint over the same Anvil that answers some requests its own
+   * way: another provider that lies, forgets or lags. `forward` asks Anvil,
+   * with other params if given.
+   */
+  function endpoint(answer: (method: string, params: unknown[], forward: (params?: unknown[]) => Promise<unknown>) => Promise<unknown> = (_, __, forward) => forward()): PublicClient {
+    const upstream = http(anvil.url)({ chain: foundry });
+    return createPublicClient({
+      chain: foundry,
+      pollingInterval: 50,
+      transport: custom({
+        request: ({ method, params }: { method: string; params?: unknown }) => {
+          const list = (params ?? []) as unknown[];
+          return answer(method, list, (p = list) => upstream.request({ method, params: p } as Parameters<typeof upstream.request>[0]));
+        },
+      }),
+    }) as PublicClient;
+  }
+  const keyStatus = () => prisma.issuerKeyStatus.findUniqueOrThrow({ where: { chainId_address: { chainId: 31337, address: issuer.address } } });
+
+  async function broadcastAnchor() {
+    await goLive();
+    const versionId = await confirmedVersion((await engagement()).id, 'en-unmodified.pdf');
+    const { chainWriteId } = await approveVersion(approver, versionId, target);
+    await pass();
+    await mine();
+    expect(await writeOf(chainWriteId)).toMatchObject({ status: 'BROADCAST' });
+    return { versionId, chainWriteId };
+  }
+
+  it('settles an anchor only once both endpoints read the same receipt at one finalized block, and flags the console while they disagree', async () => {
+    const { versionId, chainWriteId } = await broadcastAnchor();
+    // A second endpoint that says the transaction reverted.
+    const liar = endpoint(async (method, _, forward) => {
+      const answer = await forward();
+      return method === 'eth_getTransactionReceipt' && answer ? { ...(answer as object), status: '0x0' } : answer;
+    });
+
+    const first = await pass({ checkClient: liar });
+    expect(first).toMatchObject({ ran: true, rpcDisagreed: true, steps: [], errors: [{ writeId: chainWriteId, error: 'RPC_DISAGREE' }] });
+    // Nothing settled, and the row is free for the next pass to compare again.
+    expect(await writeOf(chainWriteId)).toMatchObject({ status: 'BROADCAST', leaseUntil: null, error: null });
+    expect(await versionOf(versionId)).toMatchObject({ status: 'APPROVED' });
+    const since = clock;
+    expect(await keyStatus()).toMatchObject({ rpcDisagreedAt: since });
+
+    // Still disagreeing a pass later: compared again, and the flag keeps the time it was first seen.
+    advance(15_000);
+    expect(await pass({ checkClient: liar })).toMatchObject({ rpcDisagreed: true, errors: [{ writeId: chainWriteId, error: 'RPC_DISAGREE' }] });
+    expect(await keyStatus()).toMatchObject({ rpcDisagreedAt: since });
+
+    // The same lie from the first endpoint cannot fail the row either (TX_REVERTED waits for an agreed, final receipt).
+    advance(15_000);
+    expect(await pass({ publicClient: liar, checkClient: endpoint() })).toMatchObject({ rpcDisagreed: true, errors: [{ writeId: chainWriteId, error: 'RPC_DISAGREE' }] });
+    expect(await writeOf(chainWriteId)).toMatchObject({ status: 'BROADCAST' });
+
+    // Once they agree: FINAL, and the flag is cleared.
+    advance(15_000);
+    const agreed = await pass({ checkClient: endpoint() });
+    expect(agreed).toMatchObject({ rpcDisagreed: false, errors: [] });
+    expect(agreed.steps[0]).toMatchObject({ writeId: chainWriteId, from: 'BROADCAST', to: 'FINAL' });
+    expect(await versionOf(versionId)).toMatchObject({ status: 'ANCHORED' });
+    expect(await keyStatus()).toMatchObject({ rpcDisagreedAt: null });
+  });
+
+  it('waits for a second endpoint that lags behind, without calling it a disagreement', async () => {
+    const { chainWriteId } = await broadcastAnchor();
+    // Its finalized block is still the genesis block.
+    const lagging = endpoint((method, params, forward) => (method === 'eth_getBlockByNumber' && params[0] === 'finalized' ? forward(['0x0', params[1]]) : forward()));
+
+    const waiting = await pass({ checkClient: lagging });
+    expect(waiting).toMatchObject({ rpcDisagreed: false, errors: [] });
+    expect(waiting.steps[0]).toMatchObject({ writeId: chainWriteId, from: 'BROADCAST', to: 'BROADCAST', note: expect.stringContaining('waiting for finality') });
+    expect(await keyStatus()).toMatchObject({ rpcDisagreedAt: null });
+
+    expect((await pass({ checkClient: endpoint() })).steps[0]).toMatchObject({ writeId: chainWriteId, to: 'FINAL' });
+  });
+
+  it('marks a scheduled revocation cancelled only when both endpoints read it gone', async () => {
+    const { versionId, chainWriteId: anchorWriteId } = await broadcastAnchor();
+    await pass();
+    await mine();
+    await pass();
+    expect((await versionOf(versionId)).status).toBe('COMPLETE');
+    expect(await writeOf(anchorWriteId)).toMatchObject({ status: 'FINAL' });
+    const e = (await versionOf(versionId)).engagement;
+    const { revocationId } = await requestRevocation(admin, { versionId, reason: 'ISSUED_IN_ERROR', note: 'Issued against the wrong period.', confirmation: e.engagementRef });
+    const { chainWriteId } = await approveRevocation(approver, revocationId, target);
+    await pass();
+    await mine();
+    await pass();
+    expect(await prisma.revocation.findUniqueOrThrow({ where: { id: revocationId } })).toMatchObject({ status: 'SCHEDULED' });
+
+    // An endpoint that reads the record as it was before the request: the
+    // revocation gone, as though the owner had cancelled it.
+    const requestBlock = (await writeOf(chainWriteId)).blockNumber!;
+    const recordId = (await versionOf(versionId)).recordId as Hex;
+    const getRecord = encodeFunctionData({ abi: registryAbi, functionName: 'getRecord', args: [recordId] }).toLowerCase();
+    const forgetful = endpoint((method, params, forward) => {
+      const call = params[0] as { data?: string; input?: string } | undefined;
+      const data = (call?.data ?? call?.input)?.toLowerCase();
+      return method === 'eth_call' && data === getRecord ? forward([params[0], toHex(requestBlock - 1n)]) : forward();
+    });
+
+    // As the only endpoint, it would have the console call the revocation cancelled.
+    const disagreed = await pass({ publicClient: forgetful, checkClient: endpoint() });
+    expect(disagreed).toMatchObject({ rpcDisagreed: true, revocations: [], errors: [{ writeId: revocationId, error: 'RPC_DISAGREE' }] });
+    expect(await prisma.revocation.findUniqueOrThrow({ where: { id: revocationId } })).toMatchObject({ status: 'SCHEDULED' });
+
+    // Read alike on both, it takes effect as scheduled.
+    await waitOutDelay();
+    await mine();
+    expect((await pass({ checkClient: endpoint() })).revocations).toEqual([{ revocationId, outcome: 'REVOKED' }]);
+    expect(await keyStatus()).toMatchObject({ rpcDisagreedAt: null });
   });
 });

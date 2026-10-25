@@ -22,7 +22,11 @@
     "src/components/ui/status-badge.tsx",
     "src/components/ui/copy-button.tsx",
     "src/components/ui/confirm-dialog.tsx",
-    "src/components/ui/radio-group.tsx"
+    "src/components/ui/radio-group.tsx",
+    "packages/ui/src/components/ui/charts/time-series-chart.tsx",
+    "packages/ui/src/components/ui/charts/bars.tsx",
+    "packages/ui/src/components/ui/charts/x-axis.tsx",
+    "packages/ui/src/components/ui/charts/y-axis.tsx"
   ],
   "importRewrites": [
     {

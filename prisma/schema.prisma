@@ -87,6 +87,7 @@ model IssuerOrg {
   users          User[]
   clients        Client[]
   auditEvents    AuditEvent[]
+  lookupCounts   LookupCount[]
 }
 
 model User {
@@ -317,4 +318,16 @@ model StoredFile {
   version       ReportVersion? @relation("originalFile")
   copyOf        ReportVersion? @relation("copyFile")
   certificateOf ReportVersion? @relation("certificateFile")
+}
+
+/// Lookups of a family's latest version (/r/<familyId>/latest) per UTC day,
+/// counted for the firm that issued the family. A count and nothing else: no
+/// family id, no address, no time of day.
+model LookupCount {
+  orgId String
+  org   IssuerOrg @relation(fields: [orgId], references: [id])
+  day   DateTime  @db.Date
+  count Int
+
+  @@id([orgId, day])
 }

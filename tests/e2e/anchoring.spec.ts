@@ -128,6 +128,21 @@ test('a dry run is only simulated; a live anchor is sent, final, then stamped, c
     copy = pdf;
   });
 
+  await test.step('the engagement’s timeline shows where the version landed', async () => {
+    const block = await page.getByTestId('anchor-block').textContent();
+    const recordId = await page.getByTestId('anchor-record-id').textContent();
+    await page.getByRole('link', { name: /Example Manufacturing AD/ }).click();
+    const version = page.getByTestId('timeline-version');
+    await expect(version).toHaveCount(1);
+    await expect(version).toHaveAttribute('data-status', 'COMPLETE');
+    await expect(version.getByTestId('timeline-approved')).toContainText(approver.email);
+    await expect(version.getByTestId('timeline-block')).toHaveText(block!);
+    await expect(version.getByTestId('timeline-record')).toHaveText(recordId!);
+    await expect(version.getByTestId('timeline-tx')).toHaveText(/^0x[0-9a-f]{64}$/);
+    await expect(version.getByTestId('timeline-latest')).toBeVisible();
+    await expect(version.getByTestId('timeline-copy')).toHaveAttribute('href', /\/api\/versions\/[^/]+\/copy$/);
+  });
+
   await test.step('anyone verifies the copy and the original in a browser, signed out', async () => {
     await page.context().clearCookies();
     const issuerName = (JSON.parse(fs.readFileSync(path.join(process.cwd(), 'deployments', 'local.json'), 'utf8')) as { issuer: { orgName: string } }).issuer.orgName;

@@ -68,7 +68,11 @@
     },
     "settings": "Settings",
     "lowBalance": "The issuer key's balance is below 0.02 ETH. Anchors will fail once it runs out: top it up.",
-    "twoStep": "Two-step sign-in"
+    "twoStep": "Two-step sign-in",
+    "label": "Console",
+    "dashboard": "Dashboard",
+    "clients": "Clients",
+    "reports": "Reports"
   },
   "login": {
     "title": "Sign in",
@@ -482,6 +486,114 @@
       "recoveryIntro": "Keep these recovery codes somewhere safe. Each works once, in place of a code, if you lose your phone. They are not shown again.",
       "copyCodes": "Copy recovery codes",
       "savedSignInAgain": "I have saved them: sign in again"
+    }
+  },
+  "console": {
+    "table": {
+      "total": "{count, plural, one {# entry} other {# entries}}",
+      "matching": "{count} of {total} match",
+      "page": "Page {page} of {pages}",
+      "previous": "Previous",
+      "next": "Next",
+      "noMatch": {
+        "title": "Nothing matches",
+        "description": "No entry contains “{search}”.",
+        "clear": "Clear search"
+      }
+    },
+    "clients": {
+      "title": "Clients",
+      "search": "Search clients by name, registration number or country",
+      "truncated": "Only the first {cap} clients by name are listed, so a search may miss a client past them.",
+      "empty": {
+        "title": "No clients yet",
+        "description": "A client is added when a preparer creates its first engagement."
+      },
+      "columns": {
+        "name": "Client",
+        "registrationNumber": "Registration no.",
+        "country": "Country",
+        "engagements": "Engagements",
+        "inProgress": "Versions in progress",
+        "lastActivity": "Last activity (UTC)"
+      }
+    },
+    "client": {
+      "back": "All clients",
+      "summary": "Registration no. {registrationNumber} · {country}",
+      "engagements": "Engagements",
+      "search": "Search engagements",
+      "empty": {
+        "title": "No engagements",
+        "description": "This client has no engagements yet."
+      },
+      "columns": {
+        "engagementRef": "Engagement",
+        "periodEnd": "Period end",
+        "reportType": "Report type",
+        "versions": "Versions",
+        "latest": "Latest version"
+      }
+    },
+    "timeline": {
+      "clientLink": "Client and its engagements",
+      "reasons": {
+        "INITIAL": "First issue",
+        "CORRECTION": "Correction",
+        "SUBSEQUENT_EVENT": "Subsequent event",
+        "OTHER": "Other reason"
+      },
+      "anchorOnly": "Anchored as is",
+      "latest": "Latest on chain",
+      "prepared": "Prepared",
+      "approved": "Approved",
+      "byAt": "{who}, {when} UTC",
+      "notApproved": "Not approved yet",
+      "block": "Block",
+      "notAnchored": "Not anchored yet: a version counts as anchored only once its block is final.",
+      "transaction": "Transaction",
+      "recordId": "Record id",
+      "copyTransaction": "Stamped copy’s transaction",
+      "explorer": "Etherscan ↗",
+      "downloadCopy": "Download the stamped PDF",
+      "downloadCertificate": "Download the certificate"
+    },
+    "dashboard": {
+      "title": "Dashboard",
+      "asTable": "Show the figures as a table",
+      "month": "Month",
+      "day": "Day",
+      "tiles": {
+        "anchoredThisMonth": "Reports anchored this month",
+        "anchoredThisMonthHint": "Originals whose block is final, UTC month.",
+        "inFlight": "Writes in flight",
+        "inFlightHint": "Queued or sent, waiting for a final block.",
+        "indeterminate": "Outcome unknown",
+        "indeterminateHint": "Being settled by reading the chain; never resent.",
+        "lookups": "Latest-version lookups",
+        "lookupsHint": "Last {days} days, UTC."
+      },
+      "anchors": {
+        "title": "Anchors per month",
+        "description": "Chain writes that reached a final block in each of the last {months} months (UTC). Dry runs never do, so they are not counted.",
+        "empty": "No anchors in this period.",
+        "ANCHOR": "Originals",
+        "ANCHOR_COPY": "Stamped copies",
+        "REVOKE": "Revocations"
+      },
+      "writes": {
+        "title": "Journal rows by status",
+        "description": "Every chain write the firm has, as it stands now.",
+        "status": "Status",
+        "live": "Live",
+        "dryRun": "Dry run"
+      },
+      "lookups": {
+        "title": "Lookups per day",
+        "description": "Visits to the latest-version page of one of the firm’s report families, per day for the last {days} days (UTC). Only a count is kept: no family, no address. Checks made with the verifier happen in the visitor’s browser and are not seen here.",
+        "empty": "No lookups in this period.",
+        "series": "Lookups"
+      }
     }
   }
 }

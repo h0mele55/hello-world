@@ -1,4 +1,4 @@
-import { keccak256, type Hash, type Hex, type PublicClient } from 'viem';
+import { getAddress, keccak256, type Address, type Hash, type Hex, type PublicClient } from 'viem';
 import type { Deployment } from './deployment';
 import {
   BytecodeMismatchError,
@@ -15,6 +15,20 @@ export interface FinalReceipt {
   blockNumber: bigint;
   blockHash: Hash;
 }
+
+/** One of a firm's audit-log heads on chain (#94), in the order written. */
+export interface AuditHeadEntry {
+  index: number;
+  head: Hex;
+  issuer: Address;
+  /** Unix seconds. */
+  recordedAt: number;
+  /** The owner voided it: a head a stolen key wrote. The check skips it. */
+  voided: boolean;
+}
+
+/** Heads read per call. */
+export const AUDIT_HEAD_PAGE = 500;
 
 export interface WaitFinalOptions {
   /** Give up after this long. Sepolia finalizes in roughly 13 minutes. */
@@ -84,7 +98,18 @@ export function createRegistryReader(client: PublicClient, deployment: Deploymen
     }
   }
 
-  return { deployment, assertDeployment, getRecord, findByDocHash, latestOf, waitFinal };
+  /** Every audit-log head of a firm (#94), voided ones included, a page at a time. */
+  async function auditHeads(orgId: Hex, at: { blockNumber?: bigint } = {}): Promise<AuditHeadEntry[]> {
+    const heads: AuditHeadEntry[] = [];
+    for (;;) {
+      const start = heads.length;
+      const page = await client.readContract({ address, abi: registryAbi, functionName: 'auditHeads', args: [orgId, BigInt(start), BigInt(AUDIT_HEAD_PAGE)], blockNumber: at.blockNumber });
+      page.forEach((h, i) => heads.push({ index: start + i, head: h.head, issuer: getAddress(h.issuer), recordedAt: Number(h.recordedAt), voided: h.voided }));
+      if (page.length < AUDIT_HEAD_PAGE) return heads;
+    }
+  }
+
+  return { deployment, assertDeployment, getRecord, findByDocHash, latestOf, auditHeads, waitFinal };
 }
 
 export type RegistryReader = ReturnType<typeof createRegistryReader>;

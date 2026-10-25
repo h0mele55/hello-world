@@ -167,7 +167,7 @@ describe('approving a revocation', () => {
     expect(await prisma.chainWrite.count({ where: { reportVersionId: versionId, kind: 'REVOKE' } })).toBe(2);
     // But never two in flight at once.
     await expect(
-      prisma.chainWrite.create({ data: { reportVersionId: versionId, kind: 'REVOKE', mode: 'LIVE', chainId: TARGET.chainId, registry: TARGET.registry, issuer: TARGET.issuer } }),
+      prisma.chainWrite.create({ data: { orgId: approver.orgId, reportVersionId: versionId, kind: 'REVOKE', mode: 'LIVE', chainId: TARGET.chainId, registry: TARGET.registry, issuer: TARGET.issuer } }),
     ).rejects.toThrow();
     expect((await prisma.chainWrite.findUniqueOrThrow({ where: { id: again.chainWriteId } })).status).toBe('INTENT');
   });

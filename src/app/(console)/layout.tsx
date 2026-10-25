@@ -60,7 +60,7 @@ export default async function ConsoleLayout({ children }: { children: ReactNode 
       <StatusBadge variant="warning">{t('app.prototypeNotice')}</StatusBadge>
       {nightly.state === 'BROKEN' ? (
         <p role="alert" className="text-content-error" data-testid="audit-broken">
-          {t('nav.auditBroken', { seq: nightly.seq })}{' '}
+          {nightly.seq === null ? t('nav.auditBrokenNoEvent', { reason: t(`auditLog.reasons.${nightly.reason}`) }) : t('nav.auditBroken', { seq: nightly.seq })}{' '}
           <Link href="/audit-log" className="underline">
             {t('nav.auditLog')}
           </Link>

@@ -58,7 +58,16 @@ export type AuditAction =
   | 'recipient.removed'
   | 'notification.queued'
   | 'notification.sent'
-  | 'notification.failed';
+  | 'notification.failed'
+  // An audit-log head's journal row (#94): the anchor.* steps under their own prefix, and the check that queued it.
+  | 'audit_head.queued'
+  | 'audit_head.simulated'
+  | 'audit_head.broadcast'
+  | 'audit_head.replaced'
+  | 'audit_head.indeterminate'
+  | 'audit_head.final'
+  | 'audit_head.failed'
+  | 'audit_head.nonce_released';
 
 export interface AuditEventInput {
   orgId: string;

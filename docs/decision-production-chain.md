@@ -67,6 +67,12 @@ millionth of a euro today; a thousandfold rise would still cost under a cent.
 Merkle batching (#64) would cut any chain's cost per report further: one
 transaction anchors a whole batch.
 
+Besides reports, each firm writes its audit log's head at most once a day,
+and not on a day it did nothing (#94): 95,201 gas for its first
+(`record_audit_head` in `contracts/snapshots/`), a little less after. On
+mainnet at 1 gwei that is about 0.20 EUR a day, some 70 EUR a year at most;
+on the rollups, a fraction of a cent.
+
 **Finality is about the same everywhere: 15 to 20 minutes.** A rollup's block
 is `finalized` once the Ethereum block holding its data is. So no candidate
 anchors faster than mainnet, and the console waits about as long on each.

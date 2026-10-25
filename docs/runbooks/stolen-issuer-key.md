@@ -97,6 +97,15 @@ admin can ask again, and an approver who is someone else approves again; the
 delay starts over. If the owner did not mean to cancel it, treat the owner's key
 as compromised too ([ownership-to-safe.md](ownership-to-safe.md)).
 
+## A stolen key can also write audit-log heads
+
+A key can write a head (#94) that no log of the firm holds. The nightly check
+then fails with `ANCHORED_HEAD_MISSING`, and the registry watch reports an
+`AUDIT_HEAD` the journal did not make. It harms nothing else, but the check
+stays broken until the owner voids the head:
+[audit-head-missing.md](audit-head-missing.md). Retiring the key (step 1)
+stops more.
+
 ## If one took effect
 
 It is terminal: the record reads revoked for good, and a document hash cannot

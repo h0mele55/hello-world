@@ -271,7 +271,7 @@ describe('approval (rule 6)', () => {
     const engagement = await createEngagement(preparer, ENGAGEMENT);
     const versionId = await confirmedVersion(engagement.id, 'en-unmodified.pdf');
     await approveVersion(approver, versionId, TARGET);
-    const row = { reportVersionId: versionId, kind: 'ANCHOR' as const, mode: 'LIVE' as const, chainId: 1, registry: 'r', issuer: 'i' };
+    const row = { orgId: approver.orgId, reportVersionId: versionId, kind: 'ANCHOR' as const, mode: 'LIVE' as const, chainId: 1, registry: 'r', issuer: 'i' };
     await expect(prisma.chainWrite.create({ data: row })).rejects.toThrow();
     // A simulated or failed row does not count.
     await prisma.chainWrite.updateMany({ where: { reportVersionId: versionId }, data: { status: 'SIMULATED' } });

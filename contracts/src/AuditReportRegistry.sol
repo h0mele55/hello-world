@@ -19,6 +19,12 @@ pragma solidity 0.8.30;
 /// it. A stolen issuer key therefore cannot withdraw a firm's records at once:
 /// the firm has the delay to notice and to have the owner cancel. Once in
 /// effect, a revocation is terminal.
+///
+/// It also keeps each firm's audit-log heads (#94): the hash of the firm's
+/// latest audit event, written nightly by its issuer key, so a database owner
+/// who rewrites the log cannot also rewrite the record of what it was. A head
+/// is a hash and nothing else; only the owner can void one, for a head a
+/// stolen key wrote.
 contract AuditReportRegistry {
     enum Kind {
         ORIGINAL,
@@ -73,6 +79,15 @@ contract AuditReportRegistry {
         bool active;
     }
 
+    /// @notice One audit-log head: the hash of a firm's latest audit event when
+    /// it was written. Two slots.
+    struct AuditHead {
+        bytes32 head;
+        address issuer;
+        uint40 recordedAt;
+        bool voided;
+    }
+
     /// @notice The longest delay a deployment may set: past it, a firm could
     /// not withdraw a wrong report in any useful time.
     uint32 public constant MAX_REVOCATION_DELAY = 30 days;
@@ -94,6 +109,7 @@ contract AuditReportRegistry {
     /// @notice The distribution copy of an ORIGINAL, or zero.
     mapping(bytes32 originalId => bytes32 copyId) public copyOf;
     mapping(bytes32 recordId => Revocation) private _revocations;
+    mapping(bytes32 orgId => AuditHead[]) private _auditHeads;
 
     event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -111,6 +127,10 @@ contract AuditReportRegistry {
         bytes32 indexed recordId, uint8 reasonCode, uint40 effectiveAt, address issuer
     );
     event RevocationCancelled(bytes32 indexed recordId, uint8 reasonCode, address by);
+    event AuditHeadRecorded(
+        bytes32 indexed orgId, uint256 indexed index, bytes32 head, address issuer
+    );
+    event AuditHeadVoided(bytes32 indexed orgId, uint256 indexed index, address by);
 
     error NotOwner();
     error NotPendingOwner();
@@ -130,6 +150,8 @@ contract AuditReportRegistry {
     error NoRevocation(bytes32 recordId);
     error RevocationInEffect(bytes32 recordId, uint40 effectiveAt);
     error DelayTooLong(uint32 given, uint32 max);
+    error UnknownAuditHead(bytes32 orgId, uint256 index);
+    error AuditHeadAlreadyVoided(bytes32 orgId, uint256 index);
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -308,7 +330,61 @@ contract AuditReportRegistry {
         emit RevocationCancelled(recordId, revocation.reason, msg.sender);
     }
 
+    // ── Audit-log heads (#94) ──
+
+    /// @notice Appends the hash of the caller's firm's latest audit event. The
+    /// firm's nightly check holds its database to every head not voided: each
+    /// must still be the hash of one of its events. Nothing but the hash is
+    /// kept, not even the event's number, so the firm's activity stays private.
+    function recordAuditHead(bytes32 head) external returns (uint256 index) {
+        bytes32 orgId = _activeOrgOf(msg.sender);
+        if (head == bytes32(0)) revert ZeroValue();
+        index = _auditHeads[orgId].length;
+        _auditHeads[orgId].push(
+            AuditHead({
+                head: head,
+                issuer: msg.sender,
+                // forge-lint: disable-next-line(unsafe-typecast)
+                recordedAt: uint40(block.timestamp),
+                voided: false
+            })
+        );
+        emit AuditHeadRecorded(orgId, index, head, msg.sender);
+    }
+
+    /// @notice Voids a head, so the firm's check no longer holds its log to it.
+    /// The owner's act only: for a head a stolen issuer key wrote, never one
+    /// the firm's own log contains. Terminal: a voided head stays voided.
+    function voidAuditHead(bytes32 orgId, uint256 index) external onlyOwner {
+        if (index >= _auditHeads[orgId].length) revert UnknownAuditHead(orgId, index);
+        AuditHead storage entry = _auditHeads[orgId][index];
+        if (entry.voided) revert AuditHeadAlreadyVoided(orgId, index);
+        entry.voided = true;
+        emit AuditHeadVoided(orgId, index, msg.sender);
+    }
+
     // ── Reads ──
+
+    /// @notice How many heads a firm has, voided ones included.
+    function auditHeadCount(bytes32 orgId) external view returns (uint256) {
+        return _auditHeads[orgId].length;
+    }
+
+    /// @notice Up to `limit` of a firm's heads from `start`, in the order
+    /// written; fewer at the end, none past it. Read a page at a time.
+    function auditHeads(bytes32 orgId, uint256 start, uint256 limit)
+        external
+        view
+        returns (AuditHead[] memory page)
+    {
+        AuditHead[] storage all = _auditHeads[orgId];
+        if (start >= all.length) return page;
+        uint256 end = limit > all.length - start ? all.length : start + limit;
+        page = new AuditHead[](end - start);
+        for (uint256 i = start; i < end; ++i) {
+            page[i - start] = all[i];
+        }
+    }
 
     /// @notice The issuer organisation a family belongs to, or zero for an
     /// unknown family. Derived rather than stored: every record in a family was

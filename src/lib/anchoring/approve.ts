@@ -98,7 +98,7 @@ export async function approveVersion(user: SessionUser, versionId: string, targe
     let write;
     try {
       write = await tx.chainWrite.create({
-        data: { reportVersionId: version.id, kind: 'ANCHOR', mode, chainId: target.chainId, registry: target.registry, issuer: target.issuer },
+        data: { orgId: user.orgId, reportVersionId: version.id, kind: 'ANCHOR', mode, chainId: target.chainId, registry: target.registry, issuer: target.issuer },
         select: { id: true },
       });
     } catch (error) {
@@ -142,7 +142,7 @@ export async function requeueCopy(user: SessionUser, versionId: string, target: 
     let write;
     try {
       write = await tx.chainWrite.create({
-        data: { reportVersionId: version.id, kind: 'ANCHOR_COPY', mode, chainId: target.chainId, registry: target.registry, issuer: target.issuer },
+        data: { orgId: user.orgId, reportVersionId: version.id, kind: 'ANCHOR_COPY', mode, chainId: target.chainId, registry: target.registry, issuer: target.issuer },
         select: { id: true },
       });
     } catch (error) {

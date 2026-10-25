@@ -34,8 +34,9 @@ can live in Cloud KMS (6b), the production candidates are measured for the
 owner's choice (6c, `docs/decision-production-chain.md`), and revocation is
 delayed so the owner can cancel a stolen key's (6d, #95), the registry
 watch reports any write by the firm's keys that the journal did not make (6e,
-#93), recipients are told of a withdrawal (6f, #96), and the worker settles a
-row only on what two endpoints agree on (6g, #92).
+#93), recipients are told of a withdrawal (6f, #96), the worker settles a
+row only on what two endpoints agree on (6g, #92), and the audit log's head is
+written on chain each night (6h, #94).
 
 ## Rules every phase keeps
 
@@ -84,7 +85,7 @@ npm run contracts:artifact     # regenerate src/lib/chain/registry-artifact.ts a
 npm run test:integration       # chain adapter and verifier against throwaway Anvil nodes
 npx tsx scripts/deploy-registry.ts <network>             # deploy (sepolia, local, base-sepolia, …); production networks refused until #63; REVOCATION_DELAY_HOURS (default 24, local 0)
 npx tsx scripts/measure-chain-costs.ts                   # today's cost per report and finality lag on the production candidates
-npx tsx scripts/owner-call.ts <sepolia|local> <add-issuer|remove-issuer|cancel-revocation|transfer-owner|accept-owner> [address|recordId]   # prints the owner's transaction; sends nothing
+npx tsx scripts/owner-call.ts <sepolia|local> <add-issuer|remove-issuer|cancel-revocation|void-audit-head|transfer-owner|accept-owner> [address|recordId|index]   # prints the owner's transaction; sends nothing
 npx tsx scripts/kms-address.ts <KMS key version name>     # the address of a Cloud KMS issuer key, to register it
 
 # Database (Postgres 16: `docker compose up -d`, or any local server; Prisma 7 does not read .env)
@@ -93,7 +94,7 @@ npm run db:seed                # the firm and its users, from SEED_* in the envi
 npm run test:db                # intake and approval use cases against TEST_DATABASE_URL (name must end in _test)
 npm run test:anchoring         # the worker against TEST_DATABASE_URL and a throwaway Anvil node
 npm run worker                 # the anchoring worker; add `-- --once` for one pass
-npm run audit:check            # the nightly audit-chain check; exit 1 on a break
+npm run audit:check            # the nightly audit-chain check, held to its heads on chain; queues the next head; exit 1 on a break
 npm run watch:registry         # every 10 min: report chain writes by the firm's keys the journal did not make; exit 1 while one is unreviewed
 npm run mailer                 # sends the recipients' notices; add `-- --once` for one pass (SMTP_URL, MAIL_FROM)
 scripts/backup.sh              # database dump + encrypted store copy (docs/operations.md)
@@ -132,6 +133,11 @@ Locally, Playwright needs the browser of its own version:
   finalized block (rule 2). A record holds one revocation, pending or in
   effect; `revokeReason` is non-zero for both, and `revokeEffectiveAt` says
   when.
+- **Each firm's audit-log heads live in the registry (#94).** An issuer key's
+  `recordAuditHead(head)` appends the hash of the firm's latest audit event,
+  and nothing else; only the owner's `voidAuditHead` sets one aside, for a
+  head a stolen key wrote. Heads are never removed: the nightly check holds
+  the log to every head not voided.
 - **Gas ceilings are tests.** `contracts/test/AuditReportRegistry.gas.t.sol`
   caps each write, and `contracts/snapshots/` pins the exact figures. A change
   that moves them updates the snapshot in the same pull request
@@ -286,6 +292,13 @@ to one inflect-compliance commit.
   for a person. Revoking the original is enough: the verifier calls a copy
   revoked (or being withdrawn) when its original is. No copy is stamped or
   certified while a revocation is open.
+- **An `AUDIT_HEAD` journal row writes the firm's audit-log head (#94)**, not
+  a report: it has no `reportVersionId` (a CHECK holds both ways), only the
+  nightly check queues one (one in flight per firm, chain and registry), and
+  the worker sends it without an approval and settles it on its own
+  `AuditHeadRecorded` event. Its events are `audit_head.*`, never `anchor.*`,
+  so no count of anchors includes them and the check can tell them from new
+  activity. Every journal row names its firm (`orgId`).
 - **The audit log is append-only**: write through `appendAuditEvent` inside
   the transaction that makes the change, with ids, hashes and codes only.
   `verifyAuditChain` re-derives every hash.
@@ -315,8 +328,8 @@ to one inflect-compliance commit.
   rehearsed in `tests/anchoring/worker.test.ts`). Certificates are made for an
   anchor-only version whichever key anchored it: a certificate signs nothing.
 - **The registry watch** (`src/lib/anchoring/registry-watch.ts`, run by
-  `scripts/watch-registry.ts`) reads every `Anchored` and
-  `RevocationRequested` event by the firm's issuer keys up to the finalized
+  `scripts/watch-registry.ts`) reads every `Anchored`, `RevocationRequested`
+  and `AuditHeadRecorded` event by the firm's issuer keys up to the finalized
   block and matches it to the journal **by transaction hash**, current or
   replaced. This works only because every hash is journalled before it is sent
   (rule 3): a new path that sends a registry write without a journal row will
@@ -455,9 +468,15 @@ to one inflect-compliance commit.
   every run in `AuditChainCheck` and holds the chain to the last intact check:
   it may only have grown, and its old head must still be there. That catches
   a tail cut off (`TRUNCATED`) and history rewritten and re-hashed
-  (`REWRITTEN`), which the chain alone would pass. A broken check puts a
-  banner on every console page and stays reported; a check older than 36
-  hours shows as stopped.
+  (`REWRITTEN`), which the chain alone would pass. Because the last intact
+  check is in the same database, it is also held to the chain (#94): every
+  head in the registry that is not voided must still be the hash of an event
+  (`ANCHORED_HEAD_MISSING`), read on both endpoints through
+  `registryHeadWitness` (`src/lib/anchoring/audit-head.ts`); an unreadable
+  chain is `CHAIN_UNREADABLE`, never a pass. Do not weaken this to the latest
+  head only: the database owner can queue rows, so could have the worker write
+  a rewritten log's head. A broken check puts a banner on every console page
+  and stays reported; a check older than 36 hours shows as stopped.
 - **Backups** are `scripts/backup.sh` (`pg_dump` custom format, the store as
   it is on disk, `SHA256SUMS`); `FILE_ENCRYPTION_KEY` is never in a backup.
   `scripts/restore.sh` restores only into an empty database and an empty

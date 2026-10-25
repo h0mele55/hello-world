@@ -119,7 +119,7 @@ export async function approveRevocation(user: SessionUser, revocationId: string,
     let write;
     try {
       write = await tx.chainWrite.create({
-        data: { reportVersionId: version.id, kind: 'REVOKE', mode, chainId: target.chainId, registry: target.registry, issuer: target.issuer, recordId: version.recordId },
+        data: { orgId: user.orgId, reportVersionId: version.id, kind: 'REVOKE', mode, chainId: target.chainId, registry: target.registry, issuer: target.issuer, recordId: version.recordId },
         select: { id: true },
       });
     } catch (error) {

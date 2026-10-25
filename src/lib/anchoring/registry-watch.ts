@@ -11,9 +11,10 @@ import { registryAbi } from '@/lib/chain/registry-artifact';
  * chain write the app makes is journalled, with its transaction hash, before
  * the bytes leave (rule 3). So a write on chain by one of the firm's issuer
  * keys whose hash no journal row holds was made by someone else: a stolen key,
- * or a row lost in a restore. The watch reads every `Anchored` and
- * `RevocationRequested` event up to the finalized block (rule 2), keeps the
- * firm's, matches each to the journal by hash, and reports the rest.
+ * or a row lost in a restore. The watch reads every `Anchored`,
+ * `RevocationRequested` and `AuditHeadRecorded` (#94) event up to the
+ * finalized block (rule 2), keeps the firm's, matches each to the journal by
+ * hash, and reports the rest.
  *
  * A forged version 1 under the firm's name, a forged reissue, a copy, and above
  * all a revocation: each is reported. A revocation is reported with the time it
@@ -49,6 +50,7 @@ export interface WatchDeps {
 
 export interface UnjournaledFinding {
   kind: UnjournaledKind;
+  /** The record written, or for an audit-log head the head itself. */
   recordId: Hex;
   txHash: Hash;
   blockNumber: bigint;
@@ -100,9 +102,11 @@ export async function watchRegistry(deps: WatchDeps): Promise<WatchReport> {
   let seen = 0;
   for (let from = start; from <= finalized; from += range) {
     const to = from + range - 1n < finalized ? from + range - 1n : finalized;
-    const [anchored, requested] = await Promise.all([
+    const [anchored, requested, heads] = await Promise.all([
       publicClient.getContractEvents({ address: registry, abi: registryAbi, eventName: 'Anchored', fromBlock: from, toBlock: to }),
       publicClient.getContractEvents({ address: registry, abi: registryAbi, eventName: 'RevocationRequested', fromBlock: from, toBlock: to }),
+      // A head is filed under its key's firm, so the firm's are asked for by name (#94).
+      publicClient.getContractEvents({ address: registry, abi: registryAbi, eventName: 'AuditHeadRecorded', args: { orgId: firm.onChainOrgId }, fromBlock: from, toBlock: to }),
     ]);
     const writes: UnjournaledFinding[] = [];
     for (const event of anchored) {
@@ -114,6 +118,11 @@ export async function watchRegistry(deps: WatchDeps): Promise<WatchReport> {
       const { recordId, effectiveAt, issuer } = event.args;
       if (!recordId || effectiveAt === undefined || !issuer || !(await isFirms(getAddress(issuer)))) continue;
       writes.push({ kind: 'REVOCATION', recordId, txHash: event.transactionHash, blockNumber: event.blockNumber, issuer: getAddress(issuer), effectiveAt: Number(effectiveAt) });
+    }
+    for (const event of heads) {
+      const { head, issuer } = event.args;
+      if (!head || !issuer) continue;
+      writes.push({ kind: 'AUDIT_HEAD', recordId: head, txHash: event.transactionHash, blockNumber: event.blockNumber, issuer: getAddress(issuer), effectiveAt: null });
     }
     seen += writes.length;
 

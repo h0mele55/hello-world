@@ -482,6 +482,106 @@ contract AuditReportRegistryTest is Test {
 
     // ── reads and payability ──
 
+    // ── audit-log heads (#94) ──
+
+    function _heads(bytes32 org) internal view returns (AuditReportRegistry.AuditHead[] memory) {
+        return registry.auditHeads(org, 0, type(uint256).max);
+    }
+
+    function test_recordAuditHead_appendsUnderTheKeysOrg_andEmits() public {
+        bytes32 head = keccak256("head-1");
+        vm.warp(1_800_000_000);
+        vm.expectEmit(true, true, false, true, address(registry));
+        emit AuditReportRegistry.AuditHeadRecorded(ORG, 0, head, issuer);
+        vm.prank(issuer);
+        assertEq(registry.recordAuditHead(head), 0);
+        // Another key of the same firm appends to the same list; another firm has its own.
+        vm.prank(issuer2);
+        assertEq(registry.recordAuditHead(keccak256("head-2")), 1);
+        vm.prank(otherOrgIssuer);
+        assertEq(registry.recordAuditHead(keccak256("other")), 0);
+
+        assertEq(registry.auditHeadCount(ORG), 2);
+        assertEq(registry.auditHeadCount(OTHER_ORG), 1);
+        AuditReportRegistry.AuditHead[] memory heads = _heads(ORG);
+        assertEq(heads.length, 2);
+        assertEq(heads[0].head, head);
+        assertEq(heads[0].issuer, issuer);
+        assertEq(heads[0].recordedAt, 1_800_000_000);
+        assertFalse(heads[0].voided);
+        assertEq(heads[1].issuer, issuer2);
+        // The same head may be written twice: a retried write is harmless.
+        vm.prank(issuer);
+        registry.recordAuditHead(head);
+        assertEq(registry.auditHeadCount(ORG), 3);
+    }
+
+    function test_recordAuditHead_refusals() public {
+        vm.expectRevert(AuditReportRegistry.NotIssuer.selector);
+        vm.prank(stranger);
+        registry.recordAuditHead(keccak256("h"));
+        vm.prank(owner);
+        registry.setIssuer(issuer2, ORG, false);
+        vm.expectRevert(AuditReportRegistry.NotIssuer.selector);
+        vm.prank(issuer2);
+        registry.recordAuditHead(keccak256("h"));
+        vm.expectRevert(AuditReportRegistry.ZeroValue.selector);
+        vm.prank(issuer);
+        registry.recordAuditHead(bytes32(0));
+        assertEq(registry.auditHeadCount(ORG), 0);
+    }
+
+    function test_voidAuditHead_byTheOwnerOnly_once() public {
+        vm.prank(issuer);
+        registry.recordAuditHead(keccak256("forged"));
+        vm.prank(issuer);
+        registry.recordAuditHead(keccak256("genuine"));
+
+        // Neither the firm's keys nor anyone else may void a head.
+        vm.expectRevert(AuditReportRegistry.NotOwner.selector);
+        vm.prank(issuer);
+        registry.voidAuditHead(ORG, 0);
+
+        vm.expectEmit(true, true, false, true, address(registry));
+        emit AuditReportRegistry.AuditHeadVoided(ORG, 0, owner);
+        vm.prank(owner);
+        registry.voidAuditHead(ORG, 0);
+        AuditReportRegistry.AuditHead[] memory heads = _heads(ORG);
+        assertTrue(heads[0].voided);
+        assertFalse(heads[1].voided);
+
+        vm.expectRevert(
+            abi.encodeWithSelector(AuditReportRegistry.AuditHeadAlreadyVoided.selector, ORG, 0)
+        );
+        vm.prank(owner);
+        registry.voidAuditHead(ORG, 0);
+        vm.expectRevert(
+            abi.encodeWithSelector(AuditReportRegistry.UnknownAuditHead.selector, ORG, 2)
+        );
+        vm.prank(owner);
+        registry.voidAuditHead(ORG, 2);
+        vm.expectRevert(
+            abi.encodeWithSelector(AuditReportRegistry.UnknownAuditHead.selector, OTHER_ORG, 0)
+        );
+        vm.prank(owner);
+        registry.voidAuditHead(OTHER_ORG, 0);
+    }
+
+    function test_auditHeads_pages() public {
+        for (uint256 i = 0; i < 5; ++i) {
+            vm.prank(issuer);
+            registry.recordAuditHead(keccak256(abi.encode(i)));
+        }
+        AuditReportRegistry.AuditHead[] memory page = registry.auditHeads(ORG, 1, 3);
+        assertEq(page.length, 3);
+        assertEq(page[0].head, keccak256(abi.encode(uint256(1))));
+        assertEq(page[2].head, keccak256(abi.encode(uint256(3))));
+        assertEq(registry.auditHeads(ORG, 3, 10).length, 2, "fewer at the end");
+        assertEq(registry.auditHeads(ORG, 5, 10).length, 0, "none past it");
+        assertEq(registry.auditHeads(ORG, 99, 10).length, 0);
+        assertEq(registry.auditHeads(OTHER_ORG, 0, 10).length, 0);
+    }
+
     function test_unknownRecord_readsAsZero() public view {
         AuditReportRegistry.RecordView memory r = registry.getRecord(_doc(9));
         assertEq(r.docHash, bytes32(0));

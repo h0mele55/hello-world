@@ -37,15 +37,24 @@ export const verifyFirmChain = (user: SessionUser) => verifyAuditChain(db(), use
 
 export type NightlyCheck =
   | { state: 'NEVER_RUN' }
-  | { state: 'STALE' | 'INTACT'; checkedAt: string; count: number; head: string }
-  | { state: 'BROKEN'; checkedAt: string; seq: number; reason: string };
+  /** `chainHeads`: the heads on chain the log was held to (#94); null for a check from before they were. */
+  | { state: 'STALE' | 'INTACT'; checkedAt: string; count: number; head: string; chainHeads: number | null; chainHeadAt: string | null }
+  /** `seq` is null when no event is to blame: a head on chain the log lacks, or a chain that could not be read. */
+  | { state: 'BROKEN'; checkedAt: string; seq: number | null; reason: string };
 
 /** The firm's latest nightly check, and whether it has stopped running. A broken check outranks a stale one. */
 export async function latestNightlyCheck(user: SessionUser, now = new Date()): Promise<NightlyCheck> {
   const check = await db().auditChainCheck.findFirst({ where: { orgId: user.orgId }, orderBy: { checkedAt: 'desc' } });
   if (!check) return { state: 'NEVER_RUN' };
   const checkedAt = check.checkedAt.toISOString();
-  if (!check.ok) return { state: 'BROKEN', checkedAt, seq: check.brokenSeq!, reason: check.reason! };
+  if (!check.ok) return { state: 'BROKEN', checkedAt, seq: check.brokenSeq, reason: check.reason! };
   const stale = now.getTime() - check.checkedAt.getTime() > AUDIT_CHECK_STALE_MS;
-  return { state: stale ? 'STALE' : 'INTACT', checkedAt, count: check.count, head: check.head! };
+  return {
+    state: stale ? 'STALE' : 'INTACT',
+    checkedAt,
+    count: check.count,
+    head: check.head!,
+    chainHeads: check.chainHeads,
+    chainHeadAt: check.chainHeadAt?.toISOString() ?? null,
+  };
 }

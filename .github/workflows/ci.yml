@@ -147,8 +147,18 @@ jobs:
           command -v pg_dump >/dev/null || (sudo apt-get update && sudo apt-get install -y postgresql-client)
           pg_dump --version
           npm run test:backup
-      - name: The nightly audit-chain check passes on what the tests wrote
-        run: npm run audit:check
+      - name: The nightly audit-chain check passes on what the tests wrote, and queues its head (#94)
+        run: |
+          npm run audit:check > "$RUNNER_TEMP/check-1.log"; cat "$RUNNER_TEMP/check-1.log"
+          grep -q '"queued":"' "$RUNNER_TEMP/check-1.log"
+      - name: The worker writes the head on chain, and the next check holds the log to it (#94)
+        run: |
+          npm run worker -- --once
+          cast rpc --rpc-url http://127.0.0.1:8545 anvil_mine 0x3 > /dev/null
+          npm run worker -- --once
+          cast rpc --rpc-url http://127.0.0.1:8545 anvil_mine 0x3 > /dev/null
+          npm run audit:check > "$RUNNER_TEMP/check-2.log"; cat "$RUNNER_TEMP/check-2.log"
+          grep -q '"chainHeads":1' "$RUNNER_TEMP/check-2.log"
       - name: The registry watch finds every write the tests made in the journal (#93)
         run: npm run watch:registry
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

@@ -62,7 +62,7 @@ async function finalise(versionId: string, kind: ChainWriteKind, at: Date, n: nu
     const write =
       kind === 'ANCHOR'
         ? await tx.chainWrite.findFirstOrThrow({ where: { reportVersionId: versionId, kind } })
-        : await tx.chainWrite.create({ data: { reportVersionId: versionId, kind, mode: 'LIVE', chainId: TARGET.chainId, registry: TARGET.registry, issuer: TARGET.issuer } });
+        : await tx.chainWrite.create({ data: { orgId, reportVersionId: versionId, kind, mode: 'LIVE', chainId: TARGET.chainId, registry: TARGET.registry, issuer: TARGET.issuer } });
     await tx.chainWrite.update({ where: { id: write.id }, data: { status: 'FINAL', txHash, blockNumber: BigInt(100 + n), recordId } });
     if (kind === 'ANCHOR') await tx.reportVersion.update({ where: { id: versionId }, data: { status: 'ANCHORED', recordId, anchorTxHash: txHash, anchorBlock: BigInt(100 + n) } });
     await appendAuditEvent(tx, { orgId, actorId: null, action: 'anchor.final', subjectType: 'ChainWrite', subjectId: write.id, data: { recordId } }, at);

@@ -99,9 +99,10 @@ export type StampCheck = { ok: true; docHash: `0x${string}` } | { ok: false; rea
  * Re-reads a stamped copy through the isolated parser before it is anchored
  * (Phase 3 hardening): it must begin with the original, parse to the same pages
  * and text with the same flags, and carry exactly the expected stamp in both
- * its XMP and its Info dictionary.
+ * its XMP and its Info dictionary. A sealed copy (`sealed`, #70) is held to
+ * the same, but for the signature it adds.
  */
-export async function checkStampedCopy(original: Uint8Array, stamped: Uint8Array, expected: StampFields): Promise<StampCheck> {
+export async function checkStampedCopy(original: Uint8Array, stamped: Uint8Array, expected: StampFields, options: { sealed?: boolean } = {}): Promise<StampCheck> {
   if (stamped.length <= original.length || !Buffer.from(stamped.subarray(0, original.length)).equals(Buffer.from(original))) {
     return { ok: false, reason: 'NOT_INCREMENTAL' };
   }
@@ -110,7 +111,9 @@ export async function checkStampedCopy(original: Uint8Array, stamped: Uint8Array
   if (!after.ok) return { ok: false, reason: `COPY_REFUSED:${after.reason}` };
   if (after.pdf.pageCount !== before.pdf.pageCount) return { ok: false, reason: 'PAGE_COUNT_CHANGED' };
   if (JSON.stringify(after.pdf.pages) !== JSON.stringify(before.pdf.pages)) return { ok: false, reason: 'TEXT_CHANGED' };
-  if (JSON.stringify(after.pdf.flags) !== JSON.stringify(before.pdf.flags)) return { ok: false, reason: 'FLAGS_CHANGED' };
+  // A sealed copy (#70) differs from its original by its signature, and by nothing else.
+  const flags = options.sealed ? { ...before.pdf.flags, signed: true } : before.pdf.flags;
+  if (JSON.stringify(after.pdf.flags) !== JSON.stringify(flags)) return { ok: false, reason: 'FLAGS_CHANGED' };
   const reading = readStamp(after.pdf.xmp, after.pdf.info);
   if (reading.status !== 'FOUND' || !reading.inXmp || !reading.inInfo) return { ok: false, reason: `STAMP_${reading.status}` };
   if (STAMP_FIELD_NAMES.some((name) => String(reading.fields[name]) !== String(expected[name]))) return { ok: false, reason: 'STAMP_MISMATCH' };

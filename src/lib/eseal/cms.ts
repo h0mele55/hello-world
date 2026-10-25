@@ -146,6 +146,10 @@ export interface TimestampReading {
   imprint: Uint8Array;
   genTime: Date;
   serial: string;
+  /** The nonce the request carried, when it carried one. */
+  nonce: bigint | null;
+  /** The authority's policy under which it stamped. */
+  policy: string;
   /** The token as CMS, for verifying its own signature. */
   signedData: pkijs.SignedData;
   /** The TSA certificate, when the token carries it. */
@@ -169,6 +173,8 @@ export async function readTimestampToken(token: Uint8Array): Promise<TimestampRe
     imprint: new Uint8Array(tstInfo.messageImprint.hashedMessage.valueBlock.valueHexView),
     genTime: tstInfo.genTime,
     serial: Buffer.from(tstInfo.serialNumber.valueBlock.valueHexView).toString('hex'),
+    nonce: tstInfo.nonce ? tstInfo.nonce.toBigInt() : null,
+    policy: tstInfo.policy,
     signedData,
     tsa,
   };

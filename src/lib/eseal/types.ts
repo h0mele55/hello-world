@@ -35,9 +35,12 @@ export type SealErrorCode =
   | 'PDF_REFUSED'
   /** The signature and its timestamp do not fit the space reserved for them. */
   | 'TOO_LARGE'
-  /** The provider's answer is not what was asked for. */
+  /** The provider refused, or its answer is not what was asked for: a person looks. */
   | 'SIGNER_REFUSED'
   | 'TIMESTAMP_REFUSED'
+  /** The provider did not answer, or answered 429 or 5xx: tried again on a later pass. */
+  | 'SIGNER_UNAVAILABLE'
+  | 'TIMESTAMP_UNAVAILABLE'
   /** A check of a sealed file failed; the message says which. */
   | 'NO_SEAL'
   | 'NOT_WHOLE_FILE'
@@ -47,3 +50,6 @@ export type SealErrorCode =
   | 'WRONG_CERTIFICATE'
   | 'UNTRUSTED'
   | 'BAD_TIMESTAMP';
+
+/** Whether a seal that failed with this code may succeed if simply tried again later. */
+export const sealMayRetry = (code: SealErrorCode) => code === 'SIGNER_UNAVAILABLE' || code === 'TIMESTAMP_UNAVAILABLE';

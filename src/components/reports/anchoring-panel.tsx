@@ -54,7 +54,10 @@ export async function AnchoringPanel({ user, versionId, status }: { user: Sessio
   const chainId = target?.chainId ?? anchoring.writes[0]?.chainId ?? 0;
 
   function reason(code: string) {
-    // A stamp that did not pass its check is one sentence, with the check's own code beside it.
+    // A seal (#70) that could not be made, or waits for its provider, is one sentence each; so is a stamp
+    // that did not pass its check. The code itself is shown beside it.
+    if (code.startsWith('SEAL_')) return t('reasons.SEAL_WAITING');
+    if (code.startsWith('STAMP_SEAL_')) return t('reasons.SEAL_REFUSED');
     if (code.startsWith('STAMP_')) return t('reasons.STAMP_CHECK');
     const [name, detail] = code.split(':');
     const key = `reasons.${name}` as const;
@@ -84,6 +87,11 @@ export async function AnchoringPanel({ user, versionId, status }: { user: Sessio
           </div>
           {anchoring.copyRecordId ? <Value label={t('copyRecordId')} value={anchoring.copyRecordId} testId="copy-record-id" /> : null}
           {anchoring.copyTxHash ? <Value label={t('copyTxHash')} value={anchoring.copyTxHash} href={explorerTxUrl(chainId, anchoring.copyTxHash)} /> : null}
+          {anchoring.copySealedAt ? (
+            <p className="text-content-muted" data-testid="copy-sealed">
+              {t('copySealed', { at: format.dateTime(anchoring.copySealedAt, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }) })}
+            </p>
+          ) : null}
         </div>
       ) : null}
       {status === 'ANCHORED' ? (

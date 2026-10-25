@@ -37,8 +37,11 @@ watch reports any write by the firm's keys that the journal did not make (6e,
 #93), recipients are told of a withdrawal (6f, #96), the worker settles a
 row only on what two endpoints agree on (6g, #92), the audit log's head is
 written on chain each night (6h, #94), `npm run monitor` says what needs a
-person (6i, #68), and each manifest hash is also timestamped on Bitcoin through
-OpenTimestamps, which every verifier shows beside its verdict (#66).
+person (6i, #68), each manifest hash is also timestamped on Bitcoin through
+OpenTimestamps, which every verifier shows beside its verdict (#66), and the
+worker can seal each distribution copy with the firm's electronic seal through
+any CSC API v2 provider and RFC 3161 authority, the provider being the owner's
+choice (#70).
 
 ## Rules every phase keeps
 
@@ -539,6 +542,23 @@ to one inflect-compliance commit.
   is anchor-only and never stamped, so never sealed either.
 - **Sealing is not deterministic**: the time is the authority's. A sealed copy
   is made once and kept, never made again for a write that may have landed.
+- **The worker seals the stamped copy before storing it** (`stampCopy`,
+  `WorkerDeps.seal`, set from `scripts/seal-env.ts` when `SEAL_PROVIDER=csc`):
+  sealed, checked against `SEAL_TRUST_ANCHORS`, re-read with
+  `checkStampedCopy(…, { sealed: true })`, then stored and anchored, so the
+  file on chain is the sealed one and `copySealedAt` holds its timestamp's
+  time. A provider that does not answer (`*_UNAVAILABLE`) leaves the copy's
+  write INTENT for the next pass; any other `SealError` fails it for a person.
+  While sealing is on, a copy is never anchored unsealed.
+- **The providers** are `cscSigner` (`csc.ts`, CSC API v2: `credentials/info`,
+  `credentials/authorize`, `signatures/signHash`) and `rfc3161Timestamper`
+  (`tsa.ts`, with a fresh nonce, and the token's bytes kept as written). Both
+  go through `post` (`http.ts`): HTTPS only (plain HTTP only to loopback, for
+  the tests), a timeout and a size cap; no answer, 429 or 5xx is
+  UNAVAILABLE, anything else wrong is REFUSED. A credential that needs a
+  person for each signature (an OAuth code, a one-time password) is refused.
+  Only `scripts/seal-env.ts` reads `CSC_CLIENT_SECRET`, `CSC_PIN` and
+  `TSA_PASSWORD` (`tests/unit/key-boundary.test.ts`).
 - **`checkSeal` trusts only the anchors it is given**: the byte range covers
   the whole file but the signature, the digest and the signature hold, the
   signed attributes name the certificate that signed, that certificate chains
@@ -546,9 +566,12 @@ to one inflect-compliance commit.
   over this signature, signed by a certificate with the timestamping usage
   that also chains to an anchor. Every failure is a named `SealError`.
 - **Tests use a throwaway PKI** (`tests/helpers/test-pki.ts`), made fresh in
-  memory, and Poppler's `pdfsig` and OpenSSL check each sealed file
-  independently of this code. A "qualified" validation needs the provider's
-  qualified certificate, which no test has.
+  memory, and a stand-in provider on loopback (`tests/helpers/fake-seal-provider.ts`)
+  that serves the CSC API and an RFC 3161 authority with it; the end-to-end
+  run seals every copy through it. Poppler's `pdfsig` and OpenSSL check each
+  sealed file independently of this code. No test reaches a real provider. A
+  "qualified" validation needs the provider's qualified certificate, which no
+  test has.
 
 ## The audit log and backups
 

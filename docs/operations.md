@@ -7,7 +7,7 @@ on a public testnet; none of this makes its anchors legally binding (rule 9).
 
 | Process | How | Schedule | It alerts by |
 | --- | --- | --- | --- |
-| The anchoring worker | `npm run worker` | continuously, a pass every 15 s | error log lines; the console's low-balance and endpoint-disagreement banners |
+| The anchoring worker | `npm run worker` | continuously, a pass every 15 s | error log lines; the console's low-balance and endpoint-disagreement banners; the monitor's `SEAL_WAITING` |
 | The mailer | `npm run mailer` | continuously, a pass every 30 s (`MAILER_INTERVAL_MS`) | an error line naming notices that failed for good |
 | The OpenTimestamps job | `npm run ots` | continuously, a pass every 5 min (`OTS_INTERVAL_MS`) | an error line naming a proof that turned out wrong; the monitor's `OTS_*` alerts |
 | The audit-chain check | `npm run audit:check` | nightly, e.g. `17 2 * * *` | exit code 1 and an `AUDIT CHAIN BROKEN` error line, naming any head on chain the log lacks; the console's banner |
@@ -76,6 +76,7 @@ for each of these, with ids, codes and times, never a client or a file:
 | `OTS_NOT_SUBMITTED` | a version approved more than a day ago is final on chain and has no OpenTimestamps proof | [opentimestamps.md](runbooks/opentimestamps.md) |
 | `OTS_PENDING_LONG` | a proof has waited more than two days for Bitcoin | [opentimestamps.md](runbooks/opentimestamps.md) |
 | `OTS_BROKEN` | a proof turned out not to lead to the block it names, in the last day | [opentimestamps.md](runbooks/opentimestamps.md) |
+| `SEAL_WAITING` | a distribution copy has waited more than an hour for the seal provider to answer | [seal-provider.md](runbooks/seal-provider.md) |
 
 A failure stays reported for a day. A key with no work waiting is not
 watched, so a retired key's stopped worker raises nothing. The verifier runs
@@ -124,6 +125,42 @@ report a visitor checks, by its manifest hash, though never the file; with the
 server down the verifier still decides and says the timestamp could not be
 checked. `dist/verifier.html` and the CLI ask the origin in `APP_PUBLIC_URL`
 at build time (or the CLI's `--app-url`).
+
+## The electronic seal
+
+The firm can seal every distribution copy with its electronic seal (#70): a
+PAdES signature with an RFC 3161 timestamp, which any PDF reader shows and a
+validator checks against the EU trusted lists when the seal is qualified. The
+anchor complements the seal and does not replace it. The worker seals the
+stamped copy before storing and anchoring it, so the file on chain is the
+sealed file. It is sealed once: a retry anchors the copy already stored.
+
+The seal key stays with the trust service provider. The worker reaches it
+through the provider's CSC API v2 and sends it the SHA-256 digest of what is
+signed, never the document; the timestamping authority gets the digest of the
+signature. Set these in the worker's environment only (`scripts/seal-env.ts`):
+
+| Setting | What |
+| --- | --- |
+| `SEAL_PROVIDER` | `csc` to seal; `none`, the default, not to |
+| `CSC_URL` | the CSC API's base URL, before `/credentials/info` |
+| `CSC_TOKEN_URL` | optional: an OAuth 2.0 token endpoint (client credentials); without it, the API's `auth/login` with HTTP Basic |
+| `CSC_CLIENT_ID`, `CSC_CLIENT_SECRET` | the worker's client at the provider |
+| `CSC_CREDENTIAL_ID` | the seal's credential |
+| `CSC_PIN` | optional: the credential's PIN, when the provider asks for one |
+| `TSA_URL` | the RFC 3161 timestamping authority |
+| `TSA_USERNAME`, `TSA_PASSWORD` | optional: HTTP Basic at the authority |
+| `TSA_POLICY` | optional: the policy to ask the authority for |
+| `SEAL_TRUST_ANCHORS` | a PEM file of the roots the seal certificate and the authority must chain to |
+
+Every URL is HTTPS. The worker refuses to start with `SEAL_PROVIDER=csc` and a
+setting missing, and refuses a credential that needs a person for each
+signature (an OAuth code or a one-time password). Each new seal is checked
+against `SEAL_TRUST_ANCHORS` before the copy is stored. A provider that does
+not answer leaves the copy waiting for the next pass. One that refuses, or a
+seal that does not check, fails the copy for a person
+(`docs/runbooks/seal-provider.md`). The version's page says when its copy is
+sealed.
 
 ## The audit-chain check
 

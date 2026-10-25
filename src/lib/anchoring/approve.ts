@@ -109,3 +109,44 @@ export async function approveVersion(user: SessionUser, versionId: string, targe
     return { chainWriteId: write.id, mode };
   });
 }
+
+/**
+ * Queues the distribution copy again after its write failed (for example a
+ * stamp that did not pass its check, or a mode narrowed before it was sent).
+ * The version's approval already covers its copy, so this needs an approver
+ * but not a second approval; it is LIVE only, since the original is on chain.
+ */
+export async function requeueCopy(user: SessionUser, versionId: string, target: AnchorTarget | null) {
+  requireApprover(user);
+  if (!target) throw new AnchoringError('CHAIN_NOT_CONFIGURED');
+  return db().$transaction(async (tx) => {
+    const mode = await lockOrg(tx, user.orgId);
+    if (mode !== 'LIVE') throw new AnchoringError('CHAIN_WRITES_DISABLED', 'a distribution copy is anchored only in LIVE');
+    const version = await tx.reportVersion.findFirst({
+      where: { id: versionId, engagement: { client: { orgId: user.orgId } } },
+      select: { id: true, status: true, anchorOnly: true },
+    });
+    if (!version) throw new AnchoringError('NOT_FOUND');
+    if (version.anchorOnly) throw new AnchoringError('ANCHOR_ONLY');
+    if (version.status !== 'ANCHORED') throw new AnchoringError('NOT_ANCHORED');
+    let write;
+    try {
+      write = await tx.chainWrite.create({
+        data: { reportVersionId: version.id, kind: 'ANCHOR_COPY', mode, chainId: target.chainId, registry: target.registry, issuer: target.issuer },
+        select: { id: true },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002') throw new AnchoringError('ALREADY_QUEUED');
+      throw error;
+    }
+    await appendAuditEvent(tx, {
+      orgId: user.orgId,
+      actorId: user.id,
+      action: 'anchor.copy_requeued',
+      subjectType: 'ReportVersion',
+      subjectId: version.id,
+      data: { chainWriteId: write.id },
+    });
+    return { chainWriteId: write.id };
+  });
+}

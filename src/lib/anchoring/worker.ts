@@ -22,6 +22,13 @@ import { ChainError, RegistryRevertError } from '@/lib/chain/errors';
 import { createRegistryReader, type RegistryReader } from '@/lib/chain/reader';
 import { recordIdFor, ZERO_HASH, type RegistryRecord } from '@/lib/chain/records';
 import { registryAbi } from '@/lib/chain/registry-artifact';
+import { certificatePdf } from '@/lib/certificate';
+import { docHashOf } from '@/lib/commitments';
+import { explorerTxUrl, networkNameOf } from '@/lib/chain/explorer';
+import type { FileStore } from '@/lib/file-store';
+import { NORMALISER_VERSION } from '@/lib/opinion/normalise';
+import { checkStampedCopy, stampPdf, StampError } from '@/lib/stamp';
+import { STAMP_VERSION, type StampFields } from '@/lib/stamp-fields';
 import { rungOf } from './ladder';
 import { classifySendError, type SendOutcome } from './send';
 
@@ -50,6 +57,14 @@ import { classifySendError, type SendOutcome } from './send';
  * transaction used it. When the nonce was never used by this row's
  * transaction (refused by the node, or used by another), the nonce is cleared
  * so it can be assigned again.
+ *
+ * Two kinds of write. ANCHOR records an original; when it is FINAL the version
+ * is ANCHORED and, unless it is anchor-only, an ANCHOR_COPY is queued in the
+ * same transaction. ANCHOR_COPY first stamps the original (src/lib/stamp.ts),
+ * re-reads and checks the stamped copy, stores it encrypted, and then anchors
+ * it as the original's DISTRIBUTION_COPY; when that is FINAL the version is
+ * COMPLETE. An anchor-only version (signed or edit-protected, never rewritten)
+ * gets a verification certificate instead, after its ANCHOR is FINAL.
  */
 
 export interface WorkerOptions {
@@ -93,6 +108,10 @@ export interface WorkerDeps {
   /** The issuer key. */
   account: LocalAccount;
   deployment: Deployment;
+  /** Where originals are read from and copies and certificates are written to, encrypted. */
+  files: FileStore;
+  /** The app's public origin; stamps and certificates point at `${verifyBaseUrl}/verify`. */
+  verifyBaseUrl: string;
   now?: () => Date;
   options?: Partial<WorkerOptions>;
   faults?: WorkerFaults;
@@ -114,10 +133,17 @@ export interface PassReport {
   steps: StepReport[];
   /** Steps that threw. Their rows keep their lease and are retried once it runs out. */
   errors: { writeId: string; error: string }[];
+  /** Anchor-only versions made COMPLETE with a certificate in this pass. */
+  certified: string[];
 }
 
 const writeInclude = {
-  reportVersion: { include: { engagement: { include: { client: { include: { org: { select: { chainWriteMode: true } } } } } } } },
+  reportVersion: {
+    include: {
+      storedFile: true,
+      engagement: { include: { client: { include: { org: { select: { chainWriteMode: true } } } } } },
+    },
+  },
 } satisfies Prisma.ChainWriteInclude;
 
 type Write = Prisma.ChainWriteGetPayload<{ include: typeof writeInclude }>;
@@ -134,6 +160,8 @@ interface Context {
   options: WorkerOptions;
   faults: WorkerFaults;
   log: WorkerLog;
+  files: FileStore;
+  verifyUrl: string;
 }
 
 const defaultLog: WorkerLog = (level, message, fields) => {
@@ -165,8 +193,10 @@ export async function runWorkerPass(deps: WorkerDeps): Promise<PassReport> {
     options: { ...DEFAULT_WORKER_OPTIONS, ...deps.options },
     faults: deps.faults ?? {},
     log: deps.log ?? defaultLog,
+    files: deps.files,
+    verifyUrl: `${deps.verifyBaseUrl.replace(/\/+$/, '')}/verify`,
   };
-  const report: PassReport = { ran: false, steps: [], errors: [] };
+  const report: PassReport = { ran: false, steps: [], errors: [], certified: [] };
   const lockArgs = [ADVISORY_LOCK_CLASS.ISSUER_KEY, issuerLockKey(ctx.chainId, ctx.issuer)];
   const { rows } = await deps.lockClient.query<{ locked: boolean }>('SELECT pg_try_advisory_lock($1::int, hashtext($2)) AS locked', lockArgs);
   if (!rows[0]?.locked) return { ...report, reason: 'ISSUER_LOCKED' };
@@ -197,6 +227,7 @@ export async function runWorkerPass(deps: WorkerDeps): Promise<PassReport> {
         ctx.log('error', 'step failed; the row is retried when its lease runs out', { writeId: id, error: errorName(error) });
       }
     }
+    await certifyAnchorOnly(ctx, report);
     return report;
   } finally {
     await deps.lockClient.query('SELECT pg_advisory_unlock($1::int, hashtext($2))', lockArgs);
@@ -257,8 +288,16 @@ async function stepWrite(ctx: Context, id: string): Promise<StepReport> {
 
 // ── Transitions: each is one transaction, conditional on the row being as read ──
 
+type VersionEffect =
+  /** The approval was for this ANCHOR; a new attempt needs a new approval. */
+  | { kind: 'REVERT_TO_CONFIRMED' }
+  /** The original is final; queue its distribution copy unless it is anchor-only. */
+  | { kind: 'ANCHORED'; recordId: string; txHash: string | null; blockNumber: bigint }
+  /** The distribution copy is final. */
+  | { kind: 'COMPLETE'; recordId: string; txHash: string | null; blockNumber: bigint };
+
 interface Effects {
-  version?: 'REVERT_TO_CONFIRMED' | { recordId: string; txHash: string | null; blockNumber: bigint };
+  version?: VersionEffect;
   audit?: { action: AuditAction; data: Record<string, unknown> };
 }
 
@@ -277,15 +316,26 @@ async function transition(
     });
     if (count !== 1) return false;
     const version = write.reportVersion;
-    if (effects.version === 'REVERT_TO_CONFIRMED') {
-      // The approval was for this write; a new attempt needs a new approval.
+    const effect = effects.version;
+    if (effect?.kind === 'REVERT_TO_CONFIRMED') {
       await tx.reportVersion.updateMany({ where: { id: version.id, status: 'APPROVED' }, data: { status: 'CONFIRMED', approvedById: null, approvedAt: null } });
-    } else if (effects.version) {
+    } else if (effect?.kind === 'ANCHORED') {
       const anchored = await tx.reportVersion.updateMany({
         where: { id: version.id, status: 'APPROVED' },
-        data: { status: 'ANCHORED', recordId: effects.version.recordId, anchorTxHash: effects.version.txHash, anchorBlock: effects.version.blockNumber },
+        data: { status: 'ANCHORED', recordId: effect.recordId, anchorTxHash: effect.txHash, anchorBlock: effect.blockNumber },
       });
       if (anchored.count !== 1) throw new ChainError('VERSION_NOT_APPROVED', `version ${version.id} is not APPROVED`);
+      if (!version.anchorOnly) {
+        await tx.chainWrite.create({
+          data: { reportVersionId: version.id, kind: 'ANCHOR_COPY', mode: write.mode, chainId: write.chainId, registry: write.registry, issuer: write.issuer },
+        });
+      }
+    } else if (effect?.kind === 'COMPLETE') {
+      const completed = await tx.reportVersion.updateMany({
+        where: { id: version.id, status: 'ANCHORED', copyDocHash: { not: null } },
+        data: { status: 'COMPLETE', copyRecordId: effect.recordId, copyTxHash: effect.txHash, copyBlock: effect.blockNumber, completedAt: ctx.now() },
+      });
+      if (completed.count !== 1) throw new ChainError('VERSION_NOT_ANCHORED', `version ${version.id} is not ANCHORED with a copy`);
     }
     if (effects.audit) {
       await appendAuditEvent(
@@ -313,9 +363,10 @@ async function release(ctx: Context, write: Write, data: Prisma.ChainWriteUpdate
   return { writeId: write.id, from: write.status, to: write.status, note };
 }
 
+/** A failed ANCHOR returns the version for a new approval; a failed ANCHOR_COPY leaves it ANCHORED, to retry. */
 function fail(ctx: Context, write: Write, reason: string, data: Prisma.ChainWriteUpdateManyMutationInput = {}) {
   return transition(ctx, write, 'FAILED', { ...data, error: reason }, {
-    version: 'REVERT_TO_CONFIRMED',
+    version: write.kind === 'ANCHOR' ? { kind: 'REVERT_TO_CONFIRMED' } : undefined,
     audit: { action: 'anchor.failed', data: { reason, txHash: (data.txHash as string | undefined) ?? write.txHash } },
   }, reason);
 }
@@ -329,31 +380,50 @@ function indeterminate(ctx: Context, write: Write, reason: string, data: Prisma.
 
 function simulated(ctx: Context, write: Write, outcome: string | null) {
   return transition(ctx, write, 'SIMULATED', { error: outcome }, {
-    version: 'REVERT_TO_CONFIRMED',
+    version: { kind: 'REVERT_TO_CONFIRMED' },
     audit: { action: 'anchor.simulated', data: { outcome: outcome ?? 'WOULD_SUCCEED' } },
   }, outcome ?? 'would succeed');
 }
 
 function finalize(ctx: Context, write: Write, final: { txHash: string | null; blockNumber: bigint; recordId: string; linked: boolean; data?: Prisma.ChainWriteUpdateManyMutationInput }) {
   return transition(ctx, write, 'FINAL', { ...final.data, txHash: final.txHash, blockNumber: final.blockNumber, recordId: final.recordId, error: null }, {
-    version: { recordId: final.recordId, txHash: final.txHash, blockNumber: final.blockNumber },
+    version: { kind: write.kind === 'ANCHOR' ? 'ANCHORED' : 'COMPLETE', recordId: final.recordId, txHash: final.txHash, blockNumber: final.blockNumber },
     audit: { action: final.linked ? 'anchor.linked' : 'anchor.final', data: { recordId: final.recordId, txHash: final.txHash, blockNumber: Number(final.blockNumber) } },
   });
 }
 
 // ── INTENT: build, check, simulate, then sign and send ──
 
-function anchorArgs(write: Write, parentId: string) {
+/** The document a write anchors: the original, or its stamped copy. */
+const docOf = (write: Write) => (write.kind === 'ANCHOR' ? write.reportVersion.docHash : write.reportVersion.copyDocHash) as Hex | null;
+
+/** The registry call a built write makes. Needs `parentId` (ANCHOR) or the copy's hash (ANCHOR_COPY). */
+function callOf(write: Write) {
   const version = write.reportVersion;
-  return [
-    version.engagement.familyId as Hex,
-    version.version,
-    parentId as Hex,
-    version.docHash as Hex,
-    version.manifestHash as Hex,
-    version.opinionCommitment as Hex,
-  ] as const;
+  if (write.kind === 'ANCHOR') {
+    return {
+      functionName: 'anchor',
+      args: [
+        version.engagement.familyId as Hex,
+        version.version,
+        write.parentId as Hex,
+        version.docHash as Hex,
+        version.manifestHash as Hex,
+        version.opinionCommitment as Hex,
+      ],
+    } as const;
+  }
+  if (write.kind === 'ANCHOR_COPY') return { functionName: 'anchorDistributionCopy', args: [version.recordId as Hex, version.copyDocHash as Hex] } as const;
+  throw new ChainError('KIND_UNSUPPORTED', `the worker does not send ${write.kind} writes`);
 }
+
+type Call = ReturnType<typeof callOf>;
+
+/** viem's per-function typing does not follow a union of calls; the ABI still checks names and arity at run time. */
+const contractCall = (ctx: Context, call: Call) =>
+  ({ address: ctx.registry, abi: registryAbi, functionName: call.functionName, args: call.args, account: ctx.issuer }) as unknown as Parameters<
+    PublicClient['simulateContract']
+  >[0];
 
 async function issuerBlocked(ctx: Context): Promise<boolean> {
   const count = await ctx.prisma.chainWrite.count({ where: { chainId: ctx.chainId, issuer: ctx.issuer, status: 'INDETERMINATE' } });
@@ -361,10 +431,16 @@ async function issuerBlocked(ctx: Context): Promise<boolean> {
 }
 
 async function startWrite(ctx: Context, write: Write): Promise<StepReport> {
-  const version = write.reportVersion;
-  const orgMode = version.engagement.client.org.chainWriteMode;
+  const orgMode = write.reportVersion.engagement.client.org.chainWriteMode;
   // The brake: a write approved under a wider mode does not start once narrowed.
   if (orgMode === 'DISABLED' || rungOf(orgMode) < rungOf(write.mode)) return fail(ctx, write, 'MODE_NARROWED');
+  if (write.kind === 'ANCHOR') return startAnchor(ctx, write);
+  if (write.kind === 'ANCHOR_COPY') return startCopy(ctx, write);
+  return fail(ctx, write, 'KIND_UNSUPPORTED');
+}
+
+async function startAnchor(ctx: Context, write: Write): Promise<StepReport> {
+  const version = write.reportVersion;
   if (version.status !== 'APPROVED' || !version.manifestHash || !version.opinionCommitment) return fail(ctx, write, 'VERSION_NOT_APPROVED');
   const live = write.mode === 'LIVE';
   if (live && (await issuerBlocked(ctx))) {
@@ -399,25 +475,218 @@ async function startWrite(ctx: Context, write: Write): Promise<StepReport> {
   const current: Write = { ...write, parentId, recordId, error: null };
   await ctx.faults.afterBuild?.(write.id);
 
-  const args = anchorArgs(current, parentId);
   try {
-    await ctx.publicClient.simulateContract({ address: ctx.registry, abi: registryAbi, functionName: 'anchor', args, account: ctx.issuer });
+    await ctx.publicClient.simulateContract(contractCall(ctx, callOf(current)));
   } catch (error) {
     const named = toRegistryError(error);
     if (named instanceof RegistryRevertError) return live ? fail(ctx, current, named.errorName) : simulated(ctx, current, named.errorName);
     throw named;
   }
   if (!live) return simulated(ctx, current, null);
-  return signAndSend(ctx, current, args);
+  return signAndSend(ctx, current);
 }
 
+/**
+ * ANCHOR_COPY: stamp the original (once; a retry reuses the stored copy),
+ * then anchor the copy as the original's DISTRIBUTION_COPY. Only ever LIVE: it
+ * is queued when a LIVE anchor of the original is final.
+ */
+async function startCopy(ctx: Context, write: Write): Promise<StepReport> {
+  const version = write.reportVersion;
+  if (version.anchorOnly) return fail(ctx, write, 'ANCHOR_ONLY');
+  if (version.status !== 'ANCHORED' || !version.recordId || version.anchorBlock === null) return fail(ctx, write, 'VERSION_NOT_ANCHORED');
+  if (write.mode !== 'LIVE') return fail(ctx, write, 'COPY_NEEDS_LIVE');
+  if (await issuerBlocked(ctx)) return release(ctx, write, { error: 'ISSUER_BLOCKED' }, 'waiting: an INDETERMINATE write must be settled first');
+
+  let copyDocHash = version.copyDocHash;
+  if (!copyDocHash) {
+    const stamped = await stampCopy(ctx, write);
+    if (!stamped.ok) return fail(ctx, write, `STAMP_${stamped.reason}`);
+    copyDocHash = stamped.docHash;
+  }
+  const withCopy: Write = { ...write, reportVersion: { ...version, copyDocHash } };
+
+  const existing = await ctx.reader.findByDocHash(copyDocHash as Hex);
+  if (existing) return linkExisting(ctx, withCopy, existing);
+
+  const parentId = version.recordId;
+  const recordId = recordIdFor(ctx.chainId, ctx.registry, version.engagement.familyId as Hex, version.version, 'DISTRIBUTION_COPY');
+  const built = await ctx.prisma.chainWrite.updateMany({ where: { id: write.id, status: 'INTENT', txHash: null }, data: { parentId, recordId, error: null } });
+  if (built.count !== 1) return { writeId: write.id, from: 'INTENT', to: 'INTENT', note: 'changed by another writer; left alone' };
+  const current: Write = { ...withCopy, parentId, recordId, error: null };
+  await ctx.faults.afterBuild?.(write.id);
+
+  try {
+    await ctx.publicClient.simulateContract(contractCall(ctx, callOf(current)));
+  } catch (error) {
+    const named = toRegistryError(error);
+    if (named instanceof RegistryRevertError) return fail(ctx, current, named.errorName);
+    throw named;
+  }
+  return signAndSend(ctx, current);
+}
+
+const hexOf = (bytes: Uint8Array) => `0x${Buffer.from(bytes).toString('hex')}` as Hex;
+
+/** The original's record on chain must be this version's, final and not revoked, before anything is written about it. */
+async function originalRecordOk(ctx: Context, version: { recordId: string | null; anchorBlock: bigint | null; docHash: string }): Promise<boolean> {
+  if (!version.recordId || version.anchorBlock === null) return false;
+  const [record, finalized] = await Promise.all([ctx.reader.getRecord(version.recordId as Hex), ctx.publicClient.getBlock({ blockTag: 'finalized' })]);
+  return (
+    record !== null &&
+    record.kind === 'ORIGINAL' &&
+    record.docHash === version.docHash &&
+    !record.revoked &&
+    BigInt(record.blockNumber) === version.anchorBlock &&
+    finalized.number >= version.anchorBlock
+  );
+}
+
+/**
+ * Stamps the original with its final anchor, re-reads the copy through the
+ * isolated parser, and stores it encrypted (Phase 3 hardening: the stamped PDF
+ * is re-parsed and re-hashed before its anchor, and its stamp must equal the
+ * final record). Nothing is stored unless every check passes.
+ */
+async function stampCopy(ctx: Context, write: Write): Promise<{ ok: true; docHash: string } | { ok: false; reason: string }> {
+  const version = write.reportVersion;
+  if (!(await originalRecordOk(ctx, version))) return { ok: false, reason: 'ORIGINAL_RECORD_MISMATCH' };
+  if (!version.anchorTxHash) return { ok: false, reason: 'ORIGINAL_TX_UNKNOWN' };
+  if (!version.opinionType || !version.opinionSalt) return { ok: false, reason: 'VERSION_INCOMPLETE' };
+  const fields: StampFields = {
+    stamp: STAMP_VERSION,
+    chainId: ctx.chainId,
+    contract: ctx.registry,
+    recordId: version.recordId as Hex,
+    txHash: version.anchorTxHash as Hex,
+    blockNumber: Number(version.anchorBlock),
+    familyId: version.engagement.familyId as Hex,
+    version: version.version,
+    verifyUrl: ctx.verifyUrl,
+    opinionType: version.opinionType,
+    opinionSalt: hexOf(version.opinionSalt),
+    norm: NORMALISER_VERSION,
+  };
+  const original = await ctx.files.read(version.storedFile);
+  // The copy must be of exactly the file that was anchored.
+  if (docHashOf(original) !== version.docHash) return { ok: false, reason: 'ORIGINAL_HASH_MISMATCH' };
+  let stamped: Uint8Array;
+  try {
+    stamped = await stampPdf(original, fields);
+  } catch (error) {
+    if (error instanceof StampError) return { ok: false, reason: error.code };
+    throw error;
+  }
+  const check = await checkStampedCopy(original, stamped, fields);
+  if (!check.ok) return { ok: false, reason: check.reason };
+
+  const stored = await ctx.files.store(stamped);
+  try {
+    await ctx.prisma.$transaction(async (tx) => {
+      const file = await tx.storedFile.create({ data: stored, select: { id: true } });
+      const { count } = await tx.reportVersion.updateMany({
+        where: { id: version.id, status: 'ANCHORED', copyDocHash: null },
+        data: { copyDocHash: check.docHash, copyStoredFileId: file.id },
+      });
+      if (count !== 1) throw new ChainError('VERSION_NOT_ANCHORED', `version ${version.id} already has a copy or is not ANCHORED`);
+      await appendAuditEvent(
+        tx,
+        {
+          orgId: version.engagement.client.orgId,
+          actorId: null,
+          action: 'version.stamped',
+          subjectType: 'ReportVersion',
+          subjectId: version.id,
+          data: { chainWriteId: write.id, recordId: fields.recordId, copyDocHash: check.docHash },
+        },
+        ctx.now(),
+      );
+    });
+  } catch (error) {
+    await ctx.files.discard(stored.path);
+    throw error;
+  }
+  return { ok: true, docHash: check.docHash };
+}
+
+/**
+ * Anchor-only versions (signed or edit-protected) are never rewritten: once
+ * their ANCHOR is final they get a verification certificate and are COMPLETE.
+ */
+async function certifyAnchorOnly(ctx: Context, report: PassReport) {
+  const versions = await ctx.prisma.reportVersion.findMany({
+    where: {
+      status: 'ANCHORED',
+      anchorOnly: true,
+      certificateStoredFileId: null,
+      chainWrites: { some: { kind: 'ANCHOR', status: 'FINAL', chainId: ctx.chainId, registry: ctx.registry, issuer: ctx.issuer } },
+    },
+    include: { engagement: { include: { client: { select: { orgId: true } } } } },
+    orderBy: { createdAt: 'asc' },
+    take: 20,
+  });
+  for (const version of versions) {
+    let storedPath: string | null = null;
+    try {
+      if (!(await originalRecordOk(ctx, version))) {
+        ctx.log('error', 'not certifying: the record on chain does not match the version', { versionId: version.id });
+        continue;
+      }
+      const certificate = await certificatePdf({
+        version: version.version,
+        docHash: version.docHash,
+        recordId: version.recordId!,
+        familyId: version.engagement.familyId,
+        chainId: ctx.chainId,
+        networkName: networkNameOf(ctx.chainId),
+        contract: ctx.registry,
+        txHash: version.anchorTxHash,
+        blockNumber: Number(version.anchorBlock),
+        verifyUrl: ctx.verifyUrl,
+        explorerTxUrl: version.anchorTxHash ? explorerTxUrl(ctx.chainId, version.anchorTxHash) : null,
+      });
+      const stored = await ctx.files.store(certificate);
+      storedPath = stored.path;
+      await ctx.prisma.$transaction(async (tx) => {
+        const file = await tx.storedFile.create({ data: stored, select: { id: true } });
+        const { count } = await tx.reportVersion.updateMany({
+          where: { id: version.id, status: 'ANCHORED', certificateStoredFileId: null },
+          data: { status: 'COMPLETE', certificateStoredFileId: file.id, completedAt: ctx.now() },
+        });
+        if (count !== 1) throw new ChainError('VERSION_NOT_ANCHORED', `version ${version.id} is no longer waiting for a certificate`);
+        await appendAuditEvent(
+          tx,
+          {
+            orgId: version.engagement.client.orgId,
+            actorId: null,
+            action: 'version.certified',
+            subjectType: 'ReportVersion',
+            subjectId: version.id,
+            data: { recordId: version.recordId, certificateSha256: stored.sha256 },
+          },
+          ctx.now(),
+        );
+      });
+      storedPath = null;
+      report.certified.push(version.id);
+    } catch (error) {
+      if (storedPath) await ctx.files.discard(storedPath);
+      report.errors.push({ writeId: version.id, error: errorName(error) });
+      ctx.log('error', 'certificate failed; retried next pass', { versionId: version.id, error: errorName(error) });
+    }
+  }
+}
+
+/** Whether a record is the one this write makes: same kind, document, family, version and commitments. */
 function recordIsThisVersion(record: RegistryRecord, write: Write): boolean {
   const version = write.reportVersion;
+  const copy = write.kind === 'ANCHOR_COPY';
   return (
-    record.kind === 'ORIGINAL' &&
+    record.kind === (copy ? 'DISTRIBUTION_COPY' : 'ORIGINAL') &&
+    (!copy || record.parentId === version.recordId) &&
     record.familyId === version.engagement.familyId &&
     record.version === version.version &&
-    record.docHash === version.docHash &&
+    record.docHash === docOf(write) &&
     record.manifestHash === version.manifestHash &&
     record.opinionCommitment === version.opinionCommitment
   );
@@ -472,10 +741,11 @@ async function send(ctx: Context, serializedTransaction: Hex): Promise<SendOutco
   }
 }
 
-async function signAndSend(ctx: Context, write: Write, args: ReturnType<typeof anchorArgs>): Promise<StepReport> {
+async function signAndSend(ctx: Context, write: Write): Promise<StepReport> {
+  const call = callOf(write);
   const [nonce, gasEstimate, fees] = await Promise.all([
     nextNonce(ctx),
-    ctx.publicClient.estimateContractGas({ address: ctx.registry, abi: registryAbi, functionName: 'anchor', args, account: ctx.issuer }),
+    ctx.publicClient.estimateContractGas(contractCall(ctx, call) as Parameters<PublicClient['estimateContractGas']>[0]),
     ctx.publicClient.estimateFeesPerGas(),
   ]);
   const gas = (gasEstimate * BigInt(100 + ctx.options.gasHeadroomPercent)) / 100n;
@@ -483,7 +753,7 @@ async function signAndSend(ctx: Context, write: Write, args: ReturnType<typeof a
     chainId: ctx.chainId,
     type: 'eip1559',
     to: ctx.registry,
-    data: encodeFunctionData({ abi: registryAbi, functionName: 'anchor', args }),
+    data: encodeFunctionData({ abi: registryAbi, functionName: call.functionName, args: call.args } as Parameters<typeof encodeFunctionData>[0]),
     nonce,
     gas,
     maxFeePerGas: fees.maxFeePerGas,
@@ -603,7 +873,7 @@ async function replace(ctx: Context, write: Write): Promise<StepReport> {
     chainId: ctx.chainId,
     type: 'eip1559',
     to: ctx.registry,
-    data: encodeFunctionData({ abi: registryAbi, functionName: 'anchor', args: anchorArgs(write, write.parentId) }),
+    data: encodeFunctionData({ abi: registryAbi, ...callOf(write) } as Parameters<typeof encodeFunctionData>[0]),
     nonce: write.nonce,
     gas: BigInt(write.gasLimit),
     maxFeePerGas,
@@ -661,7 +931,8 @@ async function reconcile(ctx: Context, write: Write): Promise<StepReport> {
   }
   if (finalizedNonce > write.nonce) {
     // Another transaction used this nonce, so ours can never be mined.
-    const record = await ctx.reader.findByDocHash(write.reportVersion.docHash as Hex);
+    const doc = docOf(write);
+    const record = doc ? await ctx.reader.findByDocHash(doc) : null;
     if (record && recordIsThisVersion(record, write)) {
       const txHash = await anchoringTxOf(ctx, record);
       return finalize(ctx, write, { txHash, blockNumber: BigInt(record.blockNumber), recordId: record.recordId, linked: true, data: { nonce: null } });

@@ -15,10 +15,11 @@ Phase 0 (the Next.js scaffold rendering Inflect's UI primitives in its own
 theme) and Phase 1 (the `AuditReportRegistry` contract and the viem chain
 adapter, tested on Anvil) are done. The Sepolia deployment waits on funded keys
 (#4). Phase 2 (PDF parsing, the opinion locator, the commitments, encrypted
-storage, sign-in and the confirmation screen) is done. Phase 3a (the write
+storage, sign-in and the confirmation screen) is done. Phase 3 (the write
 ladder, four-eyes approval, the ChainWrite journal and its worker, new
-versions, the audit log, the balance alert) is done, tested on Anvil; 3b adds
-stamping and the distribution copy.
+versions, the audit log, the balance alert, stamping, the distribution copy
+and the certificate for anchor-only reports) is done and tested on Anvil; its
+Sepolia run waits on #4.
 
 ## Rules every phase keeps
 
@@ -204,6 +205,16 @@ to one inflect-compliance commit.
 - **Worker tests use fault seams** (`faults.afterBuild`, `beforeSend`,
   `afterSend`) and an injected clock. A throw from a seam is a crash: the row
   keeps its lease until it runs out.
+- **Never rewrite an anchored file.** A distribution copy is the original plus
+  an incremental update (`stampPdf`, `src/lib/stamp.ts`), checked by
+  `checkStampedCopy` before it is stored or sent. A signed or edit-protected
+  version (`anchorOnly`) is never stamped; it gets a certificate
+  (`src/lib/certificate.ts`). Stamping and certificates are deterministic.
+- **Stamps are read with `readStamp`** (`src/lib/stamp-fields.ts`, no Node
+  imports, so the browser verifier can share it). A stamp is a claim; only the
+  chain says whether the record it names is this file.
+- **The worker runs from the app's directory** (the PDF parser is found from
+  there) and needs `FILE_*` and `APP_PUBLIC_URL` besides its chain settings.
 
 ## Conventions
 

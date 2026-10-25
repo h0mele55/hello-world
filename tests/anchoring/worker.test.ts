@@ -24,12 +24,16 @@ import { generatePrivateKey, privateKeyToAccount, type PrivateKeyAccount } from 
 import { foundry } from 'viem/chains';
 import type { SessionUser } from '@/auth';
 import { PrismaClient } from '@/generated/prisma/client';
-import { approveVersion, setChainWriteMode } from '@/lib/anchoring/approve';
+import { approveVersion, requeueCopy, setChainWriteMode } from '@/lib/anchoring/approve';
 import { AnchoringError } from '@/lib/anchoring/errors';
 import type { AnchorTarget } from '@/lib/anchoring/target';
 import { runWorkerPass, type WorkerDeps } from '@/lib/anchoring/worker';
 import { verifyAuditChain } from '@/lib/audit';
 import { deployRegistry, orgIdFor } from '@/lib/chain/deploy';
+import { docHashOf } from '@/lib/commitments';
+import { createFileStore, type FileStore } from '@/lib/file-store';
+import { parsePdf } from '@/lib/pdf/parse';
+import { readStamp } from '@/lib/stamp-fields';
 import type { Deployment } from '@/lib/chain/deployment';
 import { createRegistryReader, type RegistryReader } from '@/lib/chain/reader';
 import { recordIdFor, ZERO_HASH } from '@/lib/chain/records';
@@ -62,13 +66,15 @@ let clock: Date;
 let preparer: SessionUser;
 let approver: SessionUser;
 let refCounter = 0;
+let files: FileStore;
+const VERIFY_BASE = 'https://anchor.example.test';
 
 const issuerWallet = () => createWalletClient({ chain: foundry, transport: http(anvil.url), account: issuer });
 const nonceOf = (blockTag: 'latest' | 'pending' = 'latest') => publicClient.getTransactionCount({ address: issuer.address, blockTag });
 const mine = (blocks = 3) => testClient.mine({ blocks });
 
 function deps(overrides: Partial<WorkerDeps> = {}): WorkerDeps {
-  return { prisma, lockClient, publicClient, account: issuer, deployment, now: () => clock, log: () => {}, ...overrides };
+  return { prisma, lockClient, publicClient, account: issuer, deployment, files, verifyBaseUrl: VERIFY_BASE, now: () => clock, log: () => {}, ...overrides };
 }
 const pass = (overrides: Partial<WorkerDeps> = {}) => runWorkerPass(deps(overrides));
 const advance = (ms: number) => {
@@ -99,6 +105,7 @@ async function goLive() {
 }
 
 const writeOf = (chainWriteId: string) => prisma.chainWrite.findUniqueOrThrow({ where: { id: chainWriteId } });
+const copyWriteOf = (versionId: string) => prisma.chainWrite.findFirstOrThrow({ where: { reportVersionId: versionId, kind: 'ANCHOR_COPY' }, orderBy: { createdAt: 'desc' } });
 const versionOf = (versionId: string) =>
   prisma.reportVersion.findUniqueOrThrow({ where: { id: versionId }, include: { engagement: true } });
 
@@ -145,6 +152,9 @@ beforeAll(async () => {
   target = { network: 'local', chainId: 31337, registry: getAddress(deployment.address), issuer: issuer.address };
   lockClient = new pg.Client({ connectionString: process.env.DATABASE_URL });
   await lockClient.connect();
+  // The same key and directory the app's upload used (tests/db/env.ts).
+  const key = { key: new Uint8Array(Buffer.from(process.env.FILE_ENCRYPTION_KEY!, 'base64')), version: 1 };
+  files = createFileStore({ dir: process.env.FILE_STORAGE_DIR!, current: key, keys: [key] });
 }, 60_000);
 
 afterAll(async () => {
@@ -192,20 +202,97 @@ describe('LIVE anchoring', () => {
     expect((await versionOf(versionId)).status).toBe('APPROVED');
 
     await mine();
-    await pass();
+    const anchored = await pass();
     const final = await writeOf(chainWriteId);
     const v = await versionOf(versionId);
     const recordId = recordIdFor(31337, target.registry, v.engagement.familyId as Hex, 1, 'ORIGINAL');
     expect(final).toMatchObject({ status: 'FINAL', recordId, error: null });
     expect(v).toMatchObject({ status: 'ANCHORED', recordId, anchorTxHash: sent.txHash, anchorBlock: final.blockNumber });
-
     const onChain = await reader.findByDocHash(v.docHash as Hex);
     expect(onChain).toMatchObject({ recordId, version: 1, manifestHash: v.manifestHash, opinionCommitment: v.opinionCommitment, issuer: issuer.address });
-    expect(await nonceOf()).toBe(1);
+
+    // The same pass queued the distribution copy, stamped it, checked it and sent it.
+    const copyWrite = await copyWriteOf(versionId);
+    expect(anchored.steps.map((s) => [s.writeId, s.from, s.to])).toEqual([
+      [chainWriteId, 'BROADCAST', 'FINAL'],
+      [copyWrite.id, 'INTENT', 'BROADCAST'],
+    ]);
+    expect(v.copyDocHash).toMatch(/^0x[0-9a-f]{64}$/);
+    const storedCopy = await prisma.storedFile.findUniqueOrThrow({ where: { id: v.copyStoredFileId! } });
+    const copyBytes = await files.read(storedCopy);
+    expect(docHashOf(copyBytes)).toBe(v.copyDocHash);
+    const original = fixture('en-unmodified.pdf');
+    expect(Buffer.from(copyBytes.subarray(0, original.length)).equals(original)).toBe(true);
+    const parsed = await parsePdf(copyBytes);
+    if (!parsed.ok) throw new Error(parsed.reason);
+    expect(readStamp(parsed.pdf.xmp, parsed.pdf.info)).toMatchObject({
+      status: 'FOUND',
+      fields: { recordId, txHash: sent.txHash, blockNumber: Number(final.blockNumber), contract: target.registry, verifyUrl: `${VERIFY_BASE}/verify`, opinionType: 'UNMODIFIED' },
+    });
+
+    // The copy's block is finalized: the version is COMPLETE.
+    await mine();
+    await pass();
+    const done = await versionOf(versionId);
+    const copyRecordId = recordIdFor(31337, target.registry, v.engagement.familyId as Hex, 1, 'DISTRIBUTION_COPY');
+    expect(done).toMatchObject({ status: 'COMPLETE', copyRecordId, copyTxHash: copyWrite.txHash });
+    expect(done.completedAt).not.toBeNull();
+    expect(await reader.findByDocHash(v.copyDocHash as Hex)).toMatchObject({ recordId: copyRecordId, kind: 'DISTRIBUTION_COPY', parentId: recordId });
+    expect(await nonceOf()).toBe(2);
 
     const actions = (await prisma.auditEvent.findMany({ orderBy: { seq: 'asc' } })).map((e) => e.action);
-    expect(actions.slice(-3)).toEqual(['version.approved', 'anchor.broadcast', 'anchor.final']);
+    expect(actions.slice(-6)).toEqual(['version.approved', 'anchor.broadcast', 'anchor.final', 'version.stamped', 'anchor.broadcast', 'anchor.final']);
     expect(await verifyAuditChain(prisma, preparer.orgId)).toMatchObject({ ok: true });
+  });
+
+  it('gives an anchor-only (signed) version a certificate instead of a copy', async () => {
+    await goLive();
+    const versionId = await confirmedVersion((await engagement()).id, 'en-signed.pdf');
+    expect((await versionOf(versionId)).anchorOnly).toBe(true);
+    const { chainWriteId } = await approveVersion(approver, versionId, target);
+    await pass();
+    await mine();
+    const report = await pass();
+    expect(report.certified).toEqual([versionId]);
+    const v = await versionOf(versionId);
+    expect(v).toMatchObject({ status: 'COMPLETE', copyDocHash: null, copyRecordId: null });
+    expect(await prisma.chainWrite.count({ where: { reportVersionId: versionId, kind: 'ANCHOR_COPY' } })).toBe(0);
+    expect(await nonceOf()).toBe(1);
+
+    const certificate = await files.read(await prisma.storedFile.findUniqueOrThrow({ where: { id: v.certificateStoredFileId! } }));
+    const parsed = await parsePdf(certificate);
+    if (!parsed.ok) throw new Error(parsed.reason);
+    const text = parsed.pdf.pages[0].lines.map((l) => l.text).join('\n');
+    expect(text).toContain(v.recordId!);
+    expect(text).toContain(v.docHash);
+    expect(text).toContain((await writeOf(chainWriteId)).txHash!);
+    expect(await prisma.auditEvent.count({ where: { action: 'version.certified', subjectId: versionId } })).toBe(1);
+  });
+
+  it('never stamps a file that is not the anchored original, and lets an approver retry the copy', async () => {
+    await goLive();
+    const versionId = await confirmedVersion((await engagement()).id, 'en-qualified.pdf');
+    const { chainWriteId } = await approveVersion(approver, versionId, target);
+    await pass();
+    await mine();
+    // Storage hands back the wrong bytes: the copy is refused before anything is stored or sent.
+    const wrong: FileStore = { ...files, read: async () => new Uint8Array(fixture('en-adverse.pdf')) };
+    const nonceBefore = await nonceOf('pending');
+    await pass({ files: wrong });
+    expect(await writeOf(chainWriteId)).toMatchObject({ status: 'FINAL' });
+    const failed = await copyWriteOf(versionId);
+    expect(failed).toMatchObject({ status: 'FAILED', error: 'STAMP_ORIGINAL_HASH_MISMATCH', txHash: null });
+    expect(await versionOf(versionId)).toMatchObject({ status: 'ANCHORED', copyDocHash: null, copyStoredFileId: null });
+    expect(await nonceOf('pending')).toBe(nonceBefore);
+
+    await expect(requeueCopy(preparer, versionId, target)).rejects.toMatchObject({ code: 'FORBIDDEN' });
+    await requeueCopy(approver, versionId, target);
+    await expect(requeueCopy(approver, versionId, target)).rejects.toMatchObject({ code: 'ALREADY_QUEUED' });
+    await pass();
+    await mine();
+    await pass();
+    expect(await versionOf(versionId)).toMatchObject({ status: 'COMPLETE' });
+    expect(await prisma.auditEvent.count({ where: { action: 'anchor.copy_requeued' } })).toBe(1);
   });
 
   it('chains version 2 to version 1, which the family then resolves to', async () => {
@@ -232,7 +319,8 @@ describe('LIVE anchoring', () => {
     let nonceAfterCompetitor = -1;
     const report = await pass({
       faults: {
-        afterBuild: async () => {
+        afterBuild: async (writeId) => {
+          if (writeId !== chainWriteId) return;
           const familyId = (await versionOf(v2)).engagement.familyId as Hex;
           const hash = await issuerWallet().writeContract({
             address: deployment.address,
@@ -245,7 +333,7 @@ describe('LIVE anchoring', () => {
         },
       },
     });
-    expect(report.steps[0]).toMatchObject({ from: 'INTENT', to: 'FAILED', note: 'StaleParent' });
+    expect(report.steps.find((s) => s.writeId === chainWriteId)).toMatchObject({ from: 'INTENT', to: 'FAILED', note: 'StaleParent' });
     expect(await writeOf(chainWriteId)).toMatchObject({ status: 'FAILED', error: 'StaleParent', txHash: null, nonce: null });
     expect(await nonceOf('pending')).toBe(nonceAfterCompetitor);
     // The approval was for that attempt; another needs another approval.
@@ -262,10 +350,12 @@ describe('LIVE anchoring', () => {
 
     const { chainWriteId } = await approveVersion(approver, versionId, target);
     const report = await pass();
-    expect(report.steps[0]).toMatchObject({ from: 'INTENT', to: 'FINAL' });
+    expect(report.steps[0]).toMatchObject({ writeId: chainWriteId, from: 'INTENT', to: 'FINAL' });
     expect(await writeOf(chainWriteId)).toMatchObject({ status: 'FINAL', txHash: directTx, nonce: null });
     expect(await versionOf(versionId)).toMatchObject({ status: 'ANCHORED', anchorTxHash: directTx });
-    expect(await nonceOf('pending')).toBe(nonceBefore);
+    // Only the distribution copy was sent, at the next nonce.
+    expect(await copyWriteOf(versionId)).toMatchObject({ status: 'BROADCAST', nonce: nonceBefore });
+    expect(await nonceOf('pending')).toBe(nonceBefore + 1);
     expect(await prisma.auditEvent.count({ where: { action: 'anchor.linked' } })).toBe(1);
   });
 
@@ -308,7 +398,9 @@ describe('a worker that dies, and writes whose outcome is unknown', () => {
     await mine();
     await pass();
     expect(await writeOf(chainWriteId)).toMatchObject({ status: 'FINAL', txHash: orphan.txHash });
-    expect(await nonceOf()).toBe(1);
+    // One transaction for the original, then one for its copy: nothing was resent.
+    expect(await nonceOf()).toBe(2);
+    expect(await copyWriteOf(versionId)).toMatchObject({ nonce: 1 });
     const actions = (await prisma.auditEvent.findMany({ where: { subjectId: chainWriteId }, orderBy: { seq: 'asc' } })).map((e) => e.action);
     expect(actions).toEqual(['anchor.indeterminate', 'anchor.broadcast', 'anchor.final']);
   });
@@ -372,7 +464,8 @@ describe('a worker that dies, and writes whose outcome is unknown', () => {
     await pass();
     const final = await writeOf(chainWriteId);
     expect(final).toMatchObject({ status: 'FINAL', txHash: replaced.txHash, replacedTxHashes: [original.txHash] });
-    expect(await nonceOf()).toBe(1);
+    // Nonce 0 was used once, by the replacement; the copy follows at nonce 1.
+    expect(await copyWriteOf(versionId)).toMatchObject({ nonce: 1 });
   });
 
   it('lets one worker at a time work an issuer key', async () => {
@@ -456,20 +549,31 @@ describe('the worker process', () => {
   const ROOT = path.resolve(import.meta.dirname, '..', '..');
   const run = promisify(execFile);
 
-  /** Runs scripts/worker.ts --once from a directory holding a deployments/local.json for this Anvil. */
+  /** Runs scripts/worker.ts --once from the app's directory, with a deployment record for this Anvil. */
   async function runScript(env: Record<string, string>) {
-    const cwd = fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-worker-'));
-    fs.mkdirSync(path.join(cwd, 'deployments'));
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'anchor-worker-'));
     const { chainId, address, runtimeBytecodeHash } = deployment;
-    fs.writeFileSync(path.join(cwd, 'deployments', 'local.json'), JSON.stringify({ chainId, address, runtimeBytecodeHash }));
+    fs.writeFileSync(path.join(dir, 'local.json'), JSON.stringify({ chainId, address, runtimeBytecodeHash }));
     try {
-      return await run(path.join(ROOT, 'node_modules', '.bin', 'tsx'), ['--tsconfig', path.join(ROOT, 'tsconfig.json'), path.join(ROOT, 'scripts', 'worker.ts'), '--once'], {
-        cwd,
+      return await run(path.join(ROOT, 'node_modules', '.bin', 'tsx'), [path.join(ROOT, 'scripts', 'worker.ts'), '--once'], {
+        cwd: ROOT,
         encoding: 'utf8',
-        env: { NODE_ENV: 'test', PATH: process.env.PATH, DATABASE_URL: process.env.DATABASE_URL, ANCHOR_NETWORK: 'local', LOCAL_RPC_URL: anvil.url, ISSUER_PRIVATE_KEY: issuerKey, ...env },
+        env: {
+          NODE_ENV: 'test',
+          PATH: process.env.PATH,
+          DATABASE_URL: process.env.DATABASE_URL,
+          ANCHOR_NETWORK: 'local',
+          LOCAL_RPC_URL: anvil.url,
+          ISSUER_PRIVATE_KEY: issuerKey,
+          FILE_ENCRYPTION_KEY: process.env.FILE_ENCRYPTION_KEY,
+          FILE_STORAGE_DIR: process.env.FILE_STORAGE_DIR,
+          APP_PUBLIC_URL: VERIFY_BASE,
+          DEPLOYMENT_FILE: path.join(dir, 'local.json'),
+          ...env,
+        },
       });
     } finally {
-      fs.rmSync(cwd, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true });
     }
   }
 
@@ -484,6 +588,9 @@ describe('the worker process', () => {
     await mine();
     await runScript({});
     expect((await writeOf(chainWriteId)).status).toBe('FINAL');
+    await mine();
+    await runScript({});
+    expect((await versionOf(versionId)).status).toBe('COMPLETE');
   });
 
   it('refuses to start when ISSUER_ADDRESS is not its key', async () => {

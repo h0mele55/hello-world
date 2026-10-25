@@ -24,19 +24,24 @@ export function deploymentPath(network: string, root = process.cwd()): string {
 }
 
 export function loadDeployment(network: NetworkName, root = process.cwd()): Deployment {
-  const file = deploymentPath(network, root);
+  return loadDeploymentFile(network, deploymentPath(network, root), root);
+}
+
+/** Reads a deployment record from an explicit file, checked like any other. */
+export function loadDeploymentFile(network: NetworkName, file: string, root = process.cwd()): Deployment {
+  const label = path.relative(root, file);
   if (!fs.existsSync(file)) {
-    throw new DeploymentError('DEPLOYMENT_MISSING', `No deployment for ${network}: ${path.relative(root, file)} does not exist`);
+    throw new DeploymentError('DEPLOYMENT_MISSING', `No deployment for ${network}: ${label} does not exist`);
   }
   let parsed: unknown;
   try {
     parsed = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch {
-    throw new DeploymentError('DEPLOYMENT_INVALID', `${path.relative(root, file)} is not valid JSON`);
+    throw new DeploymentError('DEPLOYMENT_INVALID', `${label} is not valid JSON`);
   }
-  const deployment = parseDeployment(parsed, path.relative(root, file));
+  const deployment = parseDeployment(parsed, label);
   if (deployment.chainId !== NETWORKS[network].id) {
-    throw new DeploymentError('DEPLOYMENT_INVALID', `${path.relative(root, file)} names chain ${deployment.chainId}, not ${network}`);
+    throw new DeploymentError('DEPLOYMENT_INVALID', `${label} names chain ${deployment.chainId}, not ${network}`);
   }
   return deployment;
 }

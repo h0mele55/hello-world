@@ -22,7 +22,10 @@ and the certificate for anchor-only reports) is done and tested on Anvil; its
 Sepolia run waits on #4. Phase 4 (the shared verification code, `/verify`,
 `/r/<familyId>/latest`, the single-file verifier and CLI, the tamper suite,
 CSP and rate limits) is done on Anvil, which completes the prototype; its
-Sepolia run waits on #4 too.
+Sepolia run waits on #4 too. Phase 5, the issuer console, is under way: roles,
+two-step sign-in and rate limits (5a) and the client list, version timeline
+and dashboard (5b) are done; revocation, recipients, the audit-log viewer and
+backups (5c) are next.
 
 ## Rules every phase keeps
 
@@ -291,6 +294,30 @@ to one inflect-compliance commit.
   `SEED_APPROVER_TOTP_SECRET`, and `tests/e2e/helpers.ts` computes its codes;
   sign-ins use their own client address (`fromOwnAddress`), since the per-address
   limit is real.
+
+## The console
+
+- **Signed-in pages live in the `(console)` route group**, whose layout holds
+  the header and the nav. It is not a guard: each page still calls
+  `requireUser()` itself.
+- **Lists are `ConsoleTable`** (`src/components/console/console-table.tsx`):
+  TanStack Table v9 inside the vendored Card, searched, sorted and paged in the
+  browser over rows the server already scoped to the firm. Columns hold
+  functions, so they are defined in a client component. A list that loads at
+  most N rows reads N + 1 and says when it was cut (`CLIENT_LIST_CAP`), rather
+  than letting a search look complete.
+- **Charts are the vendored `TimeSeriesChart`, `Bars` and axes**, through
+  `CountChart`, which adds the figures as a table (the chart itself is
+  `aria-hidden`) and honours reduced motion. Days and months are UTC
+  (`src/lib/console/periods.ts`).
+- **Anchors per month come from the audit log** (`anchor.final`,
+  `anchor.linked`), whose time never changes, not from a journal row's
+  `updatedAt`.
+- **Lookups are counted, never logged**: `recordLookup` adds one to
+  `LookupCount` (firm, UTC day) for a family this server issued, after the
+  `/r/<familyId>/latest` response is sent, and never throws. No family id, no
+  address, no time of day is stored. `/verify` runs in the visitor's browser
+  and is not counted.
 
 ## Conventions
 

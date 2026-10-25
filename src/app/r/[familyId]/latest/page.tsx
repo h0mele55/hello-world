@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { after } from 'next/server';
 import { getTranslations } from 'next-intl/server';
 import type { Hex } from 'viem';
 import { Card } from '@inflect/ui/components/ui/card';
@@ -7,6 +8,7 @@ import { Heading } from '@inflect/ui/components/ui/typography';
 import { PreferencesBar } from '@/components/preferences-bar';
 import { RecordView } from '@/components/verify/record-view';
 import { CannotVerify, openRegistryView, summariseRecord, type CannotVerifyReason, type RecordSummary } from '@/lib/verify-core';
+import { recordLookup } from '@/lib/lookups';
 import { verifierSetupFromEnv, type VerifierSetupResult } from '@/lib/verify-setup';
 
 export const dynamic = 'force-dynamic';
@@ -41,6 +43,8 @@ async function lookUp(familyId: string, setup: VerifierSetupResult): Promise<Loo
  */
 export default async function LatestVersionPage({ params }: { params: Promise<{ familyId: string }> }) {
   const { familyId } = await params;
+  // Counted after the answer is sent, so the count never delays or breaks it.
+  after(() => recordLookup(familyId));
   const t = await getTranslations();
   const setupResult = verifierSetupFromEnv();
   const setup = setupResult.ok ? setupResult.setup : null;

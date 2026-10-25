@@ -883,6 +883,36 @@ decisions it left open:
   dozen times a minute and the new limit refused it; each test now signs in
   from its own address.
 
+5b is the console's pages and dashboard (#53, #54):
+
+- **The engagement page is the timeline.** The prompt's `/engagements/[id]`
+  is the existing `/reports/[engagementId]`, so links already sent keep
+  working; it now shows each version's status, reason, who prepared and
+  approved it, block, transaction, record id (with copy buttons and explorer
+  links on a public chain) and its download. The newest version with a final
+  anchor is marked as the latest on chain. `/clients`, `/clients/[id]` and
+  `/dashboard` are new; all signed-in pages share one layout with a nav.
+- **TanStack Table 9.2.8**, the newest release more than two weeks old
+  (upstream pins 9.3.1). The lists search, sort and page in the browser over
+  rows the server scoped to the firm; the client list loads at most 1,000 and
+  says when it was cut.
+- **The charts are vendored** (`TimeSeriesChart`, `Bars`, the axes and what
+  they import: eleven chart files and the date formatter), with their
+  dependencies at upstream's versions.
+  Each chart is followed by its figures as a table, and its bars stay still
+  for a reader who asked for reduced motion.
+- **Journal rows by status are a table, not a chart**: they are a snapshot by
+  category, and the vendored chart draws series over dates. The tiles above
+  it single out writes in flight and outcomes being settled.
+- **Anchors per month** are writes whose block is final, read from the audit
+  log's `anchor.final` and `anchor.linked` events by kind (originals, stamped
+  copies, revocations).
+- **Lookups per day** count visits to `/r/<familyId>/latest` for a family the
+  firm issued: one row per firm and UTC day (`LookupCount`), written after the
+  response so a database fault never costs the visitor their answer. Checks
+  made with the verifier run in the visitor's browser (rule 5) and are not
+  seen, so they are not counted.
+
 **Prompt**
 
 ```text

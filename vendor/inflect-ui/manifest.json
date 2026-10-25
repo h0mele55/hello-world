@@ -22,7 +22,11 @@
     "src/components/ui/status-badge.tsx",
     "src/components/ui/copy-button.tsx",
     "src/components/ui/confirm-dialog.tsx",
-    "src/components/ui/radio-group.tsx"
+    "src/components/ui/radio-group.tsx",
+    "packages/ui/src/components/ui/charts/time-series-chart.tsx",
+    "packages/ui/src/components/ui/charts/bars.tsx",
+    "packages/ui/src/components/ui/charts/x-axis.tsx",
+    "packages/ui/src/components/ui/charts/y-axis.tsx"
   ],
   "externals": {
     "@radix-ui/react-dialog": [
@@ -40,6 +44,42 @@
     "@radix-ui/react-visually-hidden": [
       "src/components/ui/modal.tsx",
       "src/components/ui/sheet.tsx"
+    ],
+    "@visx/axis": [
+      "src/components/ui/charts/x-axis.tsx",
+      "src/components/ui/charts/y-axis.tsx"
+    ],
+    "@visx/clip-path": [
+      "src/components/ui/charts/bars.tsx"
+    ],
+    "@visx/event": [
+      "src/components/ui/charts/use-tooltip.ts"
+    ],
+    "@visx/group": [
+      "src/components/ui/charts/bars.tsx",
+      "src/components/ui/charts/time-series-chart.tsx",
+      "src/components/ui/charts/x-axis.tsx",
+      "src/components/ui/charts/y-axis.tsx"
+    ],
+    "@visx/responsive": [
+      "src/components/ui/charts/time-series-chart.tsx"
+    ],
+    "@visx/scale": [
+      "src/components/ui/charts/layout.ts",
+      "src/components/ui/charts/types.ts"
+    ],
+    "@visx/shape": [
+      "src/components/ui/charts/bars.tsx",
+      "src/components/ui/charts/time-series-chart.tsx",
+      "src/components/ui/charts/x-axis.tsx",
+      "src/components/ui/charts/y-axis.tsx"
+    ],
+    "@visx/text": [
+      "src/components/ui/charts/y-axis.tsx"
+    ],
+    "@visx/tooltip": [
+      "src/components/ui/charts/types.ts",
+      "src/components/ui/charts/use-tooltip.ts"
     ],
     "class-variance-authority": [
       "src/components/ui/button-variants.ts",
@@ -59,6 +99,12 @@
     "clsx": [
       "src/lib/cn.ts"
     ],
+    "d3-array": [
+      "src/components/ui/charts/use-tooltip.ts"
+    ],
+    "date-fns": [
+      "src/lib/format-date.ts"
+    ],
     "lucide-react": [
       "src/components/ui/copy-button.tsx",
       "src/components/ui/empty-state.tsx",
@@ -68,6 +114,9 @@
       "src/components/ui/modal.tsx",
       "src/components/ui/sheet.tsx",
       "src/components/ui/tooltip.tsx"
+    ],
+    "motion": [
+      "src/components/ui/charts/bars.tsx"
     ],
     "next": [
       "src/components/ui/modal.tsx"
@@ -86,6 +135,16 @@
     "react": [
       "src/components/ui/button.tsx",
       "src/components/ui/card.tsx",
+      "src/components/ui/charts/bars.tsx",
+      "src/components/ui/charts/chart-context.ts",
+      "src/components/ui/charts/chart-gloss.tsx",
+      "src/components/ui/charts/interaction.tsx",
+      "src/components/ui/charts/time-series-chart.tsx",
+      "src/components/ui/charts/tooltip-sync.tsx",
+      "src/components/ui/charts/types.ts",
+      "src/components/ui/charts/use-tooltip.ts",
+      "src/components/ui/charts/x-axis.tsx",
+      "src/components/ui/charts/y-axis.tsx",
       "src/components/ui/copy-button.tsx",
       "src/components/ui/empty-state.tsx",
       "src/components/ui/error-state.tsx",
@@ -190,6 +249,72 @@
       "path": "src/components/ui/card.tsx",
       "source": "packages/ui/src/components/ui/card.tsx",
       "sha256": "6b81d806b064144899af1430655b9a91c2f39d4494c0cfd794efaa519d6a92d9",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/charts/bars.tsx",
+      "source": "packages/ui/src/components/ui/charts/bars.tsx",
+      "sha256": "868ab03ba5ab52b3562191ccf78db4bc49eafd21174a730d18a09c33b5d02a81",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/charts/chart-context.ts",
+      "source": "packages/ui/src/components/ui/charts/chart-context.ts",
+      "sha256": "9ff9aafd12ee0f62214bdab582115d8d28880b177bcb9766a9698ade67f1981f",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/charts/chart-gloss.tsx",
+      "source": "packages/ui/src/components/ui/charts/chart-gloss.tsx",
+      "sha256": "d23c88e16b5e2e53bcb83684341b401e38bb261111f7a2223848218a5c1a784a",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/charts/interaction.tsx",
+      "source": "packages/ui/src/components/ui/charts/interaction.tsx",
+      "sha256": "076cd645eb569ed54f399665b029797aab1d191caeb317ae697da30aeb81eb16",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/charts/layout.ts",
+      "source": "packages/ui/src/components/ui/charts/layout.ts",
+      "sha256": "a165663f2d7c5c7285b24296efe376cb940c6bae4ceba7e589962a1a3a5a07d8",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/charts/time-series-chart.tsx",
+      "source": "packages/ui/src/components/ui/charts/time-series-chart.tsx",
+      "sha256": "00e247b4e7d55688c00312d6a3332163157e2bc1f27bf95336dee218e8ef0ae1",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/charts/tooltip-sync.tsx",
+      "source": "packages/ui/src/components/ui/charts/tooltip-sync.tsx",
+      "sha256": "78465299bbf6ea964375f02926a1884de41f5e540bd5b713d46ee3446cb1f137",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/charts/types.ts",
+      "source": "packages/ui/src/components/ui/charts/types.ts",
+      "sha256": "a9555501352e8bad63b22ed92030c210d965688316d1dc8b727cbee2e3fc4bff",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/charts/use-tooltip.ts",
+      "source": "packages/ui/src/components/ui/charts/use-tooltip.ts",
+      "sha256": "0d1ac90c65f734f0f71300c7558b02a9d2614e83ac0729c1861c534b77022e3e",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/charts/x-axis.tsx",
+      "source": "packages/ui/src/components/ui/charts/x-axis.tsx",
+      "sha256": "31e7277feaaf2d86277fd114988854fdf1aca6f91dfc4ca16fffb827419e0540",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/charts/y-axis.tsx",
+      "source": "packages/ui/src/components/ui/charts/y-axis.tsx",
+      "sha256": "444f5a0b4daf47645db2ba506bc76671eb4f37b7cb3f1d4f19ff45dfb7c606bc",
       "transformed": false
     },
     {
@@ -409,6 +534,12 @@
       "path": "src/lib/cn.ts",
       "source": "packages/ui/src/lib/cn.ts",
       "sha256": "2abac29454bd927b55b9c2dd39da9c2e800b3e2f07a67eb1f95053a6ac869c14",
+      "transformed": false
+    },
+    {
+      "path": "src/lib/format-date.ts",
+      "source": "packages/ui/src/lib/format-date.ts",
+      "sha256": "3dcfd28438d5e1ae3ffcbcc4638d835ad71b7231275f75fced3ed84355018f18",
       "transformed": false
     },
     {

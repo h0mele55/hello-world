@@ -30,8 +30,3 @@ export async function listEngagements(user: SessionUser): Promise<EngagementView
   const rows = await db().engagement.findMany({ where: { client: { orgId: user.orgId } }, include, orderBy: { createdAt: 'desc' }, take: 200 });
   return rows.map(view);
 }
-
-export async function getEngagement(user: SessionUser, engagementId: string): Promise<EngagementView | null> {
-  const row = await db().engagement.findFirst({ where: { id: engagementId, client: { orgId: user.orgId } }, include });
-  return row ? view(row) : null;
-}

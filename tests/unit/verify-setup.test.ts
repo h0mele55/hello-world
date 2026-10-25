@@ -44,7 +44,7 @@ describe('the verifier setup', () => {
 
   it('refuses, by name, anything short of two independent public https endpoints on a known deployment', () => {
     expect(reason({})).toBe('NOT_CONFIGURED');
-    expect(reason({ VERIFY_NETWORK: 'mainnet' })).toBe('NETWORK_INVALID');
+    expect(reason({ VERIFY_NETWORK: 'polygon' })).toBe('NETWORK_INVALID');
     expect(verifierSetupFromEnv(sepolia, path.join(root, 'nowhere'))).toEqual({ ok: false, reason: 'DEPLOYMENT_UNAVAILABLE' });
     expect(reason({ ...sepolia, VERIFY_RPC_URL_2: '' })).toBe('RPC_URLS_MISSING');
     expect(reason({ ...sepolia, VERIFY_RPC_URL_2: 'not a url' })).toBe('RPC_URLS_INVALID');

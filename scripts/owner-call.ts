@@ -2,10 +2,10 @@
  * The registry owner's acts: registering and retiring issuer keys, and moving
  * ownership to a Safe (docs/runbooks/key-rotation.md, #67, #68).
  *
- *   npx tsx scripts/owner-call.ts <sepolia|local> add-issuer <address>      setIssuer(address, firm, true)
- *   npx tsx scripts/owner-call.ts <sepolia|local> remove-issuer <address>   setIssuer(address, firm, false)
- *   npx tsx scripts/owner-call.ts <sepolia|local> transfer-owner <safe>     transferOwnership(safe), by the current owner
- *   npx tsx scripts/owner-call.ts <sepolia|local> accept-owner              acceptOwnership(), by the new owner
+ *   npx tsx scripts/owner-call.ts <network> add-issuer <address>      setIssuer(address, firm, true)
+ *   npx tsx scripts/owner-call.ts <network> remove-issuer <address>   setIssuer(address, firm, false)
+ *   npx tsx scripts/owner-call.ts <network> transfer-owner <safe>     transferOwnership(safe), by the current owner
+ *   npx tsx scripts/owner-call.ts <network> accept-owner              acceptOwnership(), by the new owner
  *
  * Options:
  *   --deployment <file>  instead of deployments/<network>.json
@@ -20,7 +20,7 @@
  * that account to execute: from a hardware wallet, or in the Safe's
  * Transaction Builder (custom data).
  *
- * Reads SEPOLIA_RPC_URL or LOCAL_RPC_URL, and OWNER_PRIVATE_KEY only with --send.
+ * Reads the network's <NETWORK>_RPC_URL (e.g. SEPOLIA_RPC_URL), and OWNER_PRIVATE_KEY only with --send.
  */
 import fs from 'node:fs';
 import { parseArgs } from 'node:util';
@@ -48,7 +48,7 @@ const ACTIONS: readonly Action[] = ['add-issuer', 'remove-issuer', 'transfer-own
 async function main() {
   const { values, positionals } = parseArgs({ allowPositionals: true, options: { deployment: { type: 'string' }, send: { type: 'boolean', default: false } } });
   const [network, action, argument] = positionals;
-  if (!isNetworkName(network) || !ACTIONS.includes(action as Action)) refuse(`usage: owner-call <sepolia|local> <${ACTIONS.join('|')}> [address] [--deployment <file>] [--send]`);
+  if (!isNetworkName(network) || !ACTIONS.includes(action as Action)) refuse(`usage: owner-call <${Object.keys(NETWORKS).join('|')}> <${ACTIONS.join('|')}> [address] [--deployment <file>] [--send]`);
   const act = action as Action;
   if (values.send && (act === 'transfer-owner' || act === 'accept-owner')) refuse('moving ownership is the owner’s own act: run without --send and execute the printed transaction');
 

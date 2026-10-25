@@ -76,7 +76,8 @@ node scripts/sync-inflect-ui.mjs --check   # re-derive the vendored tree from up
 (cd contracts && forge fmt --check && forge lint --deny notes)
 npm run contracts:artifact     # regenerate src/lib/chain/registry-artifact.ts after a contract change
 npm run test:integration       # chain adapter and verifier against throwaway Anvil nodes
-npx tsx scripts/deploy-registry.ts <sepolia|local>       # deploy; reads keys from env only
+npx tsx scripts/deploy-registry.ts <network>             # deploy (sepolia, local, base-sepolia, …); production networks refused until #63
+npx tsx scripts/measure-chain-costs.ts                   # today's cost per report and finality lag on the production candidates
 npx tsx scripts/owner-call.ts <sepolia|local> <add-issuer|remove-issuer|transfer-owner|accept-owner> [address]   # prints the owner's transaction; sends nothing
 npx tsx scripts/kms-address.ts <KMS key version name>     # the address of a Cloud KMS issuer key, to register it
 
@@ -118,6 +119,12 @@ Locally, Playwright needs the browser of its own version:
   caps each write, and `contracts/snapshots/` pins the exact figures. A change
   that moves them updates the snapshot in the same pull request
   (`forge test` rewrites it; CI runs with `FORGE_SNAPSHOT_CHECK=true`).
+- **Networks are one table**, `NETWORKS` in `src/lib/chain/networks.ts`: Sepolia,
+  local, and the production candidates (mainnet, Base, OP Mainnet, Arbitrum One)
+  with their Sepolia testnets. Each has `<NETWORK>_RPC_URL`, its own
+  `deployments/<network>.json`, an explorer and a readable name. Which one is
+  production is the owner's decision (`docs/decision-production-chain.md`);
+  until then the deploy script refuses `PRODUCTION_NETWORKS`.
 - **All chain access goes through `src/lib/chain/`.** `createChainAdapter`
   checks the chain id and the code at the registry address, then simulates,
   before every write, so a refusal is a named `RegistryRevertError` and nothing

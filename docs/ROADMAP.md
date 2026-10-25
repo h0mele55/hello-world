@@ -1,6 +1,6 @@
 # Audit Report Anchoring — Roadmap
 
-As of 2026-10-24. This is the repository copy of the roadmap that sessions in
+As of 2026-10-25. This is the repository copy of the roadmap that sessions in
 this repo read. When the plan changes, change it here in the same pull request.
 
 The prototype records SHA-256 commitments for each audit report on Ethereum
@@ -20,7 +20,7 @@ caveats shape the design.
 | Hash the PDF and its metadata | SHA-256 of the exact file bytes, plus a salted SHA-256 of a canonical JSON manifest (client, period, version, opinion type, page count) | Any byte change, even a re-save, breaks the file hash. That is the point. |
 | Point the hash to a free testnet | A registry contract on Ethereum Sepolia stores the commitments; each anchor is a transaction in a block | Testnets promise no durability |
 | Link the PDF to its block | After the anchor is final, block number, transaction hash, contract and record id are written into the PDF's XMP metadata; that stamped copy is anchored too, as a child of the original | Writing into a PDF changes its hash, so each issue takes two anchors |
-| Point old copies to the latest version | Each reissue names its predecessor; the contract refuses a fork and keeps `latestOf(family)` | A family is client + engagement period + report type, pseudonymised on chain |
+| Point old copies to the latest version | Each reissue names its predecessor; the contract refuses a fork and keeps `latestOf(family)` | A family is client + period end + report type + engagement, pseudonymised on chain |
 | Let outside parties verify | The browser hashes the file locally, reads the contract directly, and returns Authentic, Superseded, Revoked, Altered or Not registered | Works with the app's server down; nobody has to trust it |
 | Show the audit opinion is unchanged | A salted commitment to the normalised opinion paragraph, confirmed by the auditor before anchoring | An exact-file match is proof; an opinion match on an altered file is only a signal |
 
@@ -216,13 +216,41 @@ reads back on Anvil.
 
 **Hardening**
 
-- [ ] Invariant tests: a file hash maps to one record; versions per family run 1, 2, 3 with no gaps; a family has exactly one latest; revocation never reverses; a non-issuer never writes
-- [ ] Fuzzing of `anchor` with random parents and versions; the stale-parent race reverts
-- [ ] Slither clean, or each finding written off in the PR; no proxy, no `delegatecall`, no payable function
-- [ ] A zero hash or zero family id is rejected
-- [ ] The adapter checks chain id and deployed bytecode hash before any write
-- [ ] Deployer and issuer are different keys, from env only; the deployer holds at most 0.1 Sepolia ETH
-- [ ] Gas per anchor measured with `forge snapshot` and checked in CI
+- [x] Invariant tests: a file hash maps to one record; versions per family run 1, 2, 3 with no gaps; a family has exactly one latest; revocation never reverses; a non-issuer never writes
+- [x] Fuzzing of `anchor` with random parents and versions; the stale-parent race reverts
+- [x] Slither clean, or each finding written off in the PR; no proxy, no `delegatecall`, no payable function
+- [x] A zero hash or zero family id is rejected
+- [x] The adapter checks chain id and deployed bytecode hash before any write
+- [x] Deployer and issuer are different keys, from env only; the deployer holds at most 0.1 Sepolia ETH
+- [x] Gas per anchor measured with `forge snapshot` and checked in CI
+
+**As built (2026-10-25).** Everything above holds except the Sepolia
+deployment, which waits on funded keys ([#4](https://github.com/h0mele55/hello-world/issues/4),
+[#25](https://github.com/h0mele55/hello-world/issues/25)). Departures from the
+prompt below, each deliberate:
+
+- **Deploy script in TypeScript, not `Deploy.s.sol`.** `scripts/deploy-registry.ts`
+  uses the same viem code the adapter uses, checks the deployed bytecode hash
+  before it writes `deployments/<network>.json`, refuses to overwrite that file,
+  refuses an issuer key equal to the deployer key, and refuses a deployer
+  holding more than 0.1 ETH.
+- **Two-step ownership** (`transferOwnership` then `acceptOwnership`), so a
+  mistyped address cannot strand the issuer allowlist.
+- **A key's organisation is fixed for life.** `setIssuer` refuses to move a key
+  to another org (`IssuerOrgImmutable`); otherwise that org could extend or
+  revoke families it never anchored.
+- **`familyOrg` is derived, not stored**: the latest record's issuer names the
+  org, which the rule above makes sound. With the record packed into six slots
+  this keeps a first anchor under 200,000 gas.
+- **`revokeReason` is `uint8`, `blockNumber` is `uint40`**, so the issuer and
+  the five small fields share one slot.
+- **A distribution copy costs about 225,000 gas**, more than an anchor, because
+  it copies the original's commitments into its own record so one `getRecord`
+  answers a verifier. The CI ceiling for it is 250,000.
+- **Every write is simulated before it is sent**, so a refusal arrives as the
+  contract's named error and no transaction is broadcast.
+- `waitFinal` re-reads the receipt once the block is final and refuses a
+  transaction that a reorg dropped (`TX_DROPPED`).
 
 **Prompt**
 
@@ -277,7 +305,9 @@ person has confirmed. Nothing touches the chain yet.
   preparer confirms or corrects, type included.
 - Commitments: `docHash` = SHA-256 of the file bytes; `familyId` =
   HMAC-SHA256 under the issuer's secret over the client's registration number
-  (the UIC in Bulgaria), period end and report type; `opinionCommitment` =
+  (the UIC in Bulgaria), period end, report type and the firm's engagement id,
+  so standalone and consolidated reports for one year are separate families
+  ([#6](https://github.com/h0mele55/hello-world/issues/6)); `opinionCommitment` =
   SHA-256 over a fresh 32-byte salt, the opinion type and the normalised text;
   `manifestHash` = SHA-256 of the canonical JSON manifest, which carries its
   own salt.
@@ -302,7 +332,7 @@ every miss shows as "not found", never as a wrong passage.
 ```text
 Work in h0mele55/hello-world. Read CLAUDE.md first; its rules bind this phase. Build Phase 2: PDF ingestion, hashing, opinion extraction and the confirmed manifest. No chain writes in this phase.
 
-1. docker-compose with Postgres; Prisma models Client (name, registrationNumber, country), Engagement (clientId, periodEnd, reportType, familyId unique), ReportVersion (engagementId, version, status DRAFT|CONFIRMED, docHash unique, manifestHash, opinionCommitment, opinionType, anchorOnly, preparedById, confirmedAt), StoredFile (encrypted blob path, iv, keyVersion, sha256). Auth.js credentials login; seed two users: preparer and approver.
+1. docker-compose with Postgres; Prisma models Client (name, registrationNumber, country), Engagement (clientId, engagementRef, periodEnd, reportType, familyId unique), ReportVersion (engagementId, version, status DRAFT|CONFIRMED, docHash unique, manifestHash, opinionCommitment, opinionType, anchorOnly, preparedById, confirmedAt), StoredFile (encrypted blob path, iv, keyVersion, sha256). Auth.js credentials login; seed two users: preparer and approver.
 
 2. POST upload (preparer only). Validate: starts with %PDF-, at most 25 MB, at most 500 pages, not encrypted. Detect /ByteRange signatures and set anchorOnly. Flag /JavaScript, /EmbeddedFile and XFA. Store the file encrypted with AES-256-GCM (FILE_ENCRYPTION_KEY, random 12-byte IV, keyVersion).
 
@@ -314,7 +344,7 @@ Work in h0mele55/hello-world. Read CLAUDE.md first; its rules bind this phase. B
 
 6. src/lib/commitments.ts:
    - docHash = SHA-256(file bytes)
-   - familyId = HMAC-SHA256(ISSUER_FAMILY_SECRET, canonicalJson({ registrationNumber, periodEnd, reportType }))
+   - familyId = HMAC-SHA256(ISSUER_FAMILY_SECRET, canonicalJson({ registrationNumber, periodEnd, reportType, engagementRef }))
    - opinionSalt = 32 random bytes; opinionCommitment = SHA-256(opinionSalt || utf8(type) || 0x1f || utf8(normalisedText))
    - manifest v1 = { schema: 1, norm: 1, familyId, version, reasonCode, docHash, pageCount, reportDate, opinionType, opinionCommitment, manifestSalt } and manifestHash = SHA-256(canonicalJson(manifest)), using the canonicalJson copied from inflect-compliance src/lib/canonical-json.ts with its tests.
    Readers refuse an unknown schema or norm version.
@@ -597,10 +627,10 @@ Finish: all suites green; commit on a branch, push, open a PR to master; list ev
 ## Open questions for the owner
 
 - [x] **Repository.** Vendor BUSL-1.1 Inflect code into this public repository — accepted 2026-10-24 when Phase 0 started; `vendor/inflect-ui/LICENSE` carries the licence.
-- [ ] **Sepolia funds.** Phase 1 needs a funded deployer key and issuer key in the environment. Several faucets require a mainnet balance, so these must come from the owner. (Phase 1)
-- [ ] **What "the same report" means.** The proposed family key is client registration number + period end + report type. Do standalone and consolidated reports for one year count as two families? (Phase 2)
-- [ ] **Issuers.** One audit firm for the prototype, or several sharing one contract? (Phase 1)
-- [ ] **Languages.** English and Bulgarian only? (Phases 2 and 4)
+- [ ] **Sepolia funds.** Phase 1 needs a funded deployer key and issuer key in the environment. Several faucets require a mainnet balance, so these must come from the owner. Decided 2026-10-25: build and test on Anvil now, deploy when the keys arrive ([#4](https://github.com/h0mele55/hello-world/issues/4)). (Phase 1)
+- [x] **What "the same report" means.** Decided 2026-10-25: the family key adds the firm's engagement id, so standalone and consolidated reports for one year are two families ([#6](https://github.com/h0mele55/hello-world/issues/6)). (Phase 2)
+- [x] **Issuers.** Decided 2026-10-25: one audit firm for the prototype; the contract still keys families by organisation, so a second firm needs no new contract ([#5](https://github.com/h0mele55/hello-world/issues/5)). (Phase 1)
+- [x] **Languages.** Decided 2026-10-25: English and Bulgarian ([#7](https://github.com/h0mele55/hello-world/issues/7)). (Phases 2 and 4)
 - [ ] **Recipient access.** May recipients download the latest PDF, or only see its details and ask the auditor for it? (Phase 5)
 
 ## Sources

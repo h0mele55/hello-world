@@ -11,3 +11,7 @@ next-env.d.ts
 !.env.example
 .DS_Store
 .claude/
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+deployments/local.json

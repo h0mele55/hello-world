@@ -42,7 +42,7 @@ describe('golden hashes for the synthetic corpus', () => {
         expect(located).toEqual({ status: 'NOT_FOUND', reason: report.expect.notFound });
         return;
       }
-      if (located.status !== 'FOUND') throw new Error(`not found: ${located.reason}`);
+      if (located.status !== 'FOUND') throw new Error(`not found: ${located.status === 'NOT_FOUND' ? located.reason : 'several reports'}`);
       expect(located.type).toBe(report.expect.type);
       expect(located.language).toBe(report.language);
       // Exactly the paragraphs that were rendered: nothing lost at line

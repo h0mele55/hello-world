@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { BUNDLE_OPINIONS, twoReportsPdf } from '../helpers/minimal-pdf';
 import { approver, createEngagement, preparer, runTag, signIn, uniquePdf } from './helpers';
 
 /**
@@ -61,4 +62,30 @@ test('signed-out visitors are sent to sign in, and the APIs refuse them', async 
   await expect(page).toHaveURL(/\/login$/);
   const response = await request.post('/api/engagements', { data: {}, headers: { origin: 'http://127.0.0.1:3100' } });
   expect(response.status()).toBe(401);
+});
+
+test('a PDF holding two reports offers both, and the preparer’s choice is recorded (#77)', async ({ page }) => {
+  const tag = runTag();
+  await signIn(page, preparer);
+  await createEngagement(page, tag);
+  await page.getByTestId('upload-file').setInputFiles({ name: 'accounts.pdf', mimeType: 'application/pdf', buffer: twoReportsPdf(tag) });
+  await page.getByRole('button', { name: 'Upload' }).click();
+  await expect(page).toHaveURL(/\/reports\/versions\//);
+
+  await expect(page.getByTestId('extraction-candidates')).toHaveAttribute('data-count', '2');
+  await page.getByTestId('report-date').fill('2026-03-20');
+  // Nothing is filled in, and nothing can be confirmed, until a report is chosen.
+  await expect(page.getByTestId('opinion-text')).toHaveValue('');
+  await expect(page.getByTestId('confirm-opinion')).toBeDisabled();
+  await page.getByTestId('opinionCandidate-c1').click();
+  await expect(page.getByTestId('opinion-text')).toHaveValue(BUNDLE_OPINIONS.pensionFund);
+  await expect(page.getByTestId('opinionType-UNMODIFIED')).toBeChecked();
+  await page.getByTestId('opinionCandidate-c0').click();
+  await expect(page.getByTestId('opinion-text')).toHaveValue(BUNDLE_OPINIONS.council);
+  await expect(page.getByTestId('opinionType-DISCLAIMER')).toBeChecked();
+
+  await page.getByTestId('confirm-opinion').click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Confirm opinion' }).click();
+  await expect(page.getByTestId('confirmed-text')).toHaveText(BUNDLE_OPINIONS.council);
+  await expect(page.getByTestId('confirmed-candidate')).toHaveText('Taken from report 1 of the 2 in this PDF (pages 1–1).');
 });

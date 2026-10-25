@@ -19,6 +19,10 @@ import { ErrorMessage } from './error-message';
  * a starting point; the person reads them against the report beside this form,
  * corrects what is wrong, and confirms in a dialog that says the text becomes
  * part of the commitment. Nothing reaches CONFIRMED any other way.
+ *
+ * A PDF holding several auditor's reports offers each as a candidate (#77):
+ * the person chooses the one this version anchors, or none and types it, and
+ * the choice is recorded with the confirmation.
  */
 export function ConfirmOpinionForm({ versionId, extraction }: { versionId: string; extraction: LocateResult }) {
   const t = useTranslations('confirm');
@@ -26,20 +30,31 @@ export function ConfirmOpinionForm({ versionId, extraction }: { versionId: strin
   const tNotFound = useTranslations('opinion.notFound');
   const router = useRouter();
   const found = extraction.status === 'FOUND' ? extraction : null;
+  const candidates = extraction.status === 'CANDIDATES' ? extraction.candidates : [];
+  const [candidate, setCandidate] = useState<string | undefined>(undefined);
   const [opinionType, setOpinionType] = useState<OpinionType | undefined>(found?.type);
   const [text, setText] = useState(found?.text ?? '');
   const [reportDate, setReportDate] = useState('');
   const [confirming, setConfirming] = useState(false);
   const [discarding, setDiscarding] = useState(false);
   const [error, setError] = useState<ApiError | null>(null);
-  const ready = opinionType !== undefined && text.trim() !== '' && /^\d{4}-\d{2}-\d{2}$/.test(reportDate);
+  const chosen = candidate !== undefined && candidate !== 'none' ? Number(candidate.slice(1)) : undefined;
+  const ready = opinionType !== undefined && text.trim() !== '' && /^\d{4}-\d{2}-\d{2}$/.test(reportDate) && (candidates.length === 0 || candidate !== undefined);
+
+  function choose(value: string) {
+    setCandidate(value);
+    if (value === 'none') return;
+    const passage = candidates[Number(value.slice(1))];
+    setOpinionType(passage.type);
+    setText(passage.text);
+  }
 
   async function confirm() {
     setError(null);
     const response = await fetch(`/api/versions/${versionId}/confirm`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ opinionType, text, reportDate, confirmed: true }),
+      body: JSON.stringify({ opinionType, text, reportDate, confirmed: true, ...(chosen === undefined ? {} : { candidate: chosen }) }),
     });
     if (!response.ok) {
       setError(await apiError(response));
@@ -63,6 +78,22 @@ export function ConfirmOpinionForm({ versionId, extraction }: { versionId: strin
         <p className="text-content-muted" data-testid="extraction-found">
           {t('foundHint', { heading: found.heading, from: found.pageRange[0], to: found.pageRange[1] })}
         </p>
+      ) : candidates.length ? (
+        <>
+          <p className="text-content-warning" data-testid="extraction-candidates" data-count={candidates.length}>
+            {t('candidatesHint', { count: candidates.length })}
+          </p>
+          <ChoiceGroup<string>
+            name="opinionCandidate"
+            label={t('candidatesLabel')}
+            value={candidate}
+            onChange={choose}
+            options={[
+              ...candidates.map((c, i) => ({ value: `c${i}`, label: t('candidate', { n: i + 1, heading: c.heading, type: tTypes(c.type), from: c.pageRange[0], to: c.pageRange[1] }) })),
+              { value: 'none', label: t('noCandidate') },
+            ]}
+          />
+        </>
       ) : (
         <p className="text-content-warning" data-testid="extraction-not-found" data-reason={extraction.status === 'NOT_FOUND' ? extraction.reason : undefined}>
           {extraction.status === 'NOT_FOUND' ? tNotFound(extraction.reason) : null} {t('typeItIn')}

@@ -52,7 +52,7 @@ export async function anchorOriginal(registry: Registry, bytes: Uint8Array, fami
   const read = await readPdf(bytes);
   if (!read.ok) throw new Error(read.reason);
   const located = locateOpinion(dropRunningLines(read.doc.pageLines));
-  if (located.status !== 'FOUND') throw new Error(located.reason);
+  if (located.status !== 'FOUND') throw new Error(located.status === 'NOT_FOUND' ? located.reason : 'several reports');
   const sent = await registry.adapter.anchor({
     familyId,
     version,

@@ -14,6 +14,7 @@ async function golden(bytes: Uint8Array, salt: Uint8Array) {
   if (!read.ok) return { docHash, refused: read.reason };
   const located = locateOpinion(dropRunningLines(read.doc.pageLines));
   if (located.status === 'NOT_FOUND') return { docHash, notFound: located.reason };
+  if (located.status === 'CANDIDATES') return { docHash, candidates: located.candidates.length };
   return { docHash, type: located.type, text: located.text, opinionCommitment: opinionCommitmentOf({ salt, type: located.type, text: located.text }) };
 }
 

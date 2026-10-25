@@ -7,9 +7,10 @@
  *   npx tsx scripts/measure-opinion-locator.ts
  *
  * Exits non-zero when any report is located WRONGLY (wrong type, or a passage
- * that does not start where the corpus list says the opinion starts). A miss
- * is counted against the hit rate but is not an error: a person types the
- * opinion in instead.
+ * that does not start where the corpus list says the opinion starts), or when
+ * a list of candidates (#77) leaves out the report's opinion or comes from a
+ * PDF holding one report. A miss is counted against the hit rate but is not
+ * an error: a person types the opinion in instead.
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -39,6 +40,7 @@ async function main() {
   let wrong = 0;
   let singleFound = 0;
   let singleDigital = 0;
+  let candidates = 0;
   const rows: string[] = [];
   for (const entry of entries) {
     const file = path.join(CACHE, `${entry.id}.pdf`);
@@ -62,6 +64,20 @@ async function main() {
       rows.push(`${entry.id.padEnd(28)} miss    ${located.reason}`);
       continue;
     }
+    if (located.status === 'CANDIDATES') {
+      // Not a hit: the person chooses (#77). A list that leaves out the report's
+      // own opinion, or that a single-report PDF should never produce, is wrong.
+      const listed = located.candidates.some((c) => c.type === entry.opinionType && (!entry.opinionStartsWith || c.text.startsWith(normaliseText(entry.opinionStartsWith))));
+      const pages = located.candidates.map((c) => `${c.type} ${c.pageRange.join('-')}`).join(', ');
+      if (entry.reportsInFile === 1 || !listed) {
+        wrong++;
+        rows.push(`${entry.id.padEnd(28)} WRONG   ${located.candidates.length} candidates (${pages}), expected ${entry.opinionType} among them in a PDF of ${entry.reportsInFile} reports`);
+      } else {
+        candidates++;
+        rows.push(`${entry.id.padEnd(28)} choose  ${located.candidates.length} candidates: ${pages}`);
+      }
+      continue;
+    }
     const startsRight = !entry.opinionStartsWith || located.text.startsWith(normaliseText(entry.opinionStartsWith));
     if (located.type !== entry.opinionType || !startsRight) {
       wrong++;
@@ -76,6 +92,7 @@ async function main() {
   const pct = (n: number, of: number) => (of === 0 ? '0.0' : ((100 * n) / of).toFixed(1));
   console.log(`\nFound ${found} of ${digital} digital reports (${pct(found, digital)}%); wrong: ${wrong}. Gate: at least 90% and none wrong.`);
   console.log(`PDFs holding one auditor's report: found ${singleFound} of ${singleDigital} (${pct(singleFound, singleDigital)}%).`);
+  console.log(`PDFs holding several: ${candidates} offered as candidates for the person to choose from (#77).`);
   if (wrong > 0) process.exitCode = 1;
 }
 

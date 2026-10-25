@@ -356,7 +356,23 @@ Postgres, sign-in, upload with encrypted storage and the confirmation screen
   entire line and name the same opinion type. Running text that wraps to start
   with "Basis for Qualified Opinion section…", or a line holding just
   "opinion.", is therefore never taken for a heading. Bulgarian basis
-  headings are read with and without "изразяване на".
+  headings are read with and without "изразяване на". Wordings seen in real
+  reports are read too: a leading section number ("1 Our opinion is
+  unmodified"), "… on the [consolidated] financial statements", "Basis to
+  express audit opinion", and "одиторско" before "мнение".
+- **Text is read column by column.** Annual reports set the auditor's report
+  in two or three columns, which a line-by-line reading merges into lines that
+  join both columns. The parser splits each page into bands of lines that
+  share a gutter (at least 8 pt wide, with at least 15% of the band's text on
+  each side), reads a band column by column, and ends a band at any line that
+  crosses its gutter.
+- **Measured on 24 public reports** (12 Bulgarian, 12 English; 2019–2025;
+  unmodified, qualified and disclaimer opinions; listed in
+  `tests/fixtures/public-corpus.json` by URL and SHA-256): the opinion is
+  found in 21, and none is wrong. The gate counts PDFs holding one auditor's
+  report (owner decision 2026-10-25): **20 of 21, 95.2%**. The one miss has
+  a misspelled heading ("Квалифицирно"). Two PDFs that bundle two reports are
+  refused as `MULTIPLE_OPINION_HEADINGS`; #77 lets the preparer choose.
 - **Normaliser v1** applies NFKC, replaces lone surrogates, drops soft
   hyphens, zero-width and control characters, and collapses whitespace. At a
   line break, a letter, a hyphen and a lower-case continuation re-join into

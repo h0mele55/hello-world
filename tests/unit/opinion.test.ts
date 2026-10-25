@@ -115,6 +115,30 @@ describe('locateOpinion', () => {
     }
   });
 
+  it('reads the wordings real reports use (tests/fixtures/public-corpus.json)', () => {
+    const cases: [string, string, string][] = [
+      ['Opinion on the financial statements', 'Basis for opinion', 'UNMODIFIED'],
+      ['Qualified opinion on the consolidated financial statements', 'Basis for qualified opinion', 'QUALIFIED'],
+      ['1 Our opinion is unmodified', 'Basis for opinion', 'UNMODIFIED'],
+      ['2. Our opinion is qualified', 'Basis for qualified opinion', 'QUALIFIED'],
+      ['Opinion', 'Basis to express audit opinion', 'UNMODIFIED'],
+      ['Квалифицирано одиторско мнение', 'База за изразяване на квалифицирано одиторско мнение', 'QUALIFIED'],
+      ['Одиторско мнение', 'База за изразяване на одиторско мнение', 'UNMODIFIED'],
+    ];
+    for (const [heading, basis, type] of cases) {
+      expect(locateOpinion(page(heading, 'Text of the opinion.', basis)), heading).toMatchObject({ status: 'FOUND', type });
+    }
+  });
+
+  it('still refuses near misses of those wordings', () => {
+    // A heading for something other than the financial statements, a
+    // misspelled heading, and a numbered line that is running text.
+    expect(locateOpinion(page('Opinion on regularity', 'x.', 'Basis for opinion'))).toEqual({ status: 'NOT_FOUND', reason: 'NO_OPINION_HEADING' });
+    expect(locateOpinion(page('Квалифицирно одиторско мнение', 'x.', 'База за изразяване на квалифицирано одиторско мнение'))).toEqual({ status: 'NOT_FOUND', reason: 'NO_OPINION_HEADING' });
+    expect(locateOpinion(page('1 our opinion is unmodified', 'x.', 'Basis for opinion'))).toEqual({ status: 'NOT_FOUND', reason: 'NO_OPINION_HEADING' });
+    expect(locateOpinion(page('Opinion', 'x.', 'Basis to express our views'))).toEqual({ status: 'NOT_FOUND', reason: 'NO_BASIS_HEADING' });
+  });
+
   it('spans pages and reports the range', () => {
     const lines: PageLine[] = [
       { page: 2, text: 'Opinion' },

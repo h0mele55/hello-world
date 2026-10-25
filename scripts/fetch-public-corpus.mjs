@@ -21,8 +21,12 @@ const MAX_BYTES = 25 * 1024 * 1024;
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
 
+// Some publishers' CDNs refuse a bare client; a full browser user agent is
+// enough (no cookies or JavaScript are needed for any listed file).
+const USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Safari/537.36';
+
 async function download(url) {
-  const response = await fetch(url, { redirect: 'follow', signal: AbortSignal.timeout(60_000) });
+  const response = await fetch(url, { redirect: 'follow', headers: { 'User-Agent': USER_AGENT }, signal: AbortSignal.timeout(60_000) });
   if (!response.ok) throw new Error(`HTTP ${response.status}`);
   const declared = Number(response.headers.get('content-length') ?? 0);
   if (declared > MAX_BYTES) throw new Error(`declares ${declared} bytes, over the 25 MB limit`);

@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import PDFDocument from 'pdfkit';
 import { describe, expect, it } from 'vitest';
+import { locateOpinion } from '@/lib/opinion/locate';
+import { dropRunningLines, joinLines } from '@/lib/opinion/normalise';
 import { parsePdf, PDF_LIMITS } from '@/lib/pdf/parse';
 import { onePage } from '../helpers/minimal-pdf';
 
@@ -27,6 +29,31 @@ describe('parsePdf', () => {
     expect(first.text).toBe("Example Manufacturing AD · Independent auditor's report · 31 December 2025");
     expect(first.y).toBeGreaterThan(result.pdf.pages[0].lines[1].y);
     expect(result.pdf.textChars).toBeGreaterThan(1000);
+  });
+
+  it('reads a two-column page column by column, between full-width lines', async () => {
+    const left = 'We have audited the financial statements of Example plc. In our opinion, the financial statements give a true and fair view of the state of the company’s affairs.';
+    const right = 'We conducted our audit in accordance with International Standards on Auditing. We believe that the audit evidence we have obtained is sufficient and appropriate.';
+    const bytes = await pdfkit({ size: 'A4', margin: 0 }, (doc) => {
+      doc.font('Helvetica-Bold').fontSize(12).text("INDEPENDENT AUDITOR'S REPORT TO THE MEMBERS OF EXAMPLE PLC", 50, 60, { width: 495 });
+      doc.text('Opinion', 50, 100, { width: 230 });
+      doc.text('Basis for opinion', 315, 100, { width: 230 });
+      doc.font('Helvetica').fontSize(10).text(left, 50, 120, { width: 230 });
+      doc.text(right, 315, 120, { width: 230 });
+      doc.text('Key audit matters are those matters that, in our professional judgement, were of most significance in our audit.', 50, 220, { width: 495 });
+    });
+    const result = await parsePdf(bytes);
+    if (!result.ok) throw new Error(result.reason);
+    const texts = result.pdf.pages[0].lines.map((l) => l.text);
+    expect(texts[0]).toBe("INDEPENDENT AUDITOR'S REPORT TO THE MEMBERS OF EXAMPLE PLC");
+    const opinion = texts.indexOf('Opinion');
+    const basis = texts.indexOf('Basis for opinion');
+    // The whole left column comes before the right column, and every line belongs to one column.
+    expect(opinion).toBe(1);
+    expect(basis).toBeGreaterThan(opinion + 2);
+    expect(joinLines(texts.slice(opinion + 1, basis))).toBe(left);
+    expect(texts.at(-1)).toMatch(/^Key audit matters are those matters/);
+    expect(locateOpinion(dropRunningLines([texts]))).toMatchObject({ status: 'FOUND', type: 'UNMODIFIED', text: left });
   });
 
   it('refuses a file that does not start with %PDF-', async () => {

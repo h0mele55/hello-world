@@ -26,7 +26,27 @@ const HEADINGS: Record<Language, Record<string, OpinionType>> = {
   },
 };
 
-const BASIS_PREFIX: Record<Language, string> = { en: 'basis for ', bg: 'база за ' };
+const BASIS_PREFIXES: Record<Language, readonly string[]> = {
+  en: ['basis for ', 'basis to express '],
+  bg: ['база за изразяване на ', 'база за '],
+};
+
+/**
+ * Wordings real reports use for the same heading, reduced to the forms in
+ * HEADINGS. Each one was seen in a public report (tests/fixtures/public-corpus.json):
+ * "Opinion on the financial statements" (BDO), "Our opinion is unmodified"
+ * (KPMG UK), "Basis to express audit opinion" (a translation), and
+ * "квалифицирано одиторско мнение".
+ */
+function canonicalHeading(language: Language, key: string): string {
+  if (language === 'en') {
+    return key
+      .replace(/^our opinion is (unmodified|qualified|adverse)$/u, (_, t: string) => (t === 'unmodified' ? 'opinion' : `${t} opinion`))
+      .replace(/ on the ((consolidated|group|separate|individual|stand-alone|standalone|company|parent company) )?financial statements$/u, '')
+      .replace(/^(an |our )?audit opinion$/u, 'opinion');
+  }
+  return key.replace(/одиторско мнение$/u, 'мнение');
+}
 
 /**
  * The opinion type a "Basis for …" heading line names, or undefined when the
@@ -37,12 +57,14 @@ const BASIS_PREFIX: Record<Language, string> = { en: 'basis for ', bg: 'база
  * мнение"; the two mean the same.
  */
 function basisHeadingType(language: Language, text: string): OpinionType | undefined {
-  if (!STARTS_UPPERCASE.test(normaliseText(text))) return undefined;
   const key = headingKey(text);
-  if (!key.startsWith(BASIS_PREFIX[language])) return undefined;
-  let rest = key.slice(BASIS_PREFIX[language].length);
-  if (language === 'bg') rest = rest.replace(/^изразяване на /u, '');
-  return HEADINGS[language][rest];
+  if (key === null) return undefined;
+  for (const prefix of BASIS_PREFIXES[language]) {
+    if (!key.startsWith(prefix)) continue;
+    const type = HEADINGS[language][canonicalHeading(language, key.slice(prefix.length))];
+    if (type) return type;
+  }
+  return undefined;
 }
 
 /** An opinion longer than this is far more likely a heading missed than a real opinion. */
@@ -70,23 +92,30 @@ export type LocateResult =
     }
   | { status: 'NOT_FOUND'; reason: NotFoundReason };
 
-/**
- * The heading key of a line: normalised, lower-cased, without a trailing
- * colon. A trailing full stop is NOT stripped: "…a basis for our" + "opinion."
- * wraps into a line that would otherwise read as the heading.
- */
-function headingKey(text: string): string {
-  return normaliseText(text).toLowerCase().replace(/:+$/u, '').trim();
-}
+/** A section number before a heading: "1", "1.", "2.1", "IV.", "(a)". */
+const SECTION_NUMBER = /^(\d+(\.\d+)*\.?|[IVX]+\.|\([a-z]\))\s+/u;
 
 /** A heading starts with a capital ("Opinion", "OPINION", "Мнение"); a wrapped sentence fragment does not. */
 const STARTS_UPPERCASE = /^\p{Lu}/u;
 
+/**
+ * The heading key of a line, or null when the line cannot be a heading:
+ * normalised, without a section number, starting with a capital, then
+ * lower-cased and without a trailing colon. A trailing full stop is NOT
+ * stripped: "…a basis for our" + "opinion." wraps into a line that would
+ * otherwise read as the heading.
+ */
+function headingKey(text: string): string | null {
+  const line = normaliseText(text).replace(SECTION_NUMBER, '');
+  if (!STARTS_UPPERCASE.test(line)) return null;
+  return line.toLowerCase().replace(/:+$/u, '').trim();
+}
+
 function matchHeading(text: string): { language: Language; type: OpinionType } | null {
-  if (!STARTS_UPPERCASE.test(normaliseText(text))) return null;
   const key = headingKey(text);
+  if (key === null) return null;
   for (const language of ['en', 'bg'] as const) {
-    const type = HEADINGS[language][key];
+    const type = HEADINGS[language][canonicalHeading(language, key)];
     if (type) return { language, type };
   }
   return null;

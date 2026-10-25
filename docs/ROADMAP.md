@@ -1052,7 +1052,9 @@ put the decisions only the owner can make in front of them with evidence.
   HSM; contract ownership moved to a Safe multisig; a tested rotation runbook.
 - **Qualified signatures:** seal stamped PDFs with an eIDAS qualified
   electronic seal and an RFC 3161 timestamp. The anchor complements the
-  signature; it does not replace it.
+  signature; it does not replace it. The seal is built provider-neutral
+  (`src/lib/eseal/`, #70), so the trust service provider the owner chooses
+  plugs in without changing it.
 - **Legal and privacy:** a GDPR assessment (the on-chain commitments are
   salted, so deleting the off-chain salt and manifest leaves them unlinkable),
   engagement-letter wording, and the professional body's view on relying on

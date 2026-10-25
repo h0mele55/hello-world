@@ -515,6 +515,37 @@ to one inflect-compliance commit.
   `tests/fixtures/ots/` and the test; the job's tests use fake calendars and a
   stubbed check. Do not add a test that sends anything to a public calendar.
 
+## The electronic seal (#70)
+
+- **`src/lib/eseal/` is the eIDAS electronic seal**, a signature in the PDF;
+  it is not `sealed.ts`, which encrypts data at rest. The two share a word and
+  nothing else.
+- **Provider-neutral, and the provider never sees the document.** A
+  `SealSigner` (`src/lib/eseal/types.ts`) signs a SHA-256 digest with the
+  firm's seal key and hands back its certificate chain; a `Timestamper` returns
+  an RFC 3161 token over a digest. The trust service provider is the owner's
+  choice; it plugs in behind these two interfaces, and nothing else changes.
+- **PAdES baseline B-T** (`sealPdf`, `src/lib/eseal/pades.ts`): a detached
+  CAdES signature (`ETSI.CAdES.detached`) whose signed attributes are
+  content-type, message-digest and signing-certificate-v2, never signing-time,
+  with the timestamp over the signature value as its one unsigned attribute.
+  It is one more incremental update, an invisible signature field, so the
+  stamped file is the sealed file's prefix and no page or stamp changes.
+  `sealPdf` refuses a PDF that already carries a signature: a signed original
+  is anchor-only and never stamped, so never sealed either.
+- **Sealing is not deterministic**: the time is the authority's. A sealed copy
+  is made once and kept, never made again for a write that may have landed.
+- **`checkSeal` trusts only the anchors it is given**: the byte range covers
+  the whole file but the signature, the digest and the signature hold, the
+  signed attributes name the certificate that signed, that certificate chains
+  to an anchor and was valid at the timestamp's time, and the timestamp is
+  over this signature, signed by a certificate with the timestamping usage
+  that also chains to an anchor. Every failure is a named `SealError`.
+- **Tests use a throwaway PKI** (`tests/helpers/test-pki.ts`), made fresh in
+  memory, and Poppler's `pdfsig` and OpenSSL check each sealed file
+  independently of this code. A "qualified" validation needs the provider's
+  qualified certificate, which no test has.
+
 ## The audit log and backups
 
 - **`/audit-log` re-derives the chain on every view** and shows the last

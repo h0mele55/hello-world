@@ -31,7 +31,8 @@ export class StoredFileError extends Error {
 }
 
 function storageDir(): string {
-  return path.resolve(process.cwd(), serverEnv().FILE_STORAGE_DIR);
+  // Runtime data, not source: keep the bundler from tracing it.
+  return path.resolve(/*turbopackIgnore: true*/ process.cwd(), serverEnv().FILE_STORAGE_DIR);
 }
 
 const contextOf = (relativePath: string) => `stored-file:${relativePath}`;

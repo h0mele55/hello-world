@@ -18,3 +18,4 @@ deployments/local.json
 .cache/
 src/generated/
 storage/
+public/pdf.worker.min.mjs

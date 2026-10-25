@@ -21,7 +21,8 @@
     "src/components/ui/sheet.tsx",
     "src/components/ui/status-badge.tsx",
     "src/components/ui/copy-button.tsx",
-    "src/components/ui/confirm-dialog.tsx"
+    "src/components/ui/confirm-dialog.tsx",
+    "src/components/ui/radio-group.tsx"
   ],
   "externals": {
     "@radix-ui/react-dialog": [
@@ -29,6 +30,9 @@
     ],
     "@radix-ui/react-label": [
       "src/components/ui/label.tsx"
+    ],
+    "@radix-ui/react-radio-group": [
+      "src/components/ui/radio-group.tsx"
     ],
     "@radix-ui/react-tooltip": [
       "src/components/ui/tooltip.tsx"
@@ -46,6 +50,7 @@
       "src/components/ui/input.tsx",
       "src/components/ui/label.tsx",
       "src/components/ui/modal.tsx",
+      "src/components/ui/radio-group.tsx",
       "src/components/ui/sheet.tsx",
       "src/components/ui/status-badge.tsx",
       "src/components/ui/textarea.tsx",
@@ -105,6 +110,7 @@
       "src/components/ui/modal.tsx",
       "src/components/ui/overlay-depth.tsx",
       "src/components/ui/progressive-blur.tsx",
+      "src/components/ui/radio-group.tsx",
       "src/components/ui/sheet.tsx",
       "src/components/ui/textarea.tsx",
       "src/components/ui/tooltip.tsx",
@@ -348,6 +354,12 @@
       "path": "src/components/ui/progressive-blur.tsx",
       "source": "src/components/ui/progressive-blur.tsx",
       "sha256": "6e8e7dee9327fe6515cabada1d71a7554aca67d874689ecd11c91533c4b65321",
+      "transformed": false
+    },
+    {
+      "path": "src/components/ui/radio-group.tsx",
+      "source": "src/components/ui/radio-group.tsx",
+      "sha256": "b636eacf401b9c01742c4dde458c5a618474885092fd529be27e6b984829bdda",
       "transformed": false
     },
     {

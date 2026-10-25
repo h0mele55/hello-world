@@ -16,7 +16,10 @@ export default async function HomePage() {
         <p className="text-content-muted">{t('tagline')}</p>
         <StatusBadge variant="warning">{t('prototypeNotice')}</StatusBadge>
         <div className="flex flex-wrap gap-tight">
-          <Link href="/kitchen-sink" className={buttonVariants({ variant: 'primary' })}>
+          <Link href="/reports" className={buttonVariants({ variant: 'primary' })} data-testid="sign-in-link">
+            {t('signInLink')}
+          </Link>
+          <Link href="/kitchen-sink" className={buttonVariants({ variant: 'secondary' })}>
             {t('kitchenSinkLink')}
           </Link>
           <a

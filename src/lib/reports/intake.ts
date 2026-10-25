@@ -9,7 +9,7 @@ import { buildManifest, canonicalManifest, manifestHashOf } from '@/lib/manifest
 import { locateOpinion, type LocateResult } from '@/lib/opinion/locate';
 import { dropRunningLines, normaliseText } from '@/lib/opinion/normalise';
 import { parsePdf, type PdfFlags, type PdfRefusal } from '@/lib/pdf/parse';
-import { open, openJson, seal, sealJson } from '@/lib/sealed';
+import { open, openJson, seal, sealJson, type Bytes } from '@/lib/sealed';
 import { serverEnv } from '@/lib/server-env';
 import { discardStoredFile, readStoredFile, storeFile } from '@/lib/storage';
 
@@ -208,7 +208,7 @@ export async function getVersion(user: SessionUser, versionId: string) {
   };
 }
 
-export async function readVersionFile(user: SessionUser, versionId: string): Promise<Uint8Array> {
+export async function readVersionFile(user: SessionUser, versionId: string): Promise<Bytes> {
   const version = await versionInOrg(user, versionId);
   return readStoredFile(version.storedFile);
 }

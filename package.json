@@ -22,7 +22,7 @@
     "test:pdf": "vitest run --config vitest.pdf.config.mts",
     "test:golden": "vitest run --config vitest.pdf.config.mts tests/pdf/golden.test.ts",
     "fixtures:pdf": "tsx scripts/gen-pdf-fixtures.ts",
-    "postinstall": "prisma generate",
+    "postinstall": "prisma generate && node scripts/copy-pdf-worker.mjs",
     "test:db": "vitest run --config vitest.db.config.mts",
     "db:migrate": "prisma migrate dev",
     "db:seed": "prisma db seed"

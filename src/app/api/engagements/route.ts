@@ -17,4 +17,4 @@ export const POST = handler(async (req, user) => {
   if (!body.success) return errorResponse('INVALID_INPUT');
   const engagement = await createEngagement(user, body.data);
   return NextResponse.json({ id: engagement.id }, { status: 201 });
-});
+}, { may: 'prepare' });

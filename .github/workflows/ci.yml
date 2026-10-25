@@ -58,6 +58,9 @@ jobs:
           for name in SEED_PREPARER_PASSWORD SEED_APPROVER_PASSWORD; do
             value=$(openssl rand -hex 16); echo "::add-mask::$value"; echo "$name=$value" >> "$GITHUB_ENV"
           done
+          # The seeded approver signs in with two-step sign-in; the end-to-end tests compute its codes.
+          value=$(node -e "const a='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567'; console.log([...require('crypto').randomBytes(32)].map((b) => a[b & 31]).join(''))")
+          echo "::add-mask::$value"; echo "SEED_APPROVER_TOTP_SECRET=$value" >> "$GITHUB_ENV"
           echo "FILE_STORAGE_DIR=$RUNNER_TEMP/storage" >> "$GITHUB_ENV"
       - name: Vendored Inflect code matches its manifest
         run: npm run vendor:check

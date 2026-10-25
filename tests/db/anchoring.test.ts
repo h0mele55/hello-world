@@ -58,7 +58,7 @@ beforeEach(async () => {
   orgId = org.id;
   const make = async (org: string, email: string, role: 'PREPARER' | 'APPROVER'): Promise<SessionUser> => {
     const user = await prisma.user.create({ data: { orgId: org, email, name: email, role, passwordHash: 'x' } });
-    return { id: user.id, email, name: email, role, orgId: org };
+    return { id: user.id, email, name: email, role, orgId: org, mfa: role === 'APPROVER' ? 'VERIFIED' : 'NOT_REQUIRED' };
   };
   preparer = await make(org.id, 'preparer@example.test', 'PREPARER');
   approver = await make(org.id, 'approver@example.test', 'APPROVER');
@@ -155,7 +155,7 @@ describe('the write mode', () => {
     expect(await getChainWriteMode(approver)).toBe('DISABLED');
     await expectCode(setChainWriteMode(approver, 'LIVE'), 'MODE_SKIPS_RUNG');
     await expectCode(setChainWriteMode(approver, 'DISABLED'), 'MODE_UNCHANGED');
-    await expectCode(setChainWriteMode(preparer, 'DRY_RUN'), 'FORBIDDEN');
+    await expect(setChainWriteMode(preparer, 'DRY_RUN')).rejects.toMatchObject({ name: 'AccessError', code: 'FORBIDDEN' });
     await setChainWriteMode(approver, 'DRY_RUN');
     await setChainWriteMode(approver, 'LIVE');
     await setChainWriteMode(approver, 'DISABLED');
@@ -227,7 +227,7 @@ describe('approval (rule 6)', () => {
     const versionId = await confirmedVersion(engagement.id, 'en-unmodified.pdf');
     await expectCode(approveVersion(approver, versionId, TARGET), 'CHAIN_WRITES_DISABLED');
     await setChainWriteMode(approver, 'DRY_RUN');
-    await expectCode(approveVersion(preparer, versionId, TARGET), 'FORBIDDEN');
+    await expect(approveVersion(preparer, versionId, TARGET)).rejects.toMatchObject({ name: 'AccessError', code: 'FORBIDDEN' });
     await expectCode(approveVersion(approver, versionId, null), 'CHAIN_NOT_CONFIGURED');
     await expectCode(approveVersion(outsider, versionId, TARGET), 'CHAIN_WRITES_DISABLED');
     await prisma.issuerOrg.update({ where: { id: outsider.orgId }, data: { chainWriteMode: 'LIVE' } });

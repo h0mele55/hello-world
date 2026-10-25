@@ -10,4 +10,4 @@ export const PUT = handler(async (req, user) => {
   const body = Body.safeParse(await req.json().catch(() => null));
   if (!body.success) return errorResponse('INVALID_INPUT');
   return NextResponse.json(await setChainWriteMode(user, body.data.mode));
-});
+}, { may: 'setChainMode' });

@@ -62,17 +62,24 @@
     "signOut": "Sign out",
     "roles": {
       "PREPARER": "Preparer",
-      "APPROVER": "Approver"
+      "APPROVER": "Approver",
+      "ADMIN": "Admin",
+      "VIEWER": "Viewer"
     },
     "settings": "Settings",
-    "lowBalance": "The issuer key's balance is below 0.02 ETH. Anchors will fail once it runs out: top it up."
+    "lowBalance": "The issuer key's balance is below 0.02 ETH. Anchors will fail once it runs out: top it up.",
+    "twoStep": "Two-step sign-in"
   },
   "login": {
     "title": "Sign in",
     "email": "Email",
     "password": "Password",
     "submit": "Sign in",
-    "failed": "The email or password is wrong, or there have been too many attempts. Try again in a few minutes."
+    "failed": "The email or password is wrong, or there have been too many attempts. Try again in a few minutes.",
+    "codeIntro": "Enter the 6-digit code from your authenticator app, or one of your recovery codes.",
+    "code": "Code",
+    "back": "Back",
+    "codeFailed": "The code is wrong or was already used, or there have been too many attempts. Try again in a few minutes."
   },
   "reports": {
     "title": "Reports",
@@ -331,7 +338,7 @@
       "LIVE": "Approvals will send transactions from the issuer key, paid from its balance. A sent anchor cannot be withdrawn."
     },
     "changeConfirm": "Change mode",
-    "approverOnly": "Only an approver can change the write mode.",
+    "approverOnly": "Only an approver or an admin can change the write mode.",
     "modes": {
       "DISABLED": "Disabled",
       "DRY_RUN": "Dry run",
@@ -454,5 +461,27 @@
     "revoked": "Revoked, reason code {code}",
     "noPdf": "This page shows the record only. Get the file from the issuer, then check it on the verify page.",
     "verifyLink": "Verify a file"
+  },
+  "account": {
+    "mfa": {
+      "title": "Two-step sign-in",
+      "notNeeded": "Your role does not need two-step sign-in.",
+      "on": "Two-step sign-in is on",
+      "signInAgain": "Sign out and sign in again with a code to continue.",
+      "continue": "Continue to reports",
+      "intro": "Approvers and admins sign in with a code from an authenticator app as well as their password. Set it up now: you cannot do anything else until you have.",
+      "start": "Set up two-step sign-in",
+      "error": "That did not work ({code}). Try again.",
+      "scan": "Scan this code with your authenticator app, then enter the 6-digit code it shows.",
+      "qrLabel": "QR code to add this account to an authenticator app",
+      "manual": "Or enter this key by hand:",
+      "copySecret": "Copy key",
+      "code": "6-digit code",
+      "confirm": "Turn on two-step sign-in",
+      "enabled": "Two-step sign-in is on.",
+      "recoveryIntro": "Keep these recovery codes somewhere safe. Each works once, in place of a code, if you lose your phone. They are not shown again.",
+      "copyCodes": "Copy recovery codes",
+      "savedSignInAgain": "I have saved them: sign in again"
+    }
   }
 }

@@ -853,12 +853,35 @@ revocation shows as Revoked in the verifier.
 
 **Hardening**
 
-- [ ] Every mutating route checks role on the server; preparer ≠ approver is also a database constraint
-- [ ] Multi-factor sign-in is required for APPROVER and ADMIN
-- [ ] Sign-in and mutations are rate-limited, with lockout after repeated failures
+- [x] Every mutating route checks role on the server; preparer ≠ approver is also a database constraint
+- [x] Multi-factor sign-in is required for APPROVER and ADMIN
+- [x] Sign-in and mutations are rate-limited, with lockout after repeated failures
 - [ ] Notification emails carry no PDF, no opinion text and no figures
 - [ ] The nightly audit-chain check alerts on any break
 - [ ] Database and encrypted file store are backed up, and one restore has been tested
+
+**As built: Phase 5 ships in three pull requests.** 5a is roles, two-step
+sign-in and the rate limits (#52, #58). Departures from the prompt below, and
+decisions it left open:
+
+- **Roles live on the user**, not on a Membership: there is one firm (#5), so
+  a user has one role in it. The table of acts is `src/lib/roles.ts`; the
+  route handler refuses by it before any work, and the use cases check it
+  again. An ADMIN may also change the write mode.
+- **Two-step sign-in is part of the credentials sign-in.** The password is
+  checked first; an approver or admin with TOTP on is then asked for a code or
+  a recovery code in a second step, and one without it signs in only to set it
+  up (`/account/mfa`, nothing else is allowed). Setting it up ends with signing
+  in again, so the session is verified. A code is accepted for a time step
+  later than the last accepted one, never twice.
+- **The limits**: sign-in 10 attempts a minute per address, and lockout after
+  5 failures per email or 10 per address within 15 minutes (the per-email
+  limit is stricter than the prompt's 10 because the address is trusted only
+  behind a proxy that sets it); writes 60 a minute per user.
+- **Found on the way**: Next.js sets `X-Forwarded-For` itself, so with
+  `TRUST_PROXY_HEADERS=1` the end-to-end suite was one address signing in a
+  dozen times a minute and the new limit refused it; each test now signs in
+  from its own address.
 
 **Prompt**
 

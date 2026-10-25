@@ -73,7 +73,7 @@ npx tsx scripts/deploy-registry.ts <sepolia|local>       # deploy; reads keys fr
 
 # Database (Postgres 16: `docker compose up -d`, or any local server; Prisma 7 does not read .env)
 npm run db:migrate             # create and apply a migration in development
-npm run db:seed                # the firm and two users, from SEED_* in the environment
+npm run db:seed                # the firm and its users, from SEED_* in the environment
 npm run test:db                # intake and approval use cases against TEST_DATABASE_URL (name must end in _test)
 npm run test:anchoring         # the worker against TEST_DATABASE_URL and a throwaway Anvil node
 npm run worker                 # the anchoring worker; add `-- --once` for one pass
@@ -268,6 +268,29 @@ to one inflect-compliance commit.
   and the lookup page's rate limit (`src/lib/rate-limit.ts`: 60 a minute per
   address, 600 in all; the address only behind a proxy that sets it,
   `TRUST_PROXY_HEADERS=1`). Neither covers the signed-in app.
+
+## Roles and two-step sign-in
+
+- **Who may do what is one table**, `CAN` in `src/lib/roles.ts`: ADMIN,
+  PREPARER, APPROVER and VIEWER (who reads and nothing else). Use cases call
+  `requireRole(user, act)`; every mutating route passes `{ may: act }` to
+  `handler()`, which refuses before anything runs. UI checks use `mayDo`.
+  Never test a role name inline. `tests/unit/route-roles.test.ts` finds every
+  route through git and proves a VIEWER is refused with 403.
+- **APPROVER and ADMIN sign in with TOTP** (`src/lib/mfa.ts`, otplib). The
+  secret is sealed; a code is accepted only for a later time step than the
+  last one (a conditional write, so two racing sign-ins cannot both pass);
+  recovery codes are stored as SHA-256 and shown once. Until the second factor
+  is set up, the session is `mfa: 'ENROLL'`: pages redirect to `/account/mfa`
+  and routes answer `MFA_REQUIRED`, except the two setup routes.
+- **Rate limits** (`src/lib/login-throttle.ts`, `src/lib/rate-limit.ts`):
+  sign-in 10 attempts a minute per address, lockout after 5 failures per email
+  or 10 per address in 15 minutes; writes 60 a minute per user (429 with
+  `Retry-After`). The address is read only with `TRUST_PROXY_HEADERS=1`.
+- **E2E**: the seeded approver has two-step sign-in on with
+  `SEED_APPROVER_TOTP_SECRET`, and `tests/e2e/helpers.ts` computes its codes;
+  sign-ins use their own client address (`fromOwnAddress`), since the per-address
+  limit is real.
 
 ## Conventions
 

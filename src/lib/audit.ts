@@ -42,14 +42,16 @@ export type AuditAction =
   | 'anchor.copy_requeued'
   | 'anchor.nonce_released'
   | 'version.stamped'
-  | 'version.certified';
+  | 'version.certified'
+  | 'mfa.enabled'
+  | 'mfa.recovery_code_used';
 
 export interface AuditEventInput {
   orgId: string;
   /** The user, or null for the worker. */
   actorId: string | null;
   action: AuditAction;
-  subjectType: 'Engagement' | 'ReportVersion' | 'IssuerOrg' | 'ChainWrite';
+  subjectType: 'Engagement' | 'ReportVersion' | 'IssuerOrg' | 'ChainWrite' | 'User';
   subjectId: string;
   /** Plain JSON only: strings, safe integers, booleans, null, arrays and objects. */
   data: Record<string, unknown>;

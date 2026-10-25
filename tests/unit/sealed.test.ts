@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { decrypt, encrypt, open, openJson, seal, SealError, sealJson } from '@/lib/sealed';
-import { isThrottled, recordFailure, recordSuccess, resetThrottle } from '@/lib/login-throttle';
+import { isThrottled, recordFailure, recordSuccess, resetThrottle, takeSignInAttempt } from '@/lib/login-throttle';
 
 const key = { key: new Uint8Array(randomBytes(32)), version: 1 };
 const text = new TextEncoder().encode('In our opinion, the financial statements present fairly.');
@@ -56,11 +56,24 @@ describe('login throttle', () => {
     expect(isThrottled('preparer@example.test', null, now)).toBe(false);
   });
 
-  it('refuses an address after twenty failures across emails', () => {
+  it('locks an address out after ten failures across emails, for fifteen minutes', () => {
     resetThrottle();
     const now = Date.now();
-    for (let i = 0; i < 20; i++) recordFailure(`user${i}@example.test`, '10.0.0.1', now);
+    for (let i = 0; i < 9; i++) recordFailure(`user${i}@example.test`, '10.0.0.1', now);
+    expect(isThrottled('someone-new@example.test', '10.0.0.1', now)).toBe(false);
+    recordFailure('user9@example.test', '10.0.0.1', now);
     expect(isThrottled('someone-new@example.test', '10.0.0.1', now)).toBe(true);
     expect(isThrottled('someone-new@example.test', null, now)).toBe(false);
+    expect(isThrottled('someone-new@example.test', '10.0.0.1', now + 15 * 60 * 1000 + 1)).toBe(false);
+  });
+
+  it('lets an address try ten times a minute, right or wrong', () => {
+    resetThrottle();
+    const now = Date.now();
+    for (let i = 0; i < 10; i++) expect(takeSignInAttempt('10.0.0.2', now + i)).toBe(true);
+    expect(takeSignInAttempt('10.0.0.2', now + 10)).toBe(false);
+    expect(takeSignInAttempt('10.0.0.3', now + 10)).toBe(true);
+    expect(takeSignInAttempt(null, now + 10)).toBe(true);
+    expect(takeSignInAttempt('10.0.0.2', now + 60_001)).toBe(true);
   });
 });

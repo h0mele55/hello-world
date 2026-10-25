@@ -11,6 +11,7 @@ import { ConfirmOpinionForm } from '@/components/reports/confirm-opinion-form';
 import { PdfViewer } from '@/components/reports/pdf-viewer';
 import { VersionStatusBadge } from '@/components/reports/version-status-badge';
 import { getVersion, IntakeError } from '@/lib/reports/intake';
+import { mayDo } from '@/lib/roles';
 
 async function load(versionId: string) {
   const user = await requireUser();
@@ -66,7 +67,7 @@ export default async function VersionPage({ params }: { params: Promise<{ versio
           <PdfViewer src={`/api/versions/${version.id}/file`} initialPage={initialPage} />
         </Card>
         <Card className="flex flex-col gap-default">
-          {version.status === 'DRAFT' && user.role === 'PREPARER' ? (
+          {version.status === 'DRAFT' && mayDo(user.role, 'prepare') ? (
             <>
               <Heading level={2}>{t('confirmTitle')}</Heading>
               <ConfirmOpinionForm versionId={version.id} extraction={version.extraction} />

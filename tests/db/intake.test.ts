@@ -73,6 +73,16 @@ describe('engagements', () => {
     await expectIntakeError(createEngagement(preparer, { ...ENGAGEMENT, country: 'Bulgaria' }), 'INVALID_INPUT');
   });
 
+  it('creates two engagements for one new client at the same moment', async () => {
+    // Two submissions racing to create the same client must both succeed.
+    const [first, second] = await Promise.all([
+      createEngagement(preparer, ENGAGEMENT),
+      createEngagement(preparer, { ...ENGAGEMENT, engagementRef: 'ENG-2026-099' }),
+    ]);
+    expect(first.clientId).toBe(second.clientId);
+    expect(await prisma.client.count()).toBe(1);
+  });
+
   it('keeps standalone and consolidated reports apart (#6)', async () => {
     const standalone = await createEngagement(preparer, ENGAGEMENT);
     const consolidated = await createEngagement(preparer, { ...ENGAGEMENT, reportType: 'CONSOLIDATED' });

@@ -80,11 +80,11 @@ export async function createEngagement(user: SessionUser, input: NewEngagement) 
   const familyId = familyIdOf(serverEnv().ISSUER_FAMILY_SECRET, key);
 
   return db().$transaction(async (tx) => {
-    const client = await tx.client.upsert({
-      where: { orgId_country_registrationNumber: { orgId: user.orgId, country, registrationNumber: key.registrationNumber } },
-      create: { orgId: user.orgId, name: clientName, country, registrationNumber: key.registrationNumber },
-      update: {},
-    });
+    // INSERT … ON CONFLICT DO NOTHING, then read: unlike a find-then-create
+    // upsert, two requests creating the same new client cannot both insert.
+    const clientKey = { orgId: user.orgId, country, registrationNumber: key.registrationNumber };
+    await tx.client.createMany({ data: [{ ...clientKey, name: clientName }], skipDuplicates: true });
+    const client = await tx.client.findUniqueOrThrow({ where: { orgId_country_registrationNumber: clientKey } });
     let engagement;
     try {
       engagement = await tx.engagement.create({

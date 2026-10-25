@@ -5,8 +5,11 @@ import { expect, type Page } from '@playwright/test';
 export const preparer = { email: process.env.SEED_PREPARER_EMAIL ?? '', password: process.env.SEED_PREPARER_PASSWORD ?? '' };
 export const approver = { email: process.env.SEED_APPROVER_EMAIL ?? '', password: process.env.SEED_APPROVER_PASSWORD ?? '' };
 
-/** A tag unique to this run, so engagements and file hashes never collide with earlier runs. */
-export const runTag = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+/**
+ * Digits unique to one test run, so engagements and file hashes collide
+ * neither with earlier runs nor with tests running in parallel.
+ */
+export const runTag = () => `${Date.now()}${String(Math.floor(Math.random() * 1e9)).padStart(9, '0')}`;
 
 /** A fixture made unique for this run, so its file hash has never been uploaded before. */
 export function uniquePdf(name: string, tag: string): Buffer {
@@ -25,7 +28,7 @@ export async function signIn(page: Page, user: { email: string; password: string
 export async function createEngagement(page: Page, tag: string) {
   await page.getByTestId('new-engagement').click();
   await page.getByRole('textbox', { name: 'Client name' }).fill('Example Manufacturing AD');
-  await page.getByRole('textbox', { name: 'Registration number' }).fill(`E2E${tag.replace(/\D/g, '').slice(0, 12)}`);
+  await page.getByRole('textbox', { name: 'Registration number' }).fill(`E2E${tag}`);
   await page.getByRole('textbox', { name: 'Engagement reference' }).fill(`E2E-${tag}`);
   await page.locator('input[name=periodEnd]').fill('2025-12-31');
   await page.getByRole('button', { name: 'Create engagement' }).click();

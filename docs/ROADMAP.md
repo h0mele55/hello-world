@@ -777,8 +777,9 @@ privacy, resilience and accessibility tests, the CSP and the rate limit (#48,
 - **CSP by nonce, in `src/proxy.ts`**, on `/verify` and `/r/*` only: Next.js's
   own inline scripts carry the per-request nonce, so no script runs without
   it; `connect-src` is the origin and the two endpoints. Inline styles stay
-  allowed for the UI kit's positioned popovers. The signed-in app has no CSP
-  yet (#84).
+  allowed for the UI kit's positioned popovers. Since #84 every other page
+  carries one too, with `connect-src 'self'`; an end-to-end test walks every
+  page and checks that each script carries its response's nonce.
 - **Rate limit**: the lookup page, which reads the chain on the server, takes
   60 requests a minute per client address and 600 in all; the per-address
   limit needs `TRUST_PROXY_HEADERS=1`, the total holds regardless. `/verify`

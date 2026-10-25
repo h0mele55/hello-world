@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { verifierCsp } from '@/lib/csp';
+import { appCsp, verifierCsp } from '@/lib/csp';
 import { clientAddressOf, createLimiter, LOOKUP_PER_ADDRESS, LOOKUP_TOTAL, takeLookup } from '@/lib/rate-limit';
 
 describe('the lookup rate limit', () => {
@@ -43,6 +43,23 @@ describe("the verifier's Content Security Policy", () => {
     expect(directive('connect-src')).toBe("connect-src 'self' https://rpc.one.example https://rpc.two.example");
     expect(directive('worker-src')).toBe("worker-src 'self' blob:");
     expect(directive('object-src')).toBe("object-src 'none'");
+    expect(directive('frame-ancestors')).toBe("frame-ancestors 'none'");
+  });
+});
+
+describe("the signed-in app's Content Security Policy (#84)", () => {
+  const csp = appCsp({ nonce: 'def456' });
+  const directive = (name: string) => csp.split('; ').find((d) => d.startsWith(`${name} `));
+
+  it('runs scripts only by nonce, connects to its own origin only, and is framed by nothing', () => {
+    expect(directive('script-src')).toBe("script-src 'self' 'nonce-def456' 'strict-dynamic'");
+    expect(csp).not.toContain('unsafe-eval');
+    expect(appCsp({ nonce: 'x', dev: true })).toContain("'unsafe-eval'");
+    expect(directive('connect-src')).toBe("connect-src 'self'");
+    expect(directive('worker-src')).toBe("worker-src 'self'");
+    expect(directive('img-src')).toBe("img-src 'self' data: blob:");
+    expect(directive('object-src')).toBe("object-src 'none'");
+    expect(directive('form-action')).toBe("form-action 'self'");
     expect(directive('frame-ancestors')).toBe("frame-ancestors 'none'");
   });
 });

@@ -25,6 +25,8 @@ interface CorpusEntry {
   opinionType: OpinionType | null;
   /** The first words of the opinion paragraph, as a person read them. */
   opinionStartsWith?: string;
+  /** How many independent auditor's reports the PDF holds. */
+  reportsInFile: number;
 }
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -35,6 +37,8 @@ async function main() {
   let found = 0;
   let digital = 0;
   let wrong = 0;
+  let singleFound = 0;
+  let singleDigital = 0;
   const rows: string[] = [];
   for (const entry of entries) {
     const file = path.join(CACHE, `${entry.id}.pdf`);
@@ -52,6 +56,7 @@ async function main() {
       continue;
     }
     digital++;
+    if (entry.reportsInFile === 1) singleDigital++;
     const located = locateOpinion(dropRunningLines(parsed.pdf.pages.map((p) => p.lines.map((l) => l.text))));
     if (located.status === 'NOT_FOUND') {
       rows.push(`${entry.id.padEnd(28)} miss    ${located.reason}`);
@@ -64,11 +69,13 @@ async function main() {
       continue;
     }
     found++;
+    if (entry.reportsInFile === 1) singleFound++;
     rows.push(`${entry.id.padEnd(28)} found   ${located.type} pages ${located.pageRange.join('-')}`);
   }
   console.log(rows.join('\n'));
-  const rate = digital === 0 ? 0 : (100 * found) / digital;
-  console.log(`\nFound ${found} of ${digital} digital reports (${rate.toFixed(1)}%); wrong: ${wrong}. Gate: at least 90% and none wrong.`);
+  const pct = (n: number, of: number) => (of === 0 ? '0.0' : ((100 * n) / of).toFixed(1));
+  console.log(`\nFound ${found} of ${digital} digital reports (${pct(found, digital)}%); wrong: ${wrong}. Gate: at least 90% and none wrong.`);
+  console.log(`PDFs holding one auditor's report: found ${singleFound} of ${singleDigital} (${pct(singleFound, singleDigital)}%).`);
   if (wrong > 0) process.exitCode = 1;
 }
 

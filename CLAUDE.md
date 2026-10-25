@@ -23,9 +23,9 @@ Sepolia run waits on #4. Phase 4 (the shared verification code, `/verify`,
 `/r/<familyId>/latest`, the single-file verifier and CLI, the tamper suite,
 CSP and rate limits) is done on Anvil, which completes the prototype; its
 Sepolia run waits on #4 too. Phase 5, the issuer console, is under way: roles,
-two-step sign-in and rate limits (5a) and the client list, version timeline
-and dashboard (5b) are done; revocation, recipients, the audit-log viewer and
-backups (5c) are next.
+two-step sign-in and rate limits (5a), the client list, version timeline
+and dashboard (5b), and revocation (5c) are done; recipients, the audit-log
+viewer and backups (5d) are next.
 
 ## Rules every phase keeps
 
@@ -210,10 +210,21 @@ to one inflect-compliance commit.
 - **A row holds its nonce only while its transaction may land or once its own
   transaction used it**; otherwise clear the nonce. A partial unique index
   allows one row per (chain, issuer, nonce).
-- **Do not add a path to APPROVED, ANCHORED or FINAL** other than
-  `approveVersion` and the worker's transitions. CHECK constraints hold
-  four-eyes and "approved means an approver is recorded"; a partial unique
-  index allows one live write per version and kind.
+- **Do not add a path to APPROVED, ANCHORED, REVOKED or FINAL** other than
+  `approveVersion`, `approveRevocation` and the worker's transitions. CHECK
+  constraints hold four-eyes and "approved means an approver is recorded"; a
+  partial unique index allows one live write per version and kind.
+- **Revocation** (`src/lib/anchoring/revocation.ts`): an ADMIN asks, typing
+  the engagement's reference, with a reason and a sealed note; an APPROVER who
+  is someone else approves, which writes the REVOKE row in the same
+  transaction. The worker revokes the original's record with the reason's
+  number (`REVOCATION_CODES`, fixed: verifiers read them from records already
+  on chain) and the version is REVOKED only once that block is final. A
+  failed or simulated REVOKE returns the request for approval; a record
+  already revoked with the same reason is linked, never revoked twice, and
+  one revoked with another reason is a named refusal for a person. Revoking
+  the original is enough: the verifier calls a copy revoked when its original
+  is.
 - **The audit log is append-only**: write through `appendAuditEvent` inside
   the transaction that makes the change, with ids, hashes and codes only.
   `verifyAuditChain` re-derives every hash.
@@ -290,8 +301,9 @@ to one inflect-compliance commit.
   sign-in 10 attempts a minute per address, lockout after 5 failures per email
   or 10 per address in 15 minutes; writes 60 a minute per user (429 with
   `Retry-After`). The address is read only with `TRUST_PROXY_HEADERS=1`.
-- **E2E**: the seeded approver has two-step sign-in on with
-  `SEED_APPROVER_TOTP_SECRET`, and `tests/e2e/helpers.ts` computes its codes;
+- **E2E**: the seeded approver and admin have two-step sign-in on with
+  `SEED_APPROVER_TOTP_SECRET` and `SEED_ADMIN_TOTP_SECRET`, and
+  `tests/e2e/helpers.ts` computes their codes;
   sign-ins use their own client address (`fromOwnAddress`), since the per-address
   limit is real.
 

@@ -913,6 +913,36 @@ decisions it left open:
   made with the verifier run in the visitor's browser (rule 5) and are not
   seen, so they are not counted.
 
+5c is revocation (#55):
+
+- **An admin asks, an approver approves.** The request carries a reason, a
+  note (sealed, never on chain) and the engagement's reference typed out; the
+  server checks the reference too. The approver is never the admin who asked:
+  the roles differ, the use case checks it, and a CHECK in the database holds
+  it. An approver can reject a request and the admin who made it can take it
+  back; one request per version is open at a time (a partial unique index).
+- **The typed confirmation sits in the form, not in the dialog.** The vendored
+  ConfirmDialog renders its description inside a paragraph, which cannot hold
+  inputs; the form's button stays disabled until the reference matches, and
+  the ConfirmDialog then asks once more.
+- **Reason codes** are fixed as the prompt gives them: WITHDRAWN 1,
+  ISSUED_IN_ERROR 2, SUPERSEDED_AND_WITHDRAWN 3, OTHER 9.
+- **The worker revokes the original's record**, through the journal like any
+  write, and the version and the request are REVOKED only once that block is
+  final. Revoking the original is enough: the verifier already reports a copy
+  as revoked when its original is. A dry run simulates and returns the
+  request for approval, as a dry-run anchor returns its version. A record
+  already revoked with the same reason is linked and nothing is sent; one
+  revoked with another reason is refused by name (`REVOKED_WITH_OTHER_REASON`).
+- **A revocation waits for a stamped copy in flight** (`COPY_IN_FLIGHT`), so
+  the copy's own checks never meet a revoked original halfway.
+- **A version revoked after it was complete keeps its stamped PDF or
+  certificate** for the firm's records; the timeline marks it revoked and any
+  copy of it verifies as REVOKED.
+- **The seed can turn the admin's two-step sign-in on too**
+  (`SEED_ADMIN_TOTP_SECRET`, development and CI only), so the end-to-end test
+  runs the whole flow with two people.
+
 **Prompt**
 
 ```text
@@ -1011,7 +1041,7 @@ Finish: all suites green; commit on a branch, push, open a PR to master; list ev
 - [x] **What "the same report" means.** Decided 2026-10-25: the family key adds the firm's engagement id, so standalone and consolidated reports for one year are two families ([#6](https://github.com/h0mele55/hello-world/issues/6)). (Phase 2)
 - [x] **Issuers.** Decided 2026-10-25: one audit firm for the prototype; the contract still keys families by organisation, so a second firm needs no new contract ([#5](https://github.com/h0mele55/hello-world/issues/5)). (Phase 1)
 - [x] **Languages.** Decided 2026-10-25: English and Bulgarian ([#7](https://github.com/h0mele55/hello-world/issues/7)). (Phases 2 and 4)
-- [ ] **Recipient access.** May recipients download the latest PDF, or only see its details and ask the auditor for it? (Phase 5)
+- [x] **Recipient access.** Decided 2026-10-25: details only. A recipient's link shows the latest version's number, date, block, transaction and status, and they ask the auditor for the PDF; there are no recipient accounts ([#8](https://github.com/h0mele55/hello-world/issues/8)). (Phase 5)
 
 ## Sources
 

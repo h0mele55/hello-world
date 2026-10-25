@@ -59,6 +59,11 @@ export async function VersionTimeline({ versions }: { versions: TimelineVersion[
               {v.anchorOnly ? <StatusBadge variant="info">{t('anchorOnly')}</StatusBadge> : null}
               {index === latestOnChain ? <StatusBadge variant="success" data-testid="timeline-latest">{t('latest')}</StatusBadge> : null}
             </div>
+            {v.revokedAt ? (
+              <p className="text-content-error" data-testid="timeline-revoked">
+                {t('revokedOn', { when: when(v.revokedAt) })}
+              </p>
+            ) : null}
             <dl className="grid gap-compact sm:grid-cols-2">
               <div className="flex flex-col gap-tight">
                 <dt className="text-sm text-content-muted">{t('prepared')}</dt>
@@ -92,7 +97,7 @@ export async function VersionTimeline({ versions }: { versions: TimelineVersion[
                 </div>
               )}
             </dl>
-            {v.status === 'COMPLETE' ? (
+            {v.status === 'COMPLETE' || (v.status === 'REVOKED' && v.completedAt) ? (
               <div>
                 <a
                   className={buttonVariants({ variant: 'secondary', size: 'sm' })}

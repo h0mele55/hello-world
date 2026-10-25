@@ -42,6 +42,8 @@ enum VersionStatus {
   ANCHORED
   /// The stamped copy's anchor is final too (Phase 3b).
   COMPLETE
+  /// Withdrawn: the original's record is revoked on chain, in a final block.
+  REVOKED
 }
 
 /// Inflect's write ladder, one rung at a time.
@@ -70,6 +72,28 @@ enum ChainWriteStatus {
   INDETERMINATE
 }
 
+/// Why a version is withdrawn. On chain it is a number (REVOCATION_CODES in
+/// src/lib/revocation/reasons.ts): 1, 2, 3 and 9.
+enum RevocationReason {
+  WITHDRAWN
+  ISSUED_IN_ERROR
+  SUPERSEDED_AND_WITHDRAWN
+  OTHER
+}
+
+enum RevocationStatus {
+  /// An admin asked for it; it waits for an approver who is someone else.
+  REQUESTED
+  /// Approved: its REVOKE write is in the journal.
+  APPROVED
+  /// The revocation is on chain, in a final block.
+  REVOKED
+  /// An approver turned it down.
+  REJECTED
+  /// The admin who asked took it back before it was approved.
+  WITHDRAWN
+}
+
 enum ReasonCode {
   INITIAL
   CORRECTION
@@ -91,18 +115,21 @@ model IssuerOrg {
 }
 
 model User {
-  id           String          @id @default(cuid())
-  orgId        String
-  org          IssuerOrg       @relation(fields: [orgId], references: [id])
-  email        String          @unique
-  name         String
-  passwordHash String
-  role         Role
-  createdAt    DateTime        @default(now())
-  engagements  Engagement[]
-  prepared     ReportVersion[] @relation("preparedBy")
-  confirmed    ReportVersion[] @relation("confirmedBy")
-  approved     ReportVersion[] @relation("approvedBy")
+  id                   String          @id @default(cuid())
+  orgId                String
+  org                  IssuerOrg       @relation(fields: [orgId], references: [id])
+  email                String          @unique
+  name                 String
+  passwordHash         String
+  role                 Role
+  createdAt            DateTime        @default(now())
+  engagements          Engagement[]
+  prepared             ReportVersion[] @relation("preparedBy")
+  confirmed            ReportVersion[] @relation("confirmedBy")
+  approved             ReportVersion[] @relation("approvedBy")
+  revocationsRequested Revocation[]    @relation("revocationRequestedBy")
+  revocationsApproved  Revocation[]    @relation("revocationApprovedBy")
+  revocationsClosed    Revocation[]    @relation("revocationClosedBy")
 
   /// The TOTP secret, sealed (context `User:<id>:totpSecret`); null until set up.
   totpSecret        Bytes?
@@ -219,7 +246,10 @@ model ReportVersion {
   certificateStoredFileId String?       @unique
   certificateStoredFile   StoredFile?   @relation("certificateFile", fields: [certificateStoredFileId], references: [id], onDelete: Restrict)
   completedAt             DateTime?
+  /// Set with REVOKED, when the revocation's block is final.
+  revokedAt               DateTime?
   chainWrites             ChainWrite[]
+  revocations             Revocation[]
   createdAt               DateTime      @default(now())
 
   @@unique([engagementId, version])
@@ -330,4 +360,34 @@ model LookupCount {
   count Int
 
   @@id([orgId, day])
+}
+
+/// A request to withdraw an anchored version (CLAUDE.md rule 6): an admin asks,
+/// with a reason and a note, and an approver who is someone else approves,
+/// which writes a REVOKE row to the journal in the same transaction.
+model Revocation {
+  id              String           @id @default(cuid())
+  reportVersionId String
+  reportVersion   ReportVersion    @relation(fields: [reportVersionId], references: [id])
+  reason          RevocationReason
+  /// Sealed (context `Revocation:<id>:note`): why, in the firm's words. Never on chain.
+  note            Bytes
+  status          RevocationStatus @default(REQUESTED)
+  requestedById   String
+  requestedBy     User             @relation("revocationRequestedBy", fields: [requestedById], references: [id])
+  requestedAt     DateTime         @default(now())
+  /// Never the requester: a CHECK in the migration enforces it.
+  approvedById    String?
+  approvedBy      User?            @relation("revocationApprovedBy", fields: [approvedById], references: [id])
+  approvedAt      DateTime?
+  /// Who rejected or withdrew it, and when.
+  closedById      String?
+  closedBy        User?            @relation("revocationClosedBy", fields: [closedById], references: [id])
+  closedAt        DateTime?
+  revokedAt       DateTime?
+
+  @@index([reportVersionId])
+  @@index([requestedById])
+  @@index([approvedById])
+  @@index([closedById])
 }

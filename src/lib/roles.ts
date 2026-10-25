@@ -10,8 +10,10 @@ export const ROLES = ['ADMIN', 'PREPARER', 'APPROVER', 'VIEWER'] as const satisf
 export const CAN = {
   /** Create an engagement, upload a version, confirm its opinion, discard a draft. */
   prepare: ['PREPARER'],
-  /** Approve an anchor (four-eyes, rule 6) and queue a failed copy again. */
+  /** Approve an anchor or a revocation (four-eyes, rule 6), reject a revocation, and queue a failed copy again. */
   approve: ['APPROVER'],
+  /** Ask for an anchored version to be revoked, or take that request back. */
+  requestRevocation: ['ADMIN'],
   /** Move the firm's chain write mode. */
   setChainMode: ['APPROVER', 'ADMIN'],
   /** Set up a second factor: the roles that must sign in with one. */

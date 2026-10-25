@@ -61,6 +61,8 @@ export async function AnchoringPanel({ user, versionId, status }: { user: Sessio
     return t.has(key) ? `${t(key)}${detail ? ` (${detail})` : ''}` : null;
   }
   const copyWrites = anchoring.writes.filter((w) => w.kind === 'ANCHOR_COPY');
+  // A version revoked after it was complete keeps its copy or certificate, for the firm's records.
+  const distributable = status === 'COMPLETE' || (status === 'REVOKED' && (anchoring.anchorOnly ? anchoring.hasCertificate : anchoring.copyRecordId !== null));
   const copyNeedsRetry = status === 'ANCHORED' && !anchoring.anchorOnly && copyWrites.length > 0 && copyWrites.every((w) => w.status === 'FAILED');
 
   return (
@@ -68,9 +70,9 @@ export async function AnchoringPanel({ user, versionId, status }: { user: Sessio
       <Heading level={2}>{t('title')}</Heading>
       <p className="text-content-muted">{t('prototypeEvidence')}</p>
 
-      {status === 'COMPLETE' ? (
+      {distributable ? (
         <div className="flex flex-col gap-default" data-testid="complete">
-          <p className="text-content-success">{anchoring.anchorOnly ? t('completeCertificate') : t('completeCopy')}</p>
+          {status === 'COMPLETE' ? <p className="text-content-success">{anchoring.anchorOnly ? t('completeCertificate') : t('completeCopy')}</p> : null}
           <div>
             <a
               className={buttonVariants({ variant: 'primary' })}
@@ -91,7 +93,7 @@ export async function AnchoringPanel({ user, versionId, status }: { user: Sessio
       ) : null}
       {copyNeedsRetry && mayDo(user.role, 'approve') ? <RetryCopyButton versionId={versionId} /> : null}
 
-      {(status === 'ANCHORED' || status === 'COMPLETE') && anchoring.recordId ? (
+      {(status === 'ANCHORED' || status === 'COMPLETE' || status === 'REVOKED') && anchoring.recordId ? (
         <div className="flex flex-col gap-default" data-testid="anchored">
           <p className="text-content-success">{t('anchored', { block: anchoring.anchorBlock ?? '' })}</p>
           <Value label={t('recordId')} value={anchoring.recordId} testId="anchor-record-id" />

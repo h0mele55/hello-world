@@ -24,6 +24,7 @@ import { docHashOf } from '@/lib/commitments';
 import { explorerTxUrl, networkNameOf } from '@/lib/chain/explorer';
 import type { FileStore } from '@/lib/file-store';
 import { NORMALISER_VERSION } from '@/lib/opinion/normalise';
+import { REVOCATION_CODES } from '@/lib/revocation-reasons';
 import { checkStampedCopy, stampPdf, StampError } from '@/lib/stamp';
 import { STAMP_VERSION, type StampFields } from '@/lib/stamp-fields';
 import { anyKnown, firstReceipt, hashesOfWrite, issuerLockArgs, receiptOf } from './chain-reads';
@@ -63,6 +64,12 @@ import { classifySendError, type SendOutcome } from './send';
  * it as the original's DISTRIBUTION_COPY; when that is FINAL the version is
  * COMPLETE. An anchor-only version (signed or edit-protected, never rewritten)
  * gets a verification certificate instead, after its ANCHOR is FINAL.
+ *
+ * REVOKE withdraws a version's original record, with the reason of the
+ * revocation an approver approved (src/lib/anchoring/revocation.ts). When it
+ * is FINAL, and the record reads revoked with that reason, the version and
+ * the revocation are REVOKED. A failed or simulated REVOKE returns the
+ * revocation for approval, as a failed ANCHOR returns its version.
  */
 
 export interface WorkerOptions {
@@ -140,6 +147,8 @@ const writeInclude = {
     include: {
       storedFile: true,
       engagement: { include: { client: { include: { org: { select: { chainWriteMode: true } } } } } },
+      // The approved revocation a REVOKE write carries out: its reason is what goes on chain.
+      revocations: { where: { status: 'APPROVED' }, select: { id: true, reason: true }, take: 1 },
     },
   },
 } satisfies Prisma.ChainWriteInclude;
@@ -291,7 +300,11 @@ type VersionEffect =
   /** The original is final; queue its distribution copy unless it is anchor-only. */
   | { kind: 'ANCHORED'; recordId: string; txHash: string | null; blockNumber: bigint }
   /** The distribution copy is final. */
-  | { kind: 'COMPLETE'; recordId: string; txHash: string | null; blockNumber: bigint };
+  | { kind: 'COMPLETE'; recordId: string; txHash: string | null; blockNumber: bigint }
+  /** The approval was for this REVOKE; a new attempt needs a new approval. */
+  | { kind: 'REVERT_REVOCATION' }
+  /** The revocation is final. */
+  | { kind: 'REVOKED' };
 
 interface Effects {
   version?: VersionEffect;
@@ -333,6 +346,14 @@ async function transition(
         data: { status: 'COMPLETE', copyRecordId: effect.recordId, copyTxHash: effect.txHash, copyBlock: effect.blockNumber, completedAt: ctx.now() },
       });
       if (completed.count !== 1) throw new ChainError('VERSION_NOT_ANCHORED', `version ${version.id} is not ANCHORED with a copy`);
+    } else if (effect?.kind === 'REVERT_REVOCATION') {
+      await tx.revocation.updateMany({ where: { reportVersionId: version.id, status: 'APPROVED' }, data: { status: 'REQUESTED', approvedById: null, approvedAt: null } });
+    } else if (effect?.kind === 'REVOKED') {
+      const revokedAt = ctx.now();
+      const revoked = await tx.reportVersion.updateMany({ where: { id: version.id, status: { in: ['ANCHORED', 'COMPLETE'] } }, data: { status: 'REVOKED', revokedAt } });
+      if (revoked.count !== 1) throw new ChainError('VERSION_NOT_ANCHORED', `version ${version.id} is not ANCHORED or COMPLETE`);
+      const closed = await tx.revocation.updateMany({ where: { reportVersionId: version.id, status: 'APPROVED' }, data: { status: 'REVOKED', revokedAt } });
+      if (closed.count !== 1) throw new ChainError('REVOCATION_NOT_APPROVED', `version ${version.id} has no approved revocation`);
     }
     if (effects.audit) {
       await appendAuditEvent(
@@ -360,10 +381,17 @@ async function release(ctx: Context, write: Write, data: Prisma.ChainWriteUpdate
   return { writeId: write.id, from: write.status, to: write.status, note };
 }
 
-/** A failed ANCHOR returns the version for a new approval; a failed ANCHOR_COPY leaves it ANCHORED, to retry. */
+/** What a write that will not happen undoes: the approval it was made under. A copy needs none, so it waits to be queued again. */
+function revertApproval(write: Write): VersionEffect | undefined {
+  if (write.kind === 'ANCHOR') return { kind: 'REVERT_TO_CONFIRMED' };
+  if (write.kind === 'REVOKE') return { kind: 'REVERT_REVOCATION' };
+  return undefined;
+}
+
+/** A failed ANCHOR or REVOKE returns its approval; a failed ANCHOR_COPY leaves the version ANCHORED, to retry. */
 function fail(ctx: Context, write: Write, reason: string, data: Prisma.ChainWriteUpdateManyMutationInput = {}) {
   return transition(ctx, write, 'FAILED', { ...data, error: reason }, {
-    version: write.kind === 'ANCHOR' ? { kind: 'REVERT_TO_CONFIRMED' } : undefined,
+    version: revertApproval(write),
     audit: { action: 'anchor.failed', data: { reason, txHash: (data.txHash as string | undefined) ?? write.txHash } },
   }, reason);
 }
@@ -377,14 +405,17 @@ function indeterminate(ctx: Context, write: Write, reason: string, data: Prisma.
 
 function simulated(ctx: Context, write: Write, outcome: string | null) {
   return transition(ctx, write, 'SIMULATED', { error: outcome }, {
-    version: { kind: 'REVERT_TO_CONFIRMED' },
+    version: revertApproval(write),
     audit: { action: 'anchor.simulated', data: { outcome: outcome ?? 'WOULD_SUCCEED' } },
   }, outcome ?? 'would succeed');
 }
 
 function finalize(ctx: Context, write: Write, final: { txHash: string | null; blockNumber: bigint; recordId: string; linked: boolean; data?: Prisma.ChainWriteUpdateManyMutationInput }) {
   return transition(ctx, write, 'FINAL', { ...final.data, txHash: final.txHash, blockNumber: final.blockNumber, recordId: final.recordId, error: null }, {
-    version: { kind: write.kind === 'ANCHOR' ? 'ANCHORED' : 'COMPLETE', recordId: final.recordId, txHash: final.txHash, blockNumber: final.blockNumber },
+    version:
+      write.kind === 'REVOKE'
+        ? { kind: 'REVOKED' }
+        : { kind: write.kind === 'ANCHOR' ? 'ANCHORED' : 'COMPLETE', recordId: final.recordId, txHash: final.txHash, blockNumber: final.blockNumber },
     audit: { action: final.linked ? 'anchor.linked' : 'anchor.final', data: { recordId: final.recordId, txHash: final.txHash, blockNumber: Number(final.blockNumber) } },
   });
 }
@@ -394,7 +425,13 @@ function finalize(ctx: Context, write: Write, final: { txHash: string | null; bl
 /** The document a write anchors: the original, or its stamped copy. */
 const docOf = (write: Write) => (write.kind === 'ANCHOR' ? write.reportVersion.docHash : write.reportVersion.copyDocHash) as Hex | null;
 
-/** The registry call a built write makes. Needs `parentId` (ANCHOR) or the copy's hash (ANCHOR_COPY). */
+/** The reason code a REVOKE write sends: its approved revocation's. */
+function revocationCodeOf(write: Write): number | null {
+  const revocation = write.reportVersion.revocations[0];
+  return revocation ? REVOCATION_CODES[revocation.reason] : null;
+}
+
+/** The registry call a built write makes. Needs `parentId` (ANCHOR), the copy's hash (ANCHOR_COPY) or an approved revocation (REVOKE). */
 function callOf(write: Write) {
   const version = write.reportVersion;
   if (write.kind === 'ANCHOR') {
@@ -411,6 +448,11 @@ function callOf(write: Write) {
     } as const;
   }
   if (write.kind === 'ANCHOR_COPY') return { functionName: 'anchorDistributionCopy', args: [version.recordId as Hex, version.copyDocHash as Hex] } as const;
+  if (write.kind === 'REVOKE') {
+    const code = revocationCodeOf(write);
+    if (code === null) throw new ChainError('REVOCATION_NOT_APPROVED', `write ${write.id} has no approved revocation`);
+    return { functionName: 'revoke', args: [write.recordId as Hex, code] } as const;
+  }
   throw new ChainError('KIND_UNSUPPORTED', `the worker does not send ${write.kind} writes`);
 }
 
@@ -433,6 +475,7 @@ async function startWrite(ctx: Context, write: Write): Promise<StepReport> {
   if (orgMode === 'DISABLED' || rungOf(orgMode) < rungOf(write.mode)) return fail(ctx, write, 'MODE_NARROWED');
   if (write.kind === 'ANCHOR') return startAnchor(ctx, write);
   if (write.kind === 'ANCHOR_COPY') return startCopy(ctx, write);
+  if (write.kind === 'REVOKE') return startRevoke(ctx, write);
   return fail(ctx, write, 'KIND_UNSUPPORTED');
 }
 
@@ -521,6 +564,77 @@ async function startCopy(ctx: Context, write: Write): Promise<StepReport> {
     throw named;
   }
   return signAndSend(ctx, current);
+}
+
+/**
+ * REVOKE: withdraw the version's original record with the approved reason.
+ * The record must be this version's original and final. One already revoked
+ * with the same reason is linked, never revoked again; one revoked with
+ * another reason is a refusal for a person.
+ */
+async function startRevoke(ctx: Context, write: Write): Promise<StepReport> {
+  const version = write.reportVersion;
+  const live = write.mode === 'LIVE';
+  if (revocationCodeOf(write) === null) return fail(ctx, write, 'REVOCATION_NOT_APPROVED');
+  if ((version.status !== 'ANCHORED' && version.status !== 'COMPLETE') || !version.recordId || version.anchorBlock === null) return fail(ctx, write, 'VERSION_NOT_ANCHORED');
+  if (live && (await issuerBlocked(ctx))) return release(ctx, write, { error: 'ISSUER_BLOCKED' }, 'waiting: an INDETERMINATE write must be settled first');
+
+  const [record, finalized] = await Promise.all([ctx.reader.getRecord(version.recordId as Hex), ctx.publicClient.getBlock({ blockTag: 'finalized' })]);
+  const isOriginal =
+    record !== null && record.kind === 'ORIGINAL' && record.docHash === version.docHash && BigInt(record.blockNumber) === version.anchorBlock && finalized.number >= version.anchorBlock;
+  if (!isOriginal) return live ? fail(ctx, write, 'ORIGINAL_RECORD_MISMATCH') : simulated(ctx, write, 'ORIGINAL_RECORD_MISMATCH');
+  if (record.revoked) return live ? linkRevocation(ctx, write, record) : simulated(ctx, write, 'AlreadyRevoked');
+
+  const built = await ctx.prisma.chainWrite.updateMany({ where: { id: write.id, status: 'INTENT', txHash: null }, data: { recordId: version.recordId, parentId: null, error: null } });
+  if (built.count !== 1) return { writeId: write.id, from: 'INTENT', to: 'INTENT', note: 'changed by another writer; left alone' };
+  const current: Write = { ...write, recordId: version.recordId, parentId: null, error: null };
+  await ctx.faults.afterBuild?.(write.id);
+
+  try {
+    await ctx.publicClient.simulateContract(contractCall(ctx, callOf(current)));
+  } catch (error) {
+    const named = toRegistryError(error);
+    if (named instanceof RegistryRevertError) return live ? fail(ctx, current, named.errorName) : simulated(ctx, current, named.errorName);
+    throw named;
+  }
+  if (!live) return simulated(ctx, current, null);
+  return signAndSend(ctx, current);
+}
+
+/** Whether a record reads as this REVOKE made it: the version's original, revoked with the approved reason. */
+function revocationLanded(record: RegistryRecord | null, write: Write): boolean {
+  const version = write.reportVersion;
+  return (
+    record !== null &&
+    record.recordId === write.recordId &&
+    record.kind === 'ORIGINAL' &&
+    record.docHash === version.docHash &&
+    record.familyId === version.engagement.familyId &&
+    record.revoked &&
+    record.revokeReason === revocationCodeOf(write)
+  );
+}
+
+/** The final transaction that revoked a record, found by its Revoked event; null until one is final. */
+async function revokingTxOf(ctx: Context, record: RegistryRecord): Promise<{ txHash: Hash; blockNumber: bigint } | null> {
+  const events = await ctx.publicClient.getContractEvents({
+    address: ctx.registry,
+    abi: registryAbi,
+    eventName: 'Revoked',
+    args: { recordId: record.recordId },
+    fromBlock: BigInt(record.blockNumber),
+    toBlock: 'finalized',
+  });
+  const event = events.at(-1);
+  return event?.transactionHash && event.blockNumber !== null ? { txHash: event.transactionHash, blockNumber: event.blockNumber } : null;
+}
+
+/** The record is already revoked: settle on that, sending nothing, once its revocation is final. */
+async function linkRevocation(ctx: Context, write: Write, record: RegistryRecord): Promise<StepReport> {
+  if (!revocationLanded(record, write)) return fail(ctx, write, 'REVOKED_WITH_OTHER_REASON');
+  const revoking = await revokingTxOf(ctx, record);
+  if (!revoking) return release(ctx, write, { recordId: record.recordId }, 'already revoked on chain; waiting for finality');
+  return finalize(ctx, write, { txHash: revoking.txHash, blockNumber: revoking.blockNumber, recordId: record.recordId, linked: true, data: { nonce: null } });
 }
 
 const hexOf = (bytes: Uint8Array) => `0x${Buffer.from(bytes).toString('hex')}` as Hex;
@@ -822,13 +936,15 @@ async function trackBroadcast(ctx: Context, write: Write): Promise<StepReport> {
   if (!again || again.blockHash !== receipt.blockHash) return release(ctx, write, {}, 'block changed; checking again next pass');
 
   const record = write.recordId ? await ctx.reader.getRecord(write.recordId as Hex) : null;
-  if (!recordMatches(record, write, ctx.issuer, receipt.blockNumber)) return indeterminate(ctx, write, 'RECORD_MISMATCH', settled);
+  const landedAsSent = write.kind === 'REVOKE' ? revocationLanded(record, write) : recordMatches(record, write, ctx.issuer, receipt.blockNumber);
+  if (!landedAsSent) return indeterminate(ctx, write, 'RECORD_MISMATCH', settled);
   return finalize(ctx, write, { txHash: landed, blockNumber: receipt.blockNumber, recordId: write.recordId!, linked: false, data: { replacedTxHashes: settled.replacedTxHashes } });
 }
 
 /** The same call at the same nonce with both fee caps raised: only one of the two can ever be mined. */
 async function replace(ctx: Context, write: Write): Promise<StepReport> {
-  if (write.nonce === null || !write.txHash || !write.parentId || !write.gasLimit || !write.maxFeePerGas || !write.maxPriorityFeePerGas) {
+  const built = write.kind === 'REVOKE' ? write.recordId !== null : write.parentId !== null;
+  if (write.nonce === null || !write.txHash || !built || !write.gasLimit || !write.maxFeePerGas || !write.maxPriorityFeePerGas) {
     return indeterminate(ctx, write, 'CANNOT_REPLACE');
   }
   const fees = await ctx.publicClient.estimateFeesPerGas();
@@ -898,6 +1014,15 @@ async function reconcile(ctx: Context, write: Write): Promise<StepReport> {
   }
   if (finalizedNonce > write.nonce) {
     // Another transaction used this nonce, so ours can never be mined.
+    if (write.kind === 'REVOKE') {
+      const record = write.recordId ? await ctx.reader.getRecord(write.recordId as Hex) : null;
+      if (record && revocationLanded(record, write)) {
+        const revoking = await revokingTxOf(ctx, record);
+        if (!revoking) return release(ctx, write, {}, 'revoked on chain; waiting for finality');
+        return finalize(ctx, write, { txHash: revoking.txHash, blockNumber: revoking.blockNumber, recordId: record.recordId, linked: true, data: { nonce: null } });
+      }
+      return fail(ctx, write, 'NONCE_CONSUMED', { nonce: null });
+    }
     const doc = docOf(write);
     const record = doc ? await ctx.reader.findByDocHash(doc) : null;
     if (record && recordIsThisVersion(record, write)) {

@@ -8,10 +8,11 @@
  *   SEED_ADMIN_EMAIL           SEED_ADMIN_PASSWORD      optional
  *   SEED_VIEWER_EMAIL          SEED_VIEWER_PASSWORD     optional
  *
- * For development and CI only, SEED_APPROVER_TOTP_SECRET (base32) turns the
- * approver's two-step sign-in on with that secret, so tests can compute its
- * codes; it needs FILE_ENCRYPTION_KEY to seal the secret as the app does.
- * Without it, the approver sets two-step sign-in up at first sign-in.
+ * For development and CI only, SEED_APPROVER_TOTP_SECRET and
+ * SEED_ADMIN_TOTP_SECRET (base32) turn that user's two-step sign-in on with the
+ * secret, so tests can compute their codes; they need FILE_ENCRYPTION_KEY to
+ * seal the secret as the app does. Without one, the user sets two-step
+ * sign-in up at first sign-in.
  *
  * Re-running updates names, roles and passwords in place.
  */
@@ -63,9 +64,10 @@ async function main() {
         update: { name: user.name, role: user.role, passwordHash, orgId: org.id },
       });
       console.log(`seeded ${user.role.toLowerCase()} ${email}`);
-      const totp = user.role === 'APPROVER' ? process.env.SEED_APPROVER_TOTP_SECRET : undefined;
+      const totpName = `SEED_${user.role}_TOTP_SECRET`;
+      const totp = user.role === 'APPROVER' || user.role === 'ADMIN' ? process.env[totpName] : undefined;
       if (totp) {
-        if (!/^[A-Z2-7]{16,}$/.test(totp)) throw new Error('SEED_APPROVER_TOTP_SECRET must be base32, at least 16 characters');
+        if (!/^[A-Z2-7]{16,}$/.test(totp)) throw new Error(`${totpName} must be base32, at least 16 characters`);
         await prisma.user.update({
           where: { id: seeded.id },
           data: { totpSecret: seal(sealingKey(), new TextEncoder().encode(totp), totpSecretContext(seeded.id)), totpEnabledAt: new Date(), totpLastStep: null, totpPendingSecret: null },

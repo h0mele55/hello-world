@@ -9,6 +9,7 @@ import { requireUser } from '@/lib/page-auth';
 import { AnchoringPanel } from '@/components/reports/anchoring-panel';
 import { ConfirmOpinionForm } from '@/components/reports/confirm-opinion-form';
 import { PdfViewer } from '@/components/reports/pdf-viewer';
+import { RevocationPanel } from '@/components/reports/revocation-panel';
 import { VersionStatusBadge } from '@/components/reports/version-status-badge';
 import { getVersion, IntakeError } from '@/lib/reports/intake';
 import { mayDo } from '@/lib/roles';
@@ -98,6 +99,7 @@ export default async function VersionPage({ params }: { params: Promise<{ versio
         </Card>
       </div>
       {version.status !== 'DRAFT' ? <AnchoringPanel user={user} versionId={version.id} status={version.status} /> : null}
+      <RevocationPanel user={user} version={{ id: version.id, version: version.version, status: version.status, engagementRef: version.engagement.engagementRef }} />
     </main>
   );
 }

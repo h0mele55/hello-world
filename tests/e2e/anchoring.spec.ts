@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { approver, createEngagement, preparer, runTag, signIn, uniquePdf, uploadAndConfirm } from './helpers';
+import { admin, approver, createEngagement, preparer, runTag, signIn, uniquePdf, uploadAndConfirm } from './helpers';
 
 /**
  * Phase 3 end to end, on a local Anvil chain: an approver widens the write
@@ -10,7 +10,9 @@ import { approver, createEngagement, preparer, runTag, signIn, uniquePdf, upload
  * live anchor that the worker sends and settles once its block is finalized;
  * the worker then stamps and anchors the distribution copy, which can be
  * downloaded once the version is complete. A signed report gets a
- * verification certificate instead.
+ * verification certificate instead. Last, an admin asks for the first version
+ * to be revoked, an approver approves, and the verifier then reports every
+ * copy of it as revoked.
  *
  * Needs, besides the seeded database: Anvil at LOCAL_RPC_URL started with
  * `--slots-in-an-epoch 1`, the registry deployed there (deployments/local.json),
@@ -194,5 +196,56 @@ test('a dry run is only simulated; a live anchor is sent, final, then stamped, c
     const response = await page.request.get(await page.getByTestId('download-certificate').getAttribute('href') ?? '');
     expect(response.status()).toBe(200);
     expect((await response.body()).subarray(0, 5).toString()).toBe('%PDF-');
+  });
+
+  await test.step('an admin asks for the first version to be revoked, and an approver approves', async () => {
+    test.skip(!admin.email, 'needs SEED_ADMIN_* (see CI)');
+    await page.context().clearCookies();
+    await signIn(page, admin);
+    await page.goto(versionUrl);
+    const panel = page.getByTestId('revocation-panel');
+    await expect(panel).toHaveAttribute('data-status', 'NONE');
+    await page.getByTestId('revocationReason-ISSUED_IN_ERROR').click();
+    await page.getByTestId('revocation-note').fill('Issued against the wrong period.');
+    await page.getByTestId('revocation-confirmation').fill('E2E-wrong');
+    await expect(page.getByTestId('request-revocation')).toBeDisabled();
+    await page.getByTestId('revocation-confirmation').fill(`E2E-${tag}`);
+    await page.getByTestId('request-revocation').click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Ask for revocation' }).click();
+    await expect(panel).toHaveAttribute('data-status', 'REQUESTED');
+    // Whoever asked cannot approve (rule 6), but may take the request back.
+    await expect(page.getByTestId('approve-revocation')).toHaveCount(0);
+    await expect(page.getByTestId('withdraw-revocation')).toBeVisible();
+
+    await page.context().clearCookies();
+    await signIn(page, approver);
+    await page.goto(versionUrl);
+    await expect(page.getByTestId('revocation-note-shown')).toHaveText('Issued against the wrong period.');
+    await page.getByTestId('approve-revocation').click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Approve revocation' }).click();
+    await expect(panel).toHaveAttribute('data-status', 'APPROVED');
+
+    runWorkerOnce();
+    await page.reload();
+    await expect(page.locator('[data-testid=chain-write][data-kind=REVOKE]')).toHaveAttribute('data-status', 'BROADCAST');
+    // Sent, not final: not revoked yet (rule 2).
+    await expect(panel).toHaveAttribute('data-status', 'APPROVED');
+    await mine(3);
+    runWorkerOnce();
+    await page.reload();
+    await expect(panel).toHaveAttribute('data-status', 'REVOKED');
+    await expect(page.getByTestId('revocation-final')).toContainText('Issued in error (code 2)');
+  });
+
+  await test.step('the verifier reports the copy and the original as revoked', async () => {
+    test.skip(!admin.email, 'needs SEED_ADMIN_* (see CI)');
+    await page.context().clearCookies();
+    await page.goto('/verify');
+    for (const file of [copy, uniquePdf('en-unmodified.pdf', tag)]) {
+      await page.getByTestId('verify-file').setInputFiles({ name: 'report.pdf', mimeType: 'application/pdf', buffer: file });
+      await expect(page.getByTestId('verdict')).toHaveAttribute('data-kind', 'REVOKED', { timeout: 30_000 });
+      await page.getByTestId('verify-another').click();
+      await expect(page.getByTestId('verdict')).toHaveCount(0);
+    }
   });
 });

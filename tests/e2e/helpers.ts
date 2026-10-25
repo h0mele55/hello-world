@@ -14,6 +14,8 @@ export interface TestUser {
 export const preparer: TestUser = { email: process.env.SEED_PREPARER_EMAIL ?? '', password: process.env.SEED_PREPARER_PASSWORD ?? '' };
 /** Seeded with two-step sign-in on (SEED_APPROVER_TOTP_SECRET), as every approver must have it. */
 export const approver: TestUser = { email: process.env.SEED_APPROVER_EMAIL ?? '', password: process.env.SEED_APPROVER_PASSWORD ?? '', totp: process.env.SEED_APPROVER_TOTP_SECRET };
+/** Seeded with two-step sign-in on (SEED_ADMIN_TOTP_SECRET); asks for revocations. */
+export const admin: TestUser = { email: process.env.SEED_ADMIN_EMAIL ?? '', password: process.env.SEED_ADMIN_PASSWORD ?? '', totp: process.env.SEED_ADMIN_TOTP_SECRET };
 
 const PERIOD = 30;
 const lastStep = new Map<string, number>();

@@ -4,6 +4,7 @@ import { getTranslations } from 'next-intl/server';
 import { StatusBadge } from '@inflect/ui/components/ui/status-badge';
 import { getIssuerKeyStatus, resolveAnchorTarget } from '@/lib/anchoring/queries';
 import { latestNightlyCheck } from '@/lib/console/audit-log';
+import { openUnjournaledCount } from '@/lib/console/registry-watch';
 import { requireUser } from '@/lib/page-auth';
 import { MFA_ROLES } from '@/lib/roles';
 import { PreferencesBar } from '@/components/preferences-bar';
@@ -15,7 +16,7 @@ export const dynamic = 'force-dynamic';
 export default async function ConsoleLayout({ children }: { children: ReactNode }) {
   const user = await requireUser();
   const t = await getTranslations();
-  const [key, nightly] = await Promise.all([getIssuerKeyStatus(resolveAnchorTarget().target), latestNightlyCheck(user)]);
+  const [key, nightly, unjournaled] = await Promise.all([getIssuerKeyStatus(resolveAnchorTarget().target), latestNightlyCheck(user), openUnjournaledCount(user)]);
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-section px-default py-page">
       <header className="flex flex-col gap-default">
@@ -59,6 +60,14 @@ export default async function ConsoleLayout({ children }: { children: ReactNode 
       {nightly.state === 'BROKEN' ? (
         <p role="alert" className="text-content-error" data-testid="audit-broken">
           {t('nav.auditBroken', { seq: nightly.seq })}{' '}
+          <Link href="/audit-log" className="underline">
+            {t('nav.auditLog')}
+          </Link>
+        </p>
+      ) : null}
+      {unjournaled > 0 ? (
+        <p role="alert" className="text-content-error" data-testid="unjournaled-banner">
+          {t('nav.unjournaled', { count: unjournaled })}{' '}
           <Link href="/audit-log" className="underline">
             {t('nav.auditLog')}
           </Link>

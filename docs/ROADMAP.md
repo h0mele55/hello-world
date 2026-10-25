@@ -1076,7 +1076,8 @@ script (#61, #67, #68):
   supply chain. Each threat names its mitigation and the test that proves it,
   or the issue that tracks it. Writing it found five gaps, filed as issues:
   - the worker trusts one RPC endpoint (#92);
-  - nothing detects writes the journal did not make (#93);
+  - nothing detects writes the journal did not make (#93, since built as the
+    registry watch, 6e);
   - a database owner can rewrite the audit log and its last check together
     (#94);
   - one stolen key can revoke every record for good, a decision before
@@ -1189,7 +1190,27 @@ that issue: one issuer key may no longer withdraw a firm's records at once.
   `docs/runbooks/stolen-issuer-key.md` says how to find revocations the firm
   did not ask for, and in what order to act.
 - **What it does not do:** notice such a revocation. That is the registry
-  watcher (#93), without which the delay protects only those who look.
+  watch, 6e (#93), without which the delay protects only those who look.
+
+6e is the registry watch (#93), the detection half of a stolen key:
+
+- **`npm run watch:registry`**, every ten minutes, reads every `Anchored` and
+  `RevocationRequested` event by the firm's issuer keys up to the finalized
+  block, and matches each to the journal by transaction hash. Every hash the
+  app sends is journalled first (rule 3), a replaced one included, so a hash
+  no row holds is a write the app did not make: a stolen key, or a row lost in
+  a restore.
+- **Each one is reported once**: an `UnjournaledWrite` row and an audit event,
+  in the same transaction as the checkpoint, so a run that stops resumes where
+  it stopped. A revocation is reported with the time it takes effect, which is
+  the owner's deadline to cancel it.
+- **It stays reported** until an admin marks it reviewed: a banner on every
+  console page, the watch's card on `/audit-log`, and an error exit for the
+  scheduler. A chain that does not hold the registry, or a firm the database
+  does not hold under the deployment's name, is a refusal, never "nothing
+  found".
+- **CI runs it after the end-to-end tests**, which must leave nothing to
+  report: every write they made went through the journal.
 
 **Prompt**
 

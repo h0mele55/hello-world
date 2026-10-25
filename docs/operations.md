@@ -10,11 +10,17 @@ on a public testnet; none of this makes its anchors legally binding (rule 9).
 | The anchoring worker | `npm run worker` | continuously, a pass every 15 s | error log lines; the console's low-balance banner |
 | The mailer | `npm run mailer` | continuously, a pass every 30 s (`MAILER_INTERVAL_MS`) | an error line naming notices that failed for good |
 | The audit-chain check | `npm run audit:check` | nightly, e.g. `17 2 * * *` | exit code 1 and an `AUDIT CHAIN BROKEN` error line; the console's banner |
+| The registry watch | `npm run watch:registry` | every ten minutes, e.g. `*/10 * * * *` | exit code 1 while any write the journal did not make is unreviewed, an error line for each new one; the console's banner |
 | The backup | `scripts/backup.sh` | nightly, after the check, e.g. `37 2 * * *` | a non-zero exit code |
 
-Run the check and the backup from the app's directory with the app's
-environment. The check reads `DATABASE_URL` only. The backup also needs
-`FILE_STORAGE_DIR` and `BACKUP_DIR`.
+Run the check, the watch and the backup from the app's directory with the
+app's environment. The check reads `DATABASE_URL` only. The watch also reads
+`ANCHOR_NETWORK`, its `<NETWORK>_RPC_URL` and the deployment record, and holds
+no key. The backup also needs `FILE_STORAGE_DIR` and `BACKUP_DIR`.
+
+The watch must run often, not nightly: a revocation it reports takes effect
+after the registry's delay (24 hours by default), and the owner must cancel it
+before then (`docs/runbooks/stolen-issuer-key.md`).
 
 Run the worker and the mailer under a supervisor that restarts them (for
 example a systemd unit with `Restart=always`). Each tries a failed pass again

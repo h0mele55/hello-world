@@ -27,6 +27,7 @@
     "test:anchoring": "vitest run --config vitest.anchoring.config.mts",
     "worker": "tsx scripts/worker.ts",
     "audit:check": "tsx scripts/check-audit-chain.ts",
+    "watch:registry": "tsx scripts/watch-registry.ts",
     "mailer": "tsx scripts/mailer.ts",
     "test:backup": "scripts/test-backup-restore.sh",
     "db:migrate": "prisma migrate dev",

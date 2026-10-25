@@ -5,13 +5,20 @@ import { CopyButton } from '@inflect/ui/components/ui/copy-button';
 import { EmptyState } from '@inflect/ui/components/ui/empty-state';
 import { StatusBadge } from '@inflect/ui/components/ui/status-badge';
 import { Heading } from '@inflect/ui/components/ui/typography';
+import { ReviewUnjournaledButton } from '@/components/console/review-unjournaled-button';
+import { explorerTxUrl } from '@/lib/chain/explorer';
 import { AUDIT_PAGE_SIZE, latestNightlyCheck, listAuditEvents, verifyFirmChain } from '@/lib/console/audit-log';
+import { openUnjournaledWrites, registryWatchState } from '@/lib/console/registry-watch';
 import { requireUser } from '@/lib/page-auth';
+import { mayDo } from '@/lib/roles';
 
 /**
  * The firm's audit log, newest first, and its hash chain re-derived on every
  * view: either intact, with its head hash, or broken at a named event. The
  * nightly check's last result sits beside it, and says so when it has not run.
+ * Below them, the registry watch (#93): how far it has read the chain, and
+ * every write by the firm's issuer keys that the journal did not make, until
+ * an admin has reviewed it.
  */
 export default async function AuditLogPage({ searchParams }: { searchParams: Promise<{ before?: string }> }) {
   const user = await requireUser();
@@ -20,7 +27,14 @@ export default async function AuditLogPage({ searchParams }: { searchParams: Pro
   const when = (iso: string) => format.dateTime(new Date(iso), { dateStyle: 'medium', timeStyle: 'medium', timeZone: 'UTC' });
   const beforeParam = Number((await searchParams).before);
   const before = Number.isInteger(beforeParam) && beforeParam > 1 ? beforeParam : undefined;
-  const [chain, nightly, events] = await Promise.all([verifyFirmChain(user), latestNightlyCheck(user), listAuditEvents(user, before)]);
+  const [chain, nightly, events, watch, unjournaled] = await Promise.all([
+    verifyFirmChain(user),
+    latestNightlyCheck(user),
+    listAuditEvents(user, before),
+    registryWatchState(user),
+    openUnjournaledWrites(user),
+  ]);
+  const mayReview = mayDo(user.role, 'reviewUnjournaledWrite');
   const oldest = events.at(-1)?.seq;
 
   return (
@@ -62,6 +76,62 @@ export default async function AuditLogPage({ searchParams }: { searchParams: Pro
           <p className="text-sm text-content-muted">{t('nightly.how')}</p>
         </Card>
       </div>
+
+      <Card className="flex flex-col gap-default" data-testid="registry-watch" data-state={watch.state} data-open={unjournaled.count}>
+        <Heading level={2}>{t('watch.title')}</Heading>
+        {watch.state === 'NEVER_RUN' ? <p className="text-content-warning">{t('watch.neverRun')}</p> : null}
+        {watch.state === 'CURRENT' ? <p>{t('watch.current', { block: watch.lastBlock, when: when(watch.checkedAt) })}</p> : null}
+        {watch.state === 'STALE' ? <p className="text-content-warning">{t('watch.stale', { when: when(watch.checkedAt) })}</p> : null}
+        {unjournaled.count === 0 ? (
+          watch.state === 'NEVER_RUN' ? null : <p>{t('watch.none')}</p>
+        ) : (
+          <>
+            <p role="alert" className="text-content-error">
+              {t('watch.open', { count: unjournaled.count })}
+            </p>
+            <ul className="flex flex-col gap-default" data-testid="unjournaled-writes">
+              {unjournaled.rows.map((w) => {
+                const txUrl = explorerTxUrl(w.chainId, w.txHash);
+                return (
+                  <li key={w.id} className="flex flex-col gap-tight border-l-2 border-border-default pl-default" data-testid="unjournaled-write" data-kind={w.kind}>
+                    <div className="flex flex-wrap items-center gap-tight">
+                      <StatusBadge variant="error">{t(`watch.kinds.${w.kind}`)}</StatusBadge>
+                      <span className="text-sm text-content-muted">{t('watch.block', { block: w.blockNumber })}</span>
+                      <span className="text-sm text-content-muted">{t('watch.found', { when: when(w.foundAt) })}</span>
+                    </div>
+                    {w.effectiveAt ? (
+                      <p className="text-content-error" data-testid="unjournaled-deadline">
+                        {t('watch.deadline', { when: when(w.effectiveAt) })}
+                      </p>
+                    ) : null}
+                    <p className="break-all text-sm">
+                      <span className="text-content-muted">{t('watch.record')}: </span>
+                      <code className="font-mono">{w.recordId}</code>
+                    </p>
+                    <p className="break-all text-sm">
+                      <span className="text-content-muted">{t('watch.transaction')}: </span>
+                      {txUrl ? (
+                        <a href={txUrl} target="_blank" rel="noreferrer" className="font-mono text-content-info hover:underline">
+                          {w.txHash}
+                        </a>
+                      ) : (
+                        <code className="font-mono">{w.txHash}</code>
+                      )}
+                    </p>
+                    <p className="break-all text-sm">
+                      <span className="text-content-muted">{t('watch.issuer')}: </span>
+                      <code className="font-mono">{w.issuer}</code>
+                    </p>
+                    {mayReview ? <ReviewUnjournaledButton findingId={w.id} /> : null}
+                  </li>
+                );
+              })}
+            </ul>
+            {unjournaled.count > unjournaled.rows.length ? <p className="text-sm text-content-muted">{t('watch.more', { count: unjournaled.count - unjournaled.rows.length })}</p> : null}
+          </>
+        )}
+        <p className="text-sm text-content-muted">{t('watch.how')}</p>
+      </Card>
 
       <Card className="flex flex-col gap-default">
         <Heading level={2}>{t('events')}</Heading>

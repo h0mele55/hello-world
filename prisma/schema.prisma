@@ -118,35 +118,38 @@ enum ReasonCode {
 /// The audit firm. One for the prototype (#5); everything hangs off it so a
 /// second firm needs no schema change.
 model IssuerOrg {
-  id             String            @id @default(cuid())
-  name           String
-  chainWriteMode ChainWriteMode    @default(DISABLED)
-  createdAt      DateTime          @default(now())
-  users          User[]
-  clients        Client[]
-  auditEvents    AuditEvent[]
-  lookupCounts   LookupCount[]
-  auditChecks    AuditChainCheck[]
+  id                String             @id @default(cuid())
+  name              String
+  chainWriteMode    ChainWriteMode     @default(DISABLED)
+  createdAt         DateTime           @default(now())
+  users             User[]
+  clients           Client[]
+  auditEvents       AuditEvent[]
+  lookupCounts      LookupCount[]
+  auditChecks       AuditChainCheck[]
+  registryWatches   RegistryWatch[]
+  unjournaledWrites UnjournaledWrite[]
 }
 
 model User {
-  id                   String          @id @default(cuid())
+  id                   String             @id @default(cuid())
   orgId                String
-  org                  IssuerOrg       @relation(fields: [orgId], references: [id])
-  email                String          @unique
+  org                  IssuerOrg          @relation(fields: [orgId], references: [id])
+  email                String             @unique
   name                 String
   passwordHash         String
   role                 Role
-  createdAt            DateTime        @default(now())
+  createdAt            DateTime           @default(now())
   engagements          Engagement[]
-  prepared             ReportVersion[] @relation("preparedBy")
-  confirmed            ReportVersion[] @relation("confirmedBy")
-  approved             ReportVersion[] @relation("approvedBy")
-  revocationsRequested Revocation[]    @relation("revocationRequestedBy")
-  revocationsApproved  Revocation[]    @relation("revocationApprovedBy")
-  revocationsClosed    Revocation[]    @relation("revocationClosedBy")
-  recipientsAdded      Recipient[]     @relation("recipientAddedBy")
-  recipientsRemoved    Recipient[]     @relation("recipientRemovedBy")
+  prepared             ReportVersion[]    @relation("preparedBy")
+  confirmed            ReportVersion[]    @relation("confirmedBy")
+  approved             ReportVersion[]    @relation("approvedBy")
+  revocationsRequested Revocation[]       @relation("revocationRequestedBy")
+  revocationsApproved  Revocation[]       @relation("revocationApprovedBy")
+  revocationsClosed    Revocation[]       @relation("revocationClosedBy")
+  recipientsAdded      Recipient[]        @relation("recipientAddedBy")
+  recipientsRemoved    Recipient[]        @relation("recipientRemovedBy")
+  unjournaledReviewed  UnjournaledWrite[]
 
   /// The TOTP secret, sealed (context `User:<id>:totpSecret`); null until set up.
   totpSecret        Bytes?
@@ -330,7 +333,7 @@ model AuditEvent {
   seq         Int
   /// ISO timestamp, set by the writer so the hash can cover it.
   at          String
-  /// The user, or null for the worker.
+  /// The user, or null for a background process (the worker, the mailer, the registry watch).
   actorId     String?
   action      String
   subjectType String
@@ -483,4 +486,52 @@ model Notification {
   @@unique([recipientId, reportVersionId])
   @@index([reportVersionId])
   @@index([status, leaseUntil])
+}
+
+/// A registry write the watch found on chain, by one of the firm's issuer keys.
+enum UnjournaledKind {
+  ANCHOR
+  ANCHOR_COPY
+  REVOCATION
+}
+
+/// How far the registry watch (#93, scripts/watch-registry.ts) has read the
+/// chain for a firm: every event up to `lastBlock`, a finalized block, has
+/// been matched to the journal or reported.
+model RegistryWatch {
+  orgId     String
+  org       IssuerOrg @relation(fields: [orgId], references: [id])
+  chainId   Int
+  registry  String
+  lastBlock BigInt
+  checkedAt DateTime
+
+  @@id([orgId, chainId, registry])
+}
+
+/// A write on chain by one of the firm's issuer keys that no journal row
+/// accounts for (#93): a stolen key, or a row lost in a restore. Every chain
+/// write the app makes is journalled before it is sent (rule 3), so anything
+/// else is reported, and stays reported until an admin has reviewed it.
+model UnjournaledWrite {
+  id           String          @id @default(cuid())
+  orgId        String
+  org          IssuerOrg       @relation(fields: [orgId], references: [id])
+  chainId      Int
+  registry     String
+  kind         UnjournaledKind
+  recordId     String
+  txHash       String
+  blockNumber  BigInt
+  issuer       String
+  /// A revocation: when it takes effect, so the owner's deadline to cancel it.
+  effectiveAt  DateTime?
+  foundAt      DateTime
+  reviewedById String?
+  reviewedBy   User?           @relation(fields: [reviewedById], references: [id])
+  reviewedAt   DateTime?
+
+  @@unique([chainId, registry, txHash, recordId, kind])
+  @@index([orgId, reviewedAt])
+  @@index([reviewedById])
 }

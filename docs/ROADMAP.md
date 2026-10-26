@@ -1320,6 +1320,21 @@ locked bucket or a mailbox):
   family's next version (#127, the owner's decision), and the run on Sepolia
   itself, after #4 and #123.
 
+6k is the monthly checkpoint (#122), so the production chain's records
+outlive its infrastructure:
+
+- **`npm run checkpoint`**, on the 1st, puts every record the registry holds
+  at an agreed finalized block under one root (the same tree as 6j), kept
+  append-only; the OpenTimestamps job timestamps the SHA-256 of its head
+  (chain, registry, block, month, count, root) on Bitcoin, and `--export`
+  writes the files to publish once that proof is complete.
+- **The CLI verifies through a checkpoint** (`--checkpoint`) when the registry
+  cannot be reached, only through its Bitcoin timestamp, and as of its block.
+- **The monitor** reports a month that ended without its checkpoint
+  (`CHECKPOINT_MISSING`) and a checkpoint not timestamped.
+- **Rehearsed on Anvil** (`tests/anchoring/checkpoint.test.ts`), with fake
+  calendars and a stubbed Bitcoin check as in #66's tests.
+
 **Prompt**
 
 ```text

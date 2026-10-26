@@ -18,6 +18,7 @@ never to do. `docs/operations.md` says what runs day to day, and
 | [mail.md](mail.md) | Recipients are not getting their email |
 | [opentimestamps.md](opentimestamps.md) | A version has no Bitcoin timestamp, one waits too long, or a proof turned out wrong (#66) |
 | [seal-provider.md](seal-provider.md) | A distribution copy waits for, or was refused by, the seal provider; changing the provider or its certificate (#70) |
+| [checkpoints.md](checkpoints.md) | The monthly checkpoint of the registry on Bitcoin: publishing it, verifying through it, and a month without one (#122) |
 | [sepolia-sunset.md](sepolia-sunset.md) | Sepolia is being shut down |
 
 Two rules hold in every runbook:

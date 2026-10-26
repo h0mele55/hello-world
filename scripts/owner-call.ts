@@ -139,6 +139,7 @@ async function main() {
       refuse(`${argument} is not an archive that holds together: ${error instanceof CannotVerify ? error.message : 'unreadable'}`);
     }
     if (!archive.complete) refuse(`${argument} is a single record's proof; record the root of the whole archive`);
+    if (!archive.target) refuse(`${argument} is a checkpoint: its root is timestamped on Bitcoin, never recorded on a registry`);
     if (archive.target.chainId !== chain.id || archive.target.registry.toLowerCase() !== deployment.address.toLowerCase()) refuse(`${argument} was built for another registry (${archive.target.registry} on chain ${archive.target.chainId})`);
     const total = await publicClient.readContract({ ...registry, functionName: 'reanchorRootCount' });
     const roots = await publicClient.readContract({ ...registry, functionName: 'reanchorRoots', args: [0n, total] });

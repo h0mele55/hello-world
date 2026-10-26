@@ -1,4 +1,5 @@
 import type { PrismaClient } from '@/generated/prisma/client';
+import { monthStart, previousMonth } from '@/lib/console/periods';
 import { AUDIT_CHECK_STALE_MS, WATCH_STALE_MS, WORKER_STALE_MS } from '@/lib/staleness';
 
 /**
@@ -7,8 +8,9 @@ import { AUDIT_CHECK_STALE_MS, WATCH_STALE_MS, WORKER_STALE_MS } from '@/lib/sta
  * unsettled write, a worker that stopped, a low balance, endpoints that
  * disagree, a broken or stopped audit check, a stopped registry watch or a
  * write it found, notices that could not be sent, OpenTimestamps proofs
- * that were not made, wait too long for Bitcoin or turned out wrong (#66), and
- * distribution copies held up by a seal provider that does not answer (#70). `npm run monitor`
+ * that were not made, wait too long for Bitcoin or turned out wrong (#66), a
+ * month without its checkpoint (#122), and distribution copies held up by a
+ * seal provider that does not answer (#70). `npm run monitor`
  * (scripts/monitor.ts) prints each and exits 1, for the scheduler to alert.
  *
  * Alerts carry ids, codes, counts and times only: never a client's name, a
@@ -30,6 +32,7 @@ export type AlertCode =
   | 'OTS_NOT_SUBMITTED'
   | 'OTS_PENDING_LONG'
   | 'OTS_BROKEN'
+  | 'CHECKPOINT_MISSING'
   | 'SEAL_WAITING';
 
 export interface Alert {
@@ -54,6 +57,8 @@ export const MONITOR_THRESHOLDS = {
   otsPendingMs: 48 * 60 * 60 * 1000,
   /** A copy the worker has tried to seal for this long has a provider that is down, not busy. */
   sealWaitMs: 60 * 60 * 1000,
+  /** The checkpoint runs on the 1st; by the 3rd, a month without one has a job that did not run. */
+  checkpointGraceMs: 2 * 24 * 60 * 60 * 1000,
 };
 
 const iso = (d: Date | null | undefined) => d?.toISOString() ?? null;
@@ -132,14 +137,16 @@ export async function collectAlerts(prisma: PrismaClient, now = new Date(), t = 
     const notices = await prisma.auditEvent.count({ where: { orgId, action: 'notification.failed', at: { gte: since(t.recentMs).toISOString() } } });
     if (notices) alerts.push({ code: 'NOTICE_FAILED', orgId, detail: { count: notices, runbook: 'docs/runbooks/mail.md' } });
 
-    // The OpenTimestamps job (#66).
-    const ofFirm = { reportVersion: { engagement: { client: { orgId } } } };
+    // The OpenTimestamps job (#66), for versions and checkpoints (#122).
+    const ofFirm = { OR: [{ reportVersion: { engagement: { client: { orgId } } } }, { checkpoint: { orgId } }] };
     const unsubmitted = await prisma.reportVersion.findMany({
       where: { engagement: { client: { orgId } }, status: { in: ['ANCHORED', 'COMPLETE', 'REVOKED'] }, manifestHash: { not: null }, otsProof: null, approvedAt: { lt: since(t.otsSubmitMs) } },
       select: { approvedAt: true },
       orderBy: { approvedAt: 'asc' },
     });
     if (unsubmitted.length) alerts.push({ code: 'OTS_NOT_SUBMITTED', orgId, detail: { count: unsubmitted.length, oldestApprovedAt: iso(unsubmitted[0].approvedAt), runbook: 'docs/runbooks/opentimestamps.md' } });
+    const unsubmittedCheckpoints = await prisma.registryCheckpoint.findMany({ where: { orgId, otsProof: null, createdAt: { lt: since(t.otsSubmitMs) } }, select: { period: true }, orderBy: { createdAt: 'asc' } });
+    if (unsubmittedCheckpoints.length) alerts.push({ code: 'OTS_NOT_SUBMITTED', orgId, detail: { checkpoints: unsubmittedCheckpoints.map((c) => c.period), runbook: 'docs/runbooks/opentimestamps.md' } });
     const waitingOts = await prisma.otsProof.findMany({ where: { ...ofFirm, status: 'PENDING', submittedAt: { lt: since(t.otsPendingMs) } }, select: { submittedAt: true, lastError: true }, orderBy: { submittedAt: 'asc' } });
     if (waitingOts.length) {
       alerts.push({
@@ -148,9 +155,19 @@ export async function collectAlerts(prisma: PrismaClient, now = new Date(), t = 
         detail: { count: waitingOts.length, oldestSubmittedAt: iso(waitingOts[0].submittedAt), reasons: [...new Set(waitingOts.map((p) => p.lastError).filter(Boolean))], runbook: 'docs/runbooks/opentimestamps.md' },
       });
     }
-    const brokenOts = await prisma.otsProof.findMany({ where: { ...ofFirm, status: 'BROKEN', checkedAt: { gte: since(t.recentMs) } }, select: { id: true, reportVersionId: true, lastError: true, checkedAt: true }, take: 50 });
+    const brokenOts = await prisma.otsProof.findMany({ where: { ...ofFirm, status: 'BROKEN', checkedAt: { gte: since(t.recentMs) } }, select: { id: true, reportVersionId: true, checkpointId: true, lastError: true, checkedAt: true }, take: 50 });
     for (const p of brokenOts) {
-      alerts.push({ code: 'OTS_BROKEN', orgId, detail: { otsProofId: p.id, reportVersionId: p.reportVersionId, reason: p.lastError, at: iso(p.checkedAt), runbook: 'docs/runbooks/opentimestamps.md' } });
+      alerts.push({ code: 'OTS_BROKEN', orgId, detail: { otsProofId: p.id, reportVersionId: p.reportVersionId, checkpointId: p.checkpointId, reason: p.lastError, at: iso(p.checkedAt), runbook: 'docs/runbooks/opentimestamps.md' } });
+    }
+
+    // The monthly checkpoint (#122): due for every month that ended with a version anchored.
+    const started = monthStart(now);
+    if (now.getTime() - started.getTime() > t.checkpointGraceMs) {
+      const period = previousMonth(now);
+      const due = await prisma.reportVersion.count({ where: { engagement: { client: { orgId } }, status: { in: ['ANCHORED', 'COMPLETE', 'REVOKED'] }, approvedAt: { lt: started } } });
+      if (due && !(await prisma.registryCheckpoint.findFirst({ where: { orgId, period }, select: { id: true } }))) {
+        alerts.push({ code: 'CHECKPOINT_MISSING', orgId, detail: { period, runbook: 'docs/runbooks/checkpoints.md' } });
+      }
     }
   }
   return alerts;

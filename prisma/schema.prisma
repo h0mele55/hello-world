@@ -139,10 +139,10 @@ enum ReasonCode {
 /// The audit firm. One for the prototype (#5); everything hangs off it so a
 /// second firm needs no schema change.
 model IssuerOrg {
-  id                String             @id @default(cuid())
+  id                String               @id @default(cuid())
   name              String
-  chainWriteMode    ChainWriteMode     @default(DISABLED)
-  createdAt         DateTime           @default(now())
+  chainWriteMode    ChainWriteMode       @default(DISABLED)
+  createdAt         DateTime             @default(now())
   users             User[]
   clients           Client[]
   auditEvents       AuditEvent[]
@@ -151,6 +151,7 @@ model IssuerOrg {
   registryWatches   RegistryWatch[]
   unjournaledWrites UnjournaledWrite[]
   chainWrites       ChainWrite[]
+  checkpoints       RegistryCheckpoint[]
 }
 
 model User {
@@ -580,20 +581,23 @@ model UnjournaledWrite {
   @@index([reviewedById])
 }
 
-/// A second, independent timestamp of a version's manifest hash, on Bitcoin
-/// through OpenTimestamps (#66): the detached proof, as the reference client
-/// writes it, kept by `npm run ots` (src/lib/ots/job.ts). Nothing in it is
-/// confidential: the manifest hash is on chain already, and the rest is a
-/// nonce and hashes.
+/// A second, independent timestamp on Bitcoin through OpenTimestamps: of a
+/// version's manifest hash (#66), or of a monthly checkpoint's head (#122).
+/// The detached proof, as the reference client writes it, kept by `npm run
+/// ots` (src/lib/ots/job.ts). Nothing in it is confidential: the manifest
+/// hash and the records under a root are on chain already, and the rest is a
+/// nonce and hashes. Exactly one of the version and the checkpoint (a CHECK).
 model OtsProof {
-  id               String        @id @default(cuid())
-  reportVersionId  String        @unique
-  reportVersion    ReportVersion @relation(fields: [reportVersionId], references: [id])
-  /// The manifest hash timestamped, 0x hex.
-  digest           String        @unique
+  id               String              @id @default(cuid())
+  reportVersionId  String?             @unique
+  reportVersion    ReportVersion?      @relation(fields: [reportVersionId], references: [id], onDelete: Restrict)
+  checkpointId     String?             @unique
+  checkpoint       RegistryCheckpoint? @relation(fields: [checkpointId], references: [id], onDelete: Restrict)
+  /// The digest timestamped, 0x hex: the manifest hash, or the SHA-256 of the checkpoint's head.
+  digest           String              @unique
   /// The .ots file.
   proof            Bytes
-  status           OtsStatus     @default(PENDING)
+  status           OtsStatus           @default(PENDING)
   /// The calendars that took the digest; at least two (a CHECK).
   calendars        String[]
   submittedAt      DateTime
@@ -608,4 +612,30 @@ model OtsProof {
   completedAt      DateTime?
 
   @@index([status, checkedAt])
+}
+
+/// A month's checkpoint of the registry the firm anchors on (#122): every
+/// record it held at one finalized block both endpoints agreed on, under one
+/// Merkle root (src/lib/verify-core/reanchor.ts), so the records outlive the
+/// chain's infrastructure. Its head is timestamped on Bitcoin by the
+/// OpenTimestamps job; the checkpoint file is published (`npm run checkpoint
+/// -- --export`). Written once by `npm run checkpoint` and never changed.
+model RegistryCheckpoint {
+  id        String    @id @default(cuid())
+  orgId     String
+  org       IssuerOrg @relation(fields: [orgId], references: [id])
+  chainId   Int
+  registry  String
+  /// The month it closes, YYYY-MM in UTC.
+  period    String
+  /// The finalized block the records were read at.
+  block     Int
+  root      String
+  count     Int
+  /// The checkpoint file (format checkpoint/1) as written, without its timestamp.
+  file      Bytes
+  createdAt DateTime  @default(now())
+  otsProof  OtsProof?
+
+  @@unique([orgId, chainId, registry, period])
 }

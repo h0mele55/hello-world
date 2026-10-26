@@ -13,6 +13,7 @@ import { rootsOf, setupFromDeployment, StandaloneSetupSchema, verdictJson, type 
  *   verify-report report.pdf
  *   verify-report report.pdf --deployment deployments/sepolia.json --rpc <url> --rpc <url> [--app-url <url>] [--seal-roots <pem>]
  *   verify-report report.pdf ... --reanchor archive.json [--reanchor proof.json]
+ *   verify-report report.pdf ... --checkpoint checkpoint.json
  *
  * Without flags it uses the settings baked in by `npm run build:verifier`.
  * For a file that matches a record, and with the issuer's public origin
@@ -24,13 +25,17 @@ import { rootsOf, setupFromDeployment, StandaloneSetupSchema, verdictJson, type 
  * With --reanchor (#65), a file the registry holds no record of is checked
  * against a retired registry's archive or a record's proof, through its root
  * on this registry; `reanchored` then says which root, and is null otherwise.
+ * With --checkpoint (#122), a file is checked, when this registry cannot be
+ * reached, against its latest monthly checkpoint, through the checkpoint's
+ * Bitcoin timestamp (read from the two block explorers), and as of its block;
+ * `reanchored` then names the checkpoint and the Bitcoin block.
  * Exit status: 0 a verdict was reached, 3 cannot verify right now, 2 usage.
  */
 
 declare const __VERIFIER_SETUP__: StandaloneSetup | null;
 
 function usage(message: string): never {
-  process.stderr.write(`${message}\nusage: verify-report <file.pdf> [--deployment <file> --rpc <url> --rpc <url>] [--app-url <url>] [--seal-roots <pem>] [--reanchor <archive or proof>]...\n`);
+  process.stderr.write(`${message}\nusage: verify-report <file.pdf> [--deployment <file> --rpc <url> --rpc <url>] [--app-url <url>] [--seal-roots <pem>] [--reanchor <archive or proof>]... [--checkpoint <checkpoint or proof>]...\n`);
   process.exit(2);
 }
 
@@ -55,7 +60,7 @@ function setupOf(values: { deployment?: string; rpc?: string[]; 'app-url'?: stri
 async function main() {
   let parsed;
   try {
-    parsed = parseArgs({ allowPositionals: true, options: { deployment: { type: 'string' }, rpc: { type: 'string', multiple: true }, 'app-url': { type: 'string' }, 'seal-roots': { type: 'string' }, reanchor: { type: 'string', multiple: true } } });
+    parsed = parseArgs({ allowPositionals: true, options: { deployment: { type: 'string' }, rpc: { type: 'string', multiple: true }, 'app-url': { type: 'string' }, 'seal-roots': { type: 'string' }, reanchor: { type: 'string', multiple: true }, checkpoint: { type: 'string', multiple: true } } });
   } catch (error) {
     usage(error instanceof Error ? error.message : String(error));
   }
@@ -71,11 +76,11 @@ async function main() {
     }
   }
   const sets: CheckedSet[] = [];
-  for (const reanchor of parsed.values.reanchor ?? []) {
+  for (const given of [...(parsed.values.reanchor ?? []), ...(parsed.values.checkpoint ?? [])]) {
     try {
-      sets.push(checkReanchorSet(JSON.parse(fs.readFileSync(reanchor, 'utf8'))));
+      sets.push(checkReanchorSet(JSON.parse(fs.readFileSync(given, 'utf8'))));
     } catch (error) {
-      usage(`${reanchor} is not a re-anchor archive or proof that holds together${error instanceof CannotVerify ? `: ${error.message}` : ''}`);
+      usage(`${given} is not a re-anchor archive, a checkpoint or a proof that holds together${error instanceof CannotVerify ? `: ${error.message}` : ''}`);
     }
   }
   let bytes: Uint8Array;

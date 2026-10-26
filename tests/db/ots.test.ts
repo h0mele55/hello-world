@@ -234,8 +234,39 @@ describe('the monitor', () => {
     clock = new Date(start.getTime() + 50 * HOUR);
     await pass({ calendar: calendars({ [ALICE]: 'confirmed' }).deps, bitcoinTime: bitcoin(new BitcoinError('NOT_IN_BLOCK', 'not the root')) });
     const row = await prisma.otsProof.findFirstOrThrow();
-    expect(await otsAlerts(51, start)).toEqual([{ code: 'OTS_BROKEN', orgId, detail: { otsProofId: row.id, reportVersionId: row.reportVersionId, reason: 'NOT_IN_BLOCK', at: clock.toISOString(), runbook } }]);
+    expect(await otsAlerts(51, start)).toEqual([{ code: 'OTS_BROKEN', orgId, detail: { otsProofId: row.id, reportVersionId: row.reportVersionId, checkpointId: null, reason: 'NOT_IN_BLOCK', at: clock.toISOString(), runbook } }]);
     expect(await otsAlerts(75, start)).toEqual([]);
+  });
+
+  it('reports a month that ended with an anchored version and no checkpoint, from the 3rd of the next (#122)', async () => {
+    await version('en-unmodified.pdf', true);
+    const missing = async (at: string) => (await collectAlerts(prisma, new Date(at))).filter((a) => a.code === 'CHECKPOINT_MISSING');
+    // Nothing anchored before this month: nothing due. Then October ends with one.
+    expect(await missing('2026-10-28T12:00:00Z')).toEqual([]);
+    expect(await missing('2026-11-02T23:00:00Z')).toEqual([]);
+    expect(await missing('2026-11-03T01:00:00Z')).toEqual([{ code: 'CHECKPOINT_MISSING', orgId, detail: { period: '2026-10', runbook: 'docs/runbooks/checkpoints.md' } }]);
+    const checkpoint = await prisma.registryCheckpoint.create({
+      data: { orgId, chainId: 31337, registry: `0x${'2'.repeat(40)}`, period: '2026-10', block: 120, root: `0x${'3'.repeat(64)}`, count: 1, file: new Uint8Array([1]), createdAt: new Date('2026-11-01T02:00:00Z') },
+    });
+    expect(await missing('2026-11-03T01:00:00Z')).toEqual([]);
+    // Its root a day without a timestamp is reported like a version's.
+    expect((await collectAlerts(prisma, new Date('2026-11-03T01:00:00Z'))).filter((a) => a.code === 'OTS_NOT_SUBMITTED')).toContainEqual({ code: 'OTS_NOT_SUBMITTED', orgId, detail: { checkpoints: ['2026-10'], runbook } });
+    expect(checkpoint.id).toBeTruthy();
+  });
+
+  it('holds a checkpoint to its shape, keeps it as written, and a proof to one subject', async () => {
+    const base = { orgId, chainId: 31337, registry: `0x${'2'.repeat(40)}`, period: '2026-10', block: 120, root: `0x${'3'.repeat(64)}`, count: 1, file: new Uint8Array([1]) };
+    await expect(prisma.registryCheckpoint.create({ data: { ...base, count: 0 } })).rejects.toThrow(/RegistryCheckpoint_shape/);
+    await expect(prisma.registryCheckpoint.create({ data: { ...base, period: '2026-13' } })).rejects.toThrow(/RegistryCheckpoint_shape/);
+    await expect(prisma.registryCheckpoint.create({ data: { ...base, root: `0x${'A'.repeat(64)}` } })).rejects.toThrow(/RegistryCheckpoint_shape/);
+    const checkpoint = await prisma.registryCheckpoint.create({ data: base });
+    await expect(prisma.registryCheckpoint.delete({ where: { id: checkpoint.id } })).rejects.toThrow(/append-only/);
+
+    const final = await version('en-unmodified.pdf', true);
+    const proof = { digest: `0x${'4'.repeat(64)}`, proof: new Uint8Array([1]), calendars: [ALICE, BOB], submittedAt: clock };
+    await expect(prisma.otsProof.create({ data: proof })).rejects.toThrow(/OtsProof_one_subject/);
+    await expect(prisma.otsProof.create({ data: { ...proof, reportVersionId: final.id, checkpointId: checkpoint.id } })).rejects.toThrow(/OtsProof_one_subject/);
+    await prisma.otsProof.create({ data: { ...proof, checkpointId: checkpoint.id } });
   });
 });
 

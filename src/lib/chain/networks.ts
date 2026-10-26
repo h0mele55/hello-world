@@ -31,8 +31,17 @@ export const NETWORKS = {
 } as const;
 export type NetworkName = keyof typeof NETWORKS;
 
-/** Networks whose anchors would be the firm's real evidence: deployed to only once the owner has chosen (#63). */
+/** Networks whose anchors would be the firm's real evidence: the candidates measured for the owner (#63). */
 export const PRODUCTION_NETWORKS: readonly NetworkName[] = ['mainnet', 'base', 'optimism', 'arbitrum'];
+
+/**
+ * The production chain the owner chose on 2026-10-26 (#63,
+ * docs/decision-production-chain.md): Arbitrum One. The other candidates stay
+ * refused. It is deployed to only after its testnet, whose deployment record
+ * must exist first (#123).
+ */
+export const CHOSEN_PRODUCTION_NETWORK = 'arbitrum' satisfies NetworkName;
+export const REHEARSAL_NETWORK: Partial<Record<NetworkName, NetworkName>> = { arbitrum: 'arbitrum-sepolia' };
 
 export function isNetworkName(value: string | undefined): value is NetworkName {
   return value !== undefined && Object.hasOwn(NETWORKS, value);

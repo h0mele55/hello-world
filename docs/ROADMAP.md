@@ -1043,7 +1043,9 @@ put the decisions only the owner can make in front of them with evidence.
 - **Production chain**, the owner's decision: Ethereum mainnet, or a mainnet
   rollup such as Base, Optimism or Arbitrum, where an anchor costs cents. It is
   a new `ChainAdapter` implementation, plus optional Merkle batching (one
-  transaction per batch, each PDF carrying its proof).
+  transaction per batch, each PDF carrying its proof). The owner chose
+  **Arbitrum One** (2026-10-26), with a monthly root of its records
+  timestamped on Bitcoin (#122).
 - **Re-anchoring:** commit a Merkle root of every Sepolia record to the
   production chain, so prototype anchors outlive Sepolia.
 - **Second anchor** through OpenTimestamps on Bitcoin, so evidence survives the

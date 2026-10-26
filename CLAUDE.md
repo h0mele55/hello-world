@@ -30,8 +30,8 @@ chain check and backups (5d), and recipients with the two-person exit gate
 way: `docs/threat-model.md` names each threat with the test that proves its
 mitigation, or the issue that tracks it, and `docs/runbooks/` says what to do
 when a key, an owner, an endpoint or the database must change. The issuer key
-can live in Cloud KMS (6b), the production candidates are measured for the
-owner's choice (6c, `docs/decision-production-chain.md`), and revocation is
+can live in Cloud KMS (6b), the owner chose Arbitrum One from the measured
+production candidates (6c, `docs/decision-production-chain.md`), and revocation is
 delayed so the owner can cancel a stolen key's (6d, #95), the registry
 watch reports any write by the firm's keys that the journal did not make (6e,
 #93), recipients are told of a withdrawal (6f, #96), the worker settles a
@@ -88,7 +88,7 @@ node scripts/sync-inflect-ui.mjs --check   # re-derive the vendored tree from up
 (cd contracts && forge fmt --check && forge lint --deny notes)
 npm run contracts:artifact     # regenerate src/lib/chain/registry-artifact.ts after a contract change
 npm run test:integration       # chain adapter and verifier against throwaway Anvil nodes
-npx tsx scripts/deploy-registry.ts <network>             # deploy (sepolia, local, base-sepolia, …); production networks refused until #63; REVOCATION_DELAY_HOURS (default 24, local 0)
+npx tsx scripts/deploy-registry.ts <network>             # deploy (sepolia, local, base-sepolia, …); of the production networks only arbitrum, after arbitrum-sepolia (#63); REVOCATION_DELAY_HOURS (default 24, local 0)
 npx tsx scripts/measure-chain-costs.ts                   # today's cost per report and finality lag on the production candidates
 npx tsx scripts/owner-call.ts <sepolia|local> <add-issuer|remove-issuer|cancel-revocation|void-audit-head|transfer-owner|accept-owner> [address|recordId|index]   # prints the owner's transaction; sends nothing
 npx tsx scripts/kms-address.ts <KMS key version name>     # the address of a Cloud KMS issuer key, to register it
@@ -155,8 +155,11 @@ Locally, Playwright needs the browser of its own version:
   local, and the production candidates (mainnet, Base, OP Mainnet, Arbitrum One)
   with their Sepolia testnets. Each has `<NETWORK>_RPC_URL`, its own
   `deployments/<network>.json`, an explorer and a readable name. Which one is
-  production is the owner's decision (`docs/decision-production-chain.md`);
-  until then the deploy script refuses `PRODUCTION_NETWORKS`.
+  production was the owner's decision: **Arbitrum One** (2026-10-26,
+  `docs/decision-production-chain.md`, `CHOSEN_PRODUCTION_NETWORK`). The deploy
+  script refuses the other `PRODUCTION_NETWORKS`, and deploys to Arbitrum One
+  only once `deployments/arbitrum-sepolia.json` exists (#123). A monthly root
+  of its records goes to Bitcoin through OpenTimestamps (#122).
 - **All chain access goes through `src/lib/chain/`.** `createChainAdapter`
   checks the chain id and the code at the registry address, then simulates,
   before every write, so a refusal is a named `RegistryRevertError` and nothing

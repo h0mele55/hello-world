@@ -22,7 +22,7 @@
  */
 import fs from 'node:fs';
 import path from 'node:path';
-import { parseCertificate } from '../src/lib/eseal/cms';
+import { certificatesFromPem } from '../src/lib/verify-core/seal';
 import type { CopySeal } from '../src/lib/eseal/copy';
 import { cscSigner } from '../src/lib/eseal/csc';
 import { rfc3161Timestamper } from '../src/lib/eseal/tsa';
@@ -61,14 +61,12 @@ export function readAnchors(tool: string, file: string): Uint8Array[] {
   } catch {
     refuse(tool, `SEAL_TRUST_ANCHORS (${file}) cannot be read`);
   }
-  const blocks = [...text.matchAll(/-----BEGIN CERTIFICATE-----([\s\S]*?)-----END CERTIFICATE-----/g)].map((m) => new Uint8Array(Buffer.from(m[1].replace(/\s+/g, ''), 'base64')));
-  if (blocks.length === 0) refuse(tool, `SEAL_TRUST_ANCHORS (${file}) holds no certificate`);
-  for (const der of blocks) {
-    try {
-      parseCertificate(der);
-    } catch {
-      refuse(tool, `SEAL_TRUST_ANCHORS (${file}) holds a certificate that cannot be read`);
-    }
+  let roots: Uint8Array[];
+  try {
+    roots = certificatesFromPem(text);
+  } catch {
+    refuse(tool, `SEAL_TRUST_ANCHORS (${file}) holds a certificate that cannot be read`);
   }
-  return blocks;
+  if (roots.length === 0) refuse(tool, `SEAL_TRUST_ANCHORS (${file}) holds no certificate`);
+  return roots;
 }

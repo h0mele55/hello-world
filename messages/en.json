@@ -533,6 +533,30 @@
         "PROOF_UNREADABLE": "the proof could not be read.",
         "NOT_IN_BLOCK": "the proof does not lead to the block it names."
       }
+    },
+    "seal": {
+      "title": "The firm's electronic seal",
+      "checking": "Checking this copy's electronic seal…",
+      "SEALED": "This copy carries the electronic seal of {signer}, timestamped {when}. The seal holds against the roots the firm publishes.",
+      "NOT_SEALED": "This copy carries no electronic seal.",
+      "NO_ROOTS": "This copy carries a signature, but this verifier was given no roots to check a seal against. A PDF reader shows the signature and who made it.",
+      "INVALID": "This copy carries a signature that does not hold: {reason}",
+      "apart": "The seal is separate from the verdict above and does not change it. It shows who sealed this copy and when; the registry alone says whether it is the file anchored.",
+      "status": {
+        "SEALED": "Sealed",
+        "NOT_SEALED": "None",
+        "NO_ROOTS": "Not checked",
+        "INVALID": "Does not hold"
+      },
+      "reasons": {
+        "NOT_WHOLE_FILE": "the signature does not cover the whole file, or something was added after it.",
+        "MALFORMED": "the signature cannot be read.",
+        "DIGEST_MISMATCH": "the file was changed after it was sealed.",
+        "BAD_SIGNATURE": "the signature does not verify.",
+        "WRONG_CERTIFICATE": "the signature names another certificate than the one that made it.",
+        "UNTRUSTED": "the seal's certificate does not chain to the firm's roots, or was not valid when it sealed.",
+        "BAD_TIMESTAMP": "its timestamp is not over this signature, or not from a timestamping authority the roots vouch for."
+      }
     }
   },
   "latest": {

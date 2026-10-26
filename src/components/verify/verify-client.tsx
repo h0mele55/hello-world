@@ -9,9 +9,10 @@ import { CloudUpload } from '@inflect/ui/components/ui/icons/nucleo/cloud-upload
 import { openRegistryView, readDocument, verifyFile, type PdfjsLike } from '@/lib/verify-core';
 import type { VerifierSetup } from '@/lib/verify-setup';
 import { BitcoinTimestampView } from './bitcoin-timestamp-view';
+import { SealView } from './seal-view';
 import { VerdictView, type ShownVerdict } from './verdict-view';
 
-type State = { step: 'idle' } | { step: 'checking'; name: string } | { step: 'done'; name: string; verdict: ShownVerdict };
+type State = { step: 'idle' } | { step: 'checking'; name: string } | { step: 'done'; name: string; bytes: Uint8Array; verdict: ShownVerdict };
 
 let pdfjsLoad: Promise<PdfjsLike> | null = null;
 
@@ -30,7 +31,9 @@ function loadPdfjs(): Promise<PdfjsLike> {
  * endpoints say the registry holds. It is never sent anywhere, and nothing
  * here calls the app's own API. Once a file matches a record, the page asks
  * this site's public /ots route for that report's Bitcoin timestamp by its
- * manifest hash (#66), which only adds to the verdict.
+ * manifest hash (#66), which only adds to the verdict. A matched distribution
+ * copy's electronic seal is checked here too, against the roots the firm
+ * publishes (#120), and only adds to it as well.
  */
 export function VerifyClient({ setup }: { setup: VerifierSetup }) {
   const t = useTranslations('verify');
@@ -41,8 +44,9 @@ export function VerifyClient({ setup }: { setup: VerifierSetup }) {
   async function check(file: File) {
     setState({ step: 'checking', name: file.name });
     let verdict: ShownVerdict;
+    let bytes = new Uint8Array(0);
     try {
-      const bytes = new Uint8Array(await file.arrayBuffer());
+      bytes = new Uint8Array(await file.arrayBuffer());
       verdict = await verifyFile({
         bytes,
         config: setup,
@@ -52,7 +56,7 @@ export function VerifyClient({ setup }: { setup: VerifierSetup }) {
     } catch {
       verdict = { kind: 'CANNOT_VERIFY', reason: 'UNEXPECTED' };
     }
-    setState({ step: 'done', name: file.name, verdict });
+    setState({ step: 'done', name: file.name, bytes, verdict });
   }
 
   function onDrop(event: DragEvent) {
@@ -103,6 +107,9 @@ export function VerifyClient({ setup }: { setup: VerifierSetup }) {
           <p className="break-all text-sm text-content-muted">{state.name}</p>
           <VerdictView verdict={state.verdict} chainId={setup.chainId} issuers={setup.issuers} />
           {'matched' in state.verdict ? <BitcoinTimestampView key={state.verdict.matched.manifestHash} manifestHash={state.verdict.matched.manifestHash} /> : null}
+          {'matched' in state.verdict && state.verdict.matched.kind === 'DISTRIBUTION_COPY' ? (
+            <SealView key={state.verdict.docHash} bytes={state.bytes} roots={setup.sealRoots} />
+          ) : null}
           <div>
             <Button
               type="button"

@@ -1,7 +1,8 @@
 import * as pdfjs from 'pdfjs-dist';
 import { explorerAddressUrl, explorerBlockUrl, explorerTxUrl, networkNameOf } from '@/lib/chain/explorer';
 import { bitcoinTimestampFor, defaultExplorers, issuerProofFetcher, openRegistryView, readDocument, verifyFile, type BitcoinTimestamp, type PdfjsLike, type RecordSummary, type Verdict } from '@/lib/verify-core';
-import type { StandaloneSetup } from './config';
+import { sealStatusFor, type SealStatus } from '@/lib/verify-core/seal';
+import { rootsOf, type StandaloneSetup } from './config';
 
 /**
  * The verifier as one HTML file (dist/verifier.html), for when the app is
@@ -11,7 +12,9 @@ import type { StandaloneSetup } from './config';
  * settings and the English and Bulgarian wording. Its CSP allows connections
  * to the two endpoints only, and, when it was built with the issuer's origin,
  * to that origin's /ots route and the two Bitcoin explorers, for a matched
- * report's Bitcoin timestamp (#66). It writes text, never markup, into the page.
+ * report's Bitcoin timestamp (#66). A matched distribution copy's electronic
+ * seal is checked against the roots baked in (#120), offline. It writes text,
+ * never markup, into the page.
  */
 
 type Tree = { [key: string]: string | Tree };
@@ -26,7 +29,7 @@ const setup = __VERIFIER_SETUP__;
 pdfjs.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([__PDF_WORKER__], { type: 'text/javascript' }));
 
 let locale: Locale = navigator.language.toLowerCase().startsWith('bg') ? 'bg' : 'en';
-type Checked = { name: string; verdict: Shown; stamp?: BitcoinTimestamp | 'CHECKING' };
+type Checked = { name: string; verdict: Shown; stamp?: BitcoinTimestamp | 'CHECKING'; seal?: SealStatus | 'CHECKING' };
 let last: Checked | null = null;
 
 function t(key: string, values: Record<string, string | number> = {}): string {
@@ -132,6 +135,7 @@ function renderVerdict() {
     box.append(el('p', t('details.asOf', { block: verdict.asOfBlock }), { class: 'muted' }));
   }
   if (last.stamp) box.append(stampSection(last.stamp));
+  if (last.seal) box.append(sealSection(last.seal));
   out.append(box);
 }
 
@@ -156,6 +160,28 @@ function stampSection(stamp: BitcoinTimestamp | 'CHECKING'): HTMLElement {
   return section;
 }
 
+const SEAL_TONE: Record<SealStatus['status'], string> = { SEALED: 'ok', NOT_SEALED: 'muted', NO_ROOTS: 'muted', INVALID: 'bad' };
+const SEAL_CHECK_REASONS = new Set(['NOT_WHOLE_FILE', 'MALFORMED', 'DIGEST_MISMATCH', 'BAD_SIGNATURE', 'WRONG_CERTIFICATE', 'UNTRUSTED', 'BAD_TIMESTAMP']);
+
+/** A matched copy's electronic seal, beside the verdict and never part of it. */
+function sealSection(seal: SealStatus | 'CHECKING'): HTMLElement {
+  const section = el('section', undefined, { class: 'record', 'data-testid': 'seal', 'data-status': seal === 'CHECKING' ? 'CHECKING' : seal.status });
+  section.append(el('h3', t('seal.title')));
+  if (seal === 'CHECKING') {
+    section.append(el('p', t('seal.checking'), { class: 'muted' }));
+  } else {
+    const text =
+      seal.status === 'SEALED'
+        ? t('seal.SEALED', { signer: seal.signer, when: utcDate(seal.sealedAt) })
+        : seal.status === 'INVALID'
+          ? t('seal.INVALID', { reason: t(`seal.reasons.${SEAL_CHECK_REASONS.has(seal.reason) ? seal.reason : 'MALFORMED'}`) })
+          : t(`seal.${seal.status}`);
+    section.append(el('p', text, { class: SEAL_TONE[seal.status], 'data-testid': 'seal-body' }));
+  }
+  section.append(el('p', t('seal.apart'), { class: 'muted' }));
+  return section;
+}
+
 function renderStatic() {
   document.documentElement.lang = locale;
   document.title = t('title');
@@ -177,8 +203,9 @@ async function check(file: File) {
   renderVerdict();
   $('status').textContent = t('checking', { name: file.name });
   let verdict: Shown;
+  let bytes = new Uint8Array(0);
   try {
-    const bytes = new Uint8Array(await file.arrayBuffer());
+    bytes = new Uint8Array(await file.arrayBuffer());
     verdict = await verifyFile({
       bytes,
       config: setup,
@@ -189,9 +216,16 @@ async function check(file: File) {
     verdict = { kind: 'CANNOT_VERIFY', reason: 'UNEXPECTED' };
   }
   $('status').textContent = '';
-  const current: Checked = { name: file.name, verdict, stamp: 'matched' in verdict && setup.appUrl ? 'CHECKING' : undefined };
+  const copy = 'matched' in verdict && verdict.matched.kind === 'DISTRIBUTION_COPY';
+  const current: Checked = { name: file.name, verdict, stamp: 'matched' in verdict && setup.appUrl ? 'CHECKING' : undefined, seal: copy ? 'CHECKING' : undefined };
   last = current;
   renderVerdict();
+  if (copy) {
+    const seal = await sealStatusFor(bytes, rootsOf(setup)).catch((): SealStatus => ({ status: 'INVALID', reason: 'MALFORMED' }));
+    if (last !== current) return;
+    current.seal = seal;
+    renderVerdict();
+  }
   if ('matched' in verdict && setup.appUrl) {
     const stamp = await bitcoinTimestampFor(verdict.matched.manifestHash, { fetchProof: issuerProofFetcher(setup.appUrl), explorers: defaultExplorers() }).catch(
       (): BitcoinTimestamp => ({ status: 'UNAVAILABLE', reason: 'ISSUER_UNREACHABLE' }),

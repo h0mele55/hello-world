@@ -162,6 +162,13 @@ seal that does not check, fails the copy for a person
 (`docs/runbooks/seal-provider.md`). The version's page says when its copy is
 sealed.
 
+The verifiers show a copy's seal beside the verdict (#120), checked against
+the same roots, which are public: set `SEAL_TRUST_ANCHORS` in the app's
+environment too, so `/verify` hands them to the visitor's browser, and when
+building the single-file verifier, so `npm run build:verifier` bakes them in.
+The CLI takes `--seal-roots <pem>` instead. Without roots a verifier says it
+cannot check the seal; the verdict is the same either way.
+
 ## The audit-chain check
 
 Each night `npm run audit:check` re-derives every firm's chain. It also holds

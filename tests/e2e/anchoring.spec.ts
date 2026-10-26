@@ -1,6 +1,5 @@
 import { execFile, execFileSync } from 'node:child_process';
 import fs from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import pg from 'pg';
 import { expect, test, type Browser, type Page } from '@playwright/test';
@@ -40,7 +39,8 @@ let sealEnv: Record<string, string> = {};
 test.beforeAll(async () => {
   const pki = await createTestPki();
   sealProvider = await startFakeSealProvider(pki);
-  const roots = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'seal-roots-')), 'roots.pem');
+  // The same file the app's server reads (playwright.config.ts), so /verify checks the seal against these roots (#120).
+  const roots = process.env.E2E_SEAL_ROOTS!;
   fs.writeFileSync(roots, pemOf(pki.rootDer));
   sealEnv = {
     SEAL_PROVIDER: 'csc',
@@ -269,6 +269,9 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     await expect(visitor.getByTestId('record-matched-issuer')).toHaveText(issuerName);
     // The Bitcoin timestamp (#66), asked of the issuer by the manifest hash: none yet, as the OpenTimestamps job does not run here.
     await expect(visitor.getByTestId('bitcoin-timestamp')).toHaveAttribute('data-status', 'NONE');
+    // The copy's electronic seal (#120), checked in the browser against the roots the firm publishes, beside the verdict.
+    await expect(visitor.getByTestId('seal')).toHaveAttribute('data-status', 'SEALED', { timeout: 30_000 });
+    await expect(visitor.getByTestId('seal-body')).toContainText('Example Audit OOD (test seal)');
 
     // Had the issuer submitted it, the page would say it waits for Bitcoin: a pending proof of the very manifest it asked for.
     const asked: string[] = [];
@@ -284,6 +287,8 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     await expect(visitor.getByTestId('verdict')).toHaveAttribute('data-kind', 'AUTHENTIC_LATEST');
     await expect(visitor.getByTestId('record-matched')).toContainText('Original');
     await expect(visitor.getByTestId('bitcoin-timestamp')).toHaveAttribute('data-status', 'PENDING');
+    // Only a copy is sealed; an original has no seal to report.
+    await expect(visitor.getByTestId('seal')).toHaveCount(0);
     // The original and its copy share one manifest; only its hash was asked for, never the file's.
     expect(asked).toHaveLength(1);
     expect(asked[0]).toMatch(/^0x[0-9a-f]{64}$/);
@@ -295,8 +300,9 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     await verify(Buffer.concat([copy, Buffer.from('\n%appended\n')]));
     await expect(visitor.getByTestId('verdict')).toHaveAttribute('data-kind', 'ALTERED_OPINION_APPEARS_UNCHANGED');
     await expect(visitor.getByTestId('verdict-body')).toContainText('This is not the file the issuer anchored');
-    // A file that is not the registered one gets no timestamp: the manifest's time says nothing about it.
+    // A file that is not the registered one gets no timestamp: the manifest's time says nothing about it. Nor a seal.
     await expect(visitor.getByTestId('bitcoin-timestamp')).toHaveCount(0);
+    await expect(visitor.getByTestId('seal')).toHaveCount(0);
 
     await visitor.getByTestId('latest-link').click();
     await expect(visitor.getByTestId('latest-page')).toHaveAttribute('data-status', 'FOUND');

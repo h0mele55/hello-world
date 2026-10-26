@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { ChainError } from '@/lib/chain/errors';
 import { deploymentPath, isNetworkName, loadDeployment, type NetworkName } from '@/lib/chain/networks';
 import type { VerifierConfig } from '@/lib/verify-core';
+import { pemCertificates } from '@/lib/eseal/pem';
 
 /**
  * What the public verifier is told, from the server's environment and the
@@ -14,6 +15,9 @@ import type { VerifierConfig } from '@/lib/verify-core';
  *   VERIFY_NETWORK      a network in NETWORKS, e.g. sepolia or local (default: ANCHOR_NETWORK)
  *   VERIFY_RPC_URL_1/2  two independent public endpoints, on different hosts
  *                       (local: both default to LOCAL_RPC_URL)
+ *   SEAL_TRUST_ANCHORS  optional; the PEM file of roots the firm's electronic seal
+ *                       chains to (#70), the worker's own: public certificates, so
+ *                       a verifier can check a matched copy's seal (#120)
  */
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -22,6 +26,8 @@ export interface VerifierSetup extends VerifierConfig {
   network: NetworkName;
   /** Lower-case org id -> the name the deployment registered it under. */
   issuers: Record<string, string>;
+  /** The roots a copy's seal is checked against, as base64 DER; none when the firm publishes none. */
+  sealRoots: string[];
 }
 
 export type VerifierSetupRefusal = 'NOT_CONFIGURED' | 'NETWORK_INVALID' | 'DEPLOYMENT_UNAVAILABLE' | 'RPC_URLS_MISSING' | 'RPC_URLS_INVALID' | 'RPC_URLS_NOT_INDEPENDENT';
@@ -38,6 +44,16 @@ function issuersOf(network: NetworkName, root: string): Record<string, string> {
     return issuer.success ? { [issuer.data.orgId.toLowerCase()]: issuer.data.orgName } : {};
   } catch {
     return {};
+  }
+}
+
+/** The seal's roots, as base64 DER. A file that cannot be read gives none: the seal then says it cannot be checked, and the verdict is unaffected. */
+export function sealRootsOf(file: string | undefined): string[] {
+  if (!file) return [];
+  try {
+    return pemCertificates(fs.readFileSync(file, 'utf8')).map((der) => btoa(String.fromCharCode(...der)));
+  } catch {
+    return [];
   }
 }
 
@@ -88,6 +104,7 @@ export function verifierSetupFromEnv(env: Env = process.env, root = process.cwd(
       runtimeBytecodeHash: deployment.runtimeBytecodeHash as Hex,
       rpcUrls,
       issuers: issuersOf(network, root),
+      sealRoots: sealRootsOf(env.SEAL_TRUST_ANCHORS),
     },
   };
 }

@@ -44,6 +44,8 @@ async function main() {
         rpcUrls: [...result.setup.rpcUrls],
         issuers: result.setup.issuers,
         appUrl,
+        // SEAL_TRUST_ANCHORS, the worker's PEM file of public roots: a matched copy's seal is checked against them (#120).
+        sealRoots: result.setup.sealRoots,
       }
     : null;
   if (!setup && !cliOnly) {
@@ -62,10 +64,11 @@ async function main() {
     // pdf.js finds its own worker module next to itself, so it stays in node_modules.
     external: ['pdfjs-dist', 'pdfjs-dist/*'],
     define: { __VERIFIER_SETUP__: JSON.stringify(setup) },
-    banner: { js: '#!/usr/bin/env node' },
+    // A CommonJS dependency of the seal check (#120) requires Node's built-ins, which an ES module can do only through createRequire.
+    banner: { js: "#!/usr/bin/env node\nimport { createRequire as __createRequire } from 'node:module';\nconst require = __createRequire(import.meta.url);" },
     logLevel: 'warning',
   });
-  console.log(`wrote dist/verify-report.mjs${setup ? ` (chain ${setup.chainId}, ${setup.registry})` : ' (no baked settings)'}`);
+  console.log(`wrote dist/verify-report.mjs${setup ? ` (chain ${setup.chainId}, ${setup.registry}, ${setup.sealRoots.length} seal root(s))` : ' (no baked settings)'}`);
   if (cliOnly || !setup) return;
 
   const messages = { en: JSON.parse(read('messages', 'en.json')).verify, bg: JSON.parse(read('messages', 'bg.json')).verify };

@@ -15,6 +15,8 @@ export const StandaloneSetupSchema = z.object({
   issuers: z.record(z.string(), z.string()),
   /** The issuer's public origin, whose /ots route gives a matched report's Bitcoin timestamp (#66); null for none. */
   appUrl: z.string().regex(/^https?:\/\/[^\s/]+$/).nullable().default(null),
+  /** The roots a matched copy's electronic seal is checked against (#120), base64 DER; none for none. */
+  sealRoots: z.array(z.string().regex(/^[A-Za-z0-9+/]+={0,2}$/)).default([]),
 });
 
 export type StandaloneSetup = z.infer<typeof StandaloneSetupSchema>;
@@ -27,7 +29,7 @@ const DeploymentFileSchema = z.object({
   issuer: z.object({ orgId: z.string(), orgName: z.string() }).optional(),
 });
 
-export function setupFromDeployment(json: unknown, rpcUrls: [string, string], appUrl: string | null = null): StandaloneSetup {
+export function setupFromDeployment(json: unknown, rpcUrls: [string, string], appUrl: string | null = null, sealRoots: string[] = []): StandaloneSetup {
   const d = DeploymentFileSchema.parse(json);
   return StandaloneSetupSchema.parse({
     chainId: d.chainId,
@@ -36,8 +38,12 @@ export function setupFromDeployment(json: unknown, rpcUrls: [string, string], ap
     rpcUrls,
     issuers: d.issuer ? { [d.issuer.orgId.toLowerCase()]: d.issuer.orgName } : {},
     appUrl,
+    sealRoots,
   });
 }
+
+/** Base64 DER, as the setup carries the seal's roots, to bytes. */
+export const rootsOf = (setup: StandaloneSetup) => setup.sealRoots.map((b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
 
 /** JSON with bigints as decimal strings: verdicts carry none today, but a future field must not crash the output. */
 export const verdictJson = (value: unknown) => JSON.stringify(value, (_, v) => (typeof v === 'bigint' ? v.toString() : v), 2);

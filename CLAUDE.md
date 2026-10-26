@@ -365,8 +365,8 @@ to one inflect-compliance commit.
 ## The verifier
 
 - **Verification code lives in `src/lib/verify-core/`** and runs unchanged in
-  the browser and in Node: no server imports, only `viem`, `zod` and plain
-  modules. `tests/unit/verify-core-imports.test.ts` walks its imports. The
+  the browser and in Node: no server imports, only `viem`, `zod`, the seal
+  check's `asn1js` and `pkijs`, and plain modules. `tests/unit/verify-core-imports.test.ts` walks its imports. The
   server's isolated parser uses its line, page and metadata readers, so both
   read the same text from the same file.
 - **`/verify` decides in the browser** (rule 5). The server hands the page
@@ -575,6 +575,18 @@ to one inflect-compliance commit.
   sealed file independently of this code. No test reaches a real provider. A
   "qualified" validation needs the provider's qualified certificate, which no
   test has.
+- **The verifiers show a matched copy's seal beside the verdict, never in it**
+  (#120, `sealStatusFor`, `src/lib/verify-core/seal.ts`, the same check the
+  worker runs, with no Node imports). It is checked in the visitor's browser
+  or the CLI against the roots the firm publishes: `SEAL_TRUST_ANCHORS` in
+  the app's environment for `/verify` (`verifierSetupFromEnv` hands them over
+  as base64), baked into `dist/verifier.html` and the CLI by `npm run
+  build:verifier`, or the CLI's `--seal-roots`. Only a DISTRIBUTION_COPY
+  match is checked; every outcome is a named status (SEALED, NOT_SEALED,
+  NO_ROOTS, INVALID with its `SealError` code), none of them changes the
+  verdict, and none says authentic. `/verify` loads the check's code only
+  when a copy matches. `src/lib/eseal/pem.ts` reads PEM with no dependency,
+  because `src/proxy.ts` imports the verifier's setup.
 
 ## The audit log and backups
 

@@ -6,9 +6,10 @@ import { describe, expect, it } from 'vitest';
  * src/lib/verify-core runs in the browser (and the standalone verifier), so
  * nothing it imports, directly or through other modules, may need Node or the
  * server: no `node:` modules or Node built-ins, no database, no secrets, no
- * `Buffer`. Bare package imports are allowed only from this list.
+ * `Buffer`. Bare package imports are allowed only from this list: asn1js and
+ * pkijs read a copy's electronic seal (seal.ts, #120), with WebCrypto.
  */
-const ALLOWED_PACKAGES = new Set(['viem', 'zod']);
+const ALLOWED_PACKAGES = new Set(['viem', 'zod', 'asn1js', 'pkijs']);
 const ROOT = path.resolve(import.meta.dirname, '..', '..');
 
 function resolveLocal(from: string, specifier: string): string | null {
@@ -44,8 +45,8 @@ function closure(entry: string) {
   return { files: [...seen].map((f) => path.relative(ROOT, f)).sort(), packages: [...packages].sort(), offenders };
 }
 
-describe('the verify-core boundary', () => {
-  const { files, packages, offenders } = closure(path.join(ROOT, 'src', 'lib', 'verify-core', 'index.ts'));
+describe.each(['index.ts', 'seal.ts'])('the verify-core boundary, from %s', (entry) => {
+  const { files, packages, offenders } = closure(path.join(ROOT, 'src', 'lib', 'verify-core', entry));
 
   it('imports only browser-safe packages', () => {
     expect(packages.filter((p) => !ALLOWED_PACKAGES.has(p))).toEqual([]);
@@ -56,7 +57,7 @@ describe('the verify-core boundary', () => {
     expect(files.filter((f) => /server|db\.ts|storage|sealed|keys|auth|anchoring\/|pdf\/parse/.test(f))).toEqual([]);
   });
 
-  it('covers the opinion code the server commits with', () => {
+  it.runIf(entry === 'index.ts')('covers the opinion code the server commits with', () => {
     expect(files).toEqual(expect.arrayContaining(['src/lib/opinion/locate.ts', 'src/lib/opinion/normalise.ts', 'src/lib/verify-core/lines.mjs', 'src/lib/verify-core/commitment.ts']));
   });
 });

@@ -46,9 +46,13 @@ async function deploy(network: string, env: Record<string, string>) {
 }
 
 describe('deploying to a production candidate’s testnet', () => {
-  it('refuses a production network until the owner has chosen one', async () => {
-    const refused = await deploy('base', { BASE_RPC_URL: anvil.url, DEPLOYER_PRIVATE_KEY: generatePrivateKey(), ISSUER_ADDRESS: privateKeyToAccount(generatePrivateKey()).address, ISSUER_ORG_NAME: 'Firm' });
-    expect(refused).toMatchObject({ code: 1, err: expect.stringContaining('production network') });
+  it('refuses a production network the owner did not choose, and the chosen one until its testnet is deployed (#63)', async () => {
+    const keys = { DEPLOYER_PRIVATE_KEY: generatePrivateKey(), ISSUER_ADDRESS: privateKeyToAccount(generatePrivateKey()).address, ISSUER_ORG_NAME: 'Firm' };
+    const refused = await deploy('base', { BASE_RPC_URL: anvil.url, ...keys });
+    expect(refused).toMatchObject({ code: 1, err: expect.stringContaining('production network the owner did not choose') });
+    // Arbitrum One is the owner's choice, and waits on deployments/arbitrum-sepolia.json, which no test writes.
+    const notYet = await deploy('arbitrum', { ARBITRUM_RPC_URL: anvil.url, ...keys });
+    expect(notYet).toMatchObject({ code: 1, err: expect.stringContaining('deployments/arbitrum-sepolia.json does not exist yet') });
   });
 
   it('deploys to Base Sepolia, and the adapter anchors there and reaches finality', async () => {

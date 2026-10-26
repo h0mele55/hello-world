@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { explorerTxUrl, networkNameOf } from '@/lib/chain/explorer';
-import { NETWORKS, PRODUCTION_NETWORKS, rpcUrlFor, rpcUrlVariable, secondRpcUrlFor, type NetworkName } from '@/lib/chain/networks';
+import { CHOSEN_PRODUCTION_NETWORK, NETWORKS, PRODUCTION_NETWORKS, REHEARSAL_NETWORK, rpcUrlFor, rpcUrlVariable, secondRpcUrlFor, type NetworkName } from '@/lib/chain/networks';
 
 /**
  * The networks every part of the system knows (#63): one table, so the worker,
@@ -28,6 +28,9 @@ describe('the networks', () => {
 
   it('hold the production candidates apart, each with a Sepolia testnet to rehearse on', () => {
     expect([...PRODUCTION_NETWORKS].sort()).toEqual(['arbitrum', 'base', 'mainnet', 'optimism']);
+    // The owner's choice (#63), rehearsed on its own testnet first.
+    expect(CHOSEN_PRODUCTION_NETWORK).toBe('arbitrum');
+    expect(REHEARSAL_NETWORK).toEqual({ arbitrum: 'arbitrum-sepolia' });
     for (const network of PRODUCTION_NETWORKS) {
       const testnet = network === 'mainnet' ? 'sepolia' : `${network}-sepolia`;
       expect(names).toContain(testnet);

@@ -171,10 +171,21 @@ second, independent timestamp on Bitcoin.
 
 ## The decision
 
-- [ ] **The owner chooses the production chain.**
+- [x] **The owner chose Arbitrum One** on 2026-10-26, for cost per report,
+  with the trade-off described above. To soften it, a monthly Merkle root of
+  every record the firm's keys write on Arbitrum is timestamped on Bitcoin
+  through OpenTimestamps (#122). That option is free, reuses #66, and puts the
+  record set on the hardest chain to lose. It was chosen over a mainnet root
+  (about EUR 1 to 17 a month) and over Hedera. Hedera is cheaper still, but its
+  consensus nodes are run by its council and its history lives on mirror
+  nodes, the same kind of dependency the checkpoint exists to avoid.
 
-  When the choice is made:
-  1. its testnet is deployed and rehearsed (after #4);
-  2. `scripts/deploy-registry.ts` stops refusing that one network, in the
-     same pull request that records this decision;
-  3. the ROADMAP's Phase 6 exit gate counts it as signed off.
+  What follows from the choice:
+  1. its testnet, Arbitrum Sepolia, is deployed and rehearsed first (#123,
+     after #4);
+  2. `scripts/deploy-registry.ts` deploys to Arbitrum One only once
+     `deployments/arbitrum-sepolia.json` exists, and still refuses mainnet,
+     Base and OP Mainnet (`CHOSEN_PRODUCTION_NETWORK` in
+     `src/lib/chain/networks.ts`);
+  3. Sepolia's records are re-anchored on Arbitrum One (#65);
+  4. the ROADMAP's Phase 6 exit gate counts the chain as signed off.

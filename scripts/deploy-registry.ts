@@ -4,8 +4,10 @@
  *   npx tsx scripts/deploy-registry.ts sepolia
  *   npx tsx scripts/deploy-registry.ts base-sepolia      (or optimism-sepolia, arbitrum-sepolia)
  *
- * The production networks (mainnet, base, optimism, arbitrum) are refused
- * until the owner has chosen one (#63, docs/decision-production-chain.md).
+ * Of the production candidates (mainnet, base, optimism, arbitrum), the owner
+ * chose Arbitrum One (#63, docs/decision-production-chain.md); the others are
+ * refused. Arbitrum One is deployed to only once its testnet has been:
+ * deployments/arbitrum-sepolia.json must exist (#123).
  *
  * Reads, from the environment (never from a committed file):
  *   DEPLOYER_PRIVATE_KEY  becomes the owner; refused if it holds more than 0.1 ETH
@@ -32,7 +34,7 @@ import path from 'node:path';
 import { createPublicClient, createWalletClient, encodeAbiParameters, formatEther, getAddress, http, isAddress, isHex, parseEther, type PublicClient } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { deployRegistry, orgIdFor } from '../src/lib/chain/deploy';
-import { deploymentPath, isNetworkName, NETWORKS, PRODUCTION_NETWORKS, rpcUrlFor, rpcUrlVariable } from '../src/lib/chain/networks';
+import { CHOSEN_PRODUCTION_NETWORK, deploymentPath, isNetworkName, NETWORKS, PRODUCTION_NETWORKS, REHEARSAL_NETWORK, rpcUrlFor, rpcUrlVariable } from '../src/lib/chain/networks';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
 const MAX_DEPLOYER_BALANCE = parseEther('0.1');
@@ -67,7 +69,13 @@ function env(name: string): string {
 async function main() {
   const network = process.argv[2];
   if (!isNetworkName(network)) fail(`usage: npx tsx scripts/deploy-registry.ts <${Object.keys(NETWORKS).join('|')}>`);
-  if (PRODUCTION_NETWORKS.includes(network)) fail(`${network} is a production network: deploying to one waits on the owner's choice of chain (#63)`);
+  if (PRODUCTION_NETWORKS.includes(network) && network !== CHOSEN_PRODUCTION_NETWORK) {
+    fail(`${network} is a production network the owner did not choose: production is ${CHOSEN_PRODUCTION_NETWORK} (#63)`);
+  }
+  const rehearsal = REHEARSAL_NETWORK[network];
+  if (rehearsal && !fs.existsSync(deploymentPath(rehearsal, ROOT))) {
+    fail(`${network} is deployed to only after its testnet: deployments/${rehearsal}.json does not exist yet (#123)`);
+  }
   const chain = NETWORKS[network];
   if (network !== 'local') env(rpcUrlVariable(network));
   const rpcUrl = rpcUrlFor(network);

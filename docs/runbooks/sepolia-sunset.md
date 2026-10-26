@@ -16,7 +16,7 @@ will:
 
 | Issue | What it does |
 | --- | --- |
-| #63 | The production chain, once the owner has chosen it. |
+| #63 | The production chain: Arbitrum One, chosen by the owner on 2026-10-26. |
 | #65 | `scripts/reanchor.ts`: one Merkle root of every Sepolia record, committed on the production chain, with a proof per record that the verifier accepts. |
 | #66 | A Bitcoin timestamp of each manifest (OpenTimestamps), independent of any Ethereum network. |
 
@@ -27,9 +27,9 @@ Ethereum Foundation's announcements and those of the two RPC providers.
 
 1. **Stop new anchors on Sepolia.** An approver sets the write mode to
    DISABLED. Writes in flight are still settled.
-2. **Re-anchor** while Sepolia still answers. Steps 2 and 3 need #63 and #65:
+2. **Re-anchor** while Sepolia still answers. Steps 2 and 3 need #65:
    1. read every record from the registry's logs;
-   2. commit the root on the production chain;
+   2. commit the root on the production chain, Arbitrum One;
    3. publish the proof files;
    4. check every proof against the root.
 3. **Switch the verifier** to accept a Sepolia record through its proof.

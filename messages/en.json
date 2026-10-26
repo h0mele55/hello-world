@@ -479,6 +479,9 @@
       "WRONG_CONTRACT": "The contract at the registry address is not the expected registry.",
       "RPC_DISAGREE": "The two blockchain endpoints gave different answers.",
       "CHAIN_INCONSISTENT": "The registry returned records that do not fit together.",
+      "REANCHOR_ROOT_NOT_RECORDED": "This report was anchored on a network that has been retired. Its records were carried over with a proof, but the registry does not hold that proof's root, or the registry's owner has withdrawn it.",
+      "REANCHOR_PROOF_INVALID": "This report was anchored on a network that has been retired. The proof of its records that was given does not check.",
+      "REANCHOR_NOT_COVERED": "This report was anchored on a network that has been retired. The proof given does not cover the record this file names.",
       "FILE_TOO_LARGE": "The file is larger than 25 MB.",
       "UNEXPECTED": "Something went wrong while checking."
     },

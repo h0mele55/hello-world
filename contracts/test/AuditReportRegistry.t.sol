@@ -582,6 +582,115 @@ contract AuditReportRegistryTest is Test {
         assertEq(registry.auditHeads(OTHER_ORG, 0, 10).length, 0);
     }
 
+    // ── re-anchor roots (#65) ──
+
+    address internal constant SEPOLIA_REGISTRY =
+        address(0x87Ba96d1d48e280429A8ead1059334C34507c31F);
+
+    function _roots() internal view returns (AuditReportRegistry.ReanchorRoot[] memory) {
+        return registry.reanchorRoots(0, type(uint256).max);
+    }
+
+    function test_recordReanchorRoot_byTheOwner_appendsAndEmits() public {
+        bytes32 root = keccak256("root-1");
+        vm.roll(4242);
+        vm.expectEmit(true, true, false, true, address(registry));
+        emit AuditReportRegistry.ReanchorRootRecorded(
+            0, root, 11155111, SEPOLIA_REGISTRY, 9_876_543, 17
+        );
+        vm.prank(owner);
+        assertEq(registry.recordReanchorRoot(root, 11155111, SEPOLIA_REGISTRY, 9_876_543, 17), 0);
+        vm.prank(owner);
+        assertEq(
+            registry.recordReanchorRoot(
+                keccak256("root-2"), 11155111, SEPOLIA_REGISTRY, 9_900_000, 18
+            ),
+            1
+        );
+
+        assertEq(registry.reanchorRootCount(), 2);
+        AuditReportRegistry.ReanchorRoot[] memory roots = _roots();
+        assertEq(roots[0].root, root);
+        assertEq(roots[0].sourceChainId, 11155111);
+        assertEq(roots[0].sourceRegistry, SEPOLIA_REGISTRY);
+        assertEq(roots[0].sourceBlock, 9_876_543);
+        assertEq(roots[0].count, 17);
+        assertEq(roots[0].recordedBlock, 4242);
+        assertFalse(roots[0].voided);
+        assertEq(roots[1].count, 18);
+    }
+
+    function test_recordReanchorRoot_refusals() public {
+        // A root vouches for a whole deployment's history: no issuer key, and no one else, may record one.
+        vm.expectRevert(AuditReportRegistry.NotOwner.selector);
+        vm.prank(issuer);
+        registry.recordReanchorRoot(keccak256("r"), 11155111, SEPOLIA_REGISTRY, 1, 1);
+        vm.expectRevert(AuditReportRegistry.NotOwner.selector);
+        vm.prank(stranger);
+        registry.recordReanchorRoot(keccak256("r"), 11155111, SEPOLIA_REGISTRY, 1, 1);
+
+        vm.startPrank(owner);
+        vm.expectRevert(AuditReportRegistry.ZeroValue.selector);
+        registry.recordReanchorRoot(bytes32(0), 11155111, SEPOLIA_REGISTRY, 1, 1);
+        vm.expectRevert(AuditReportRegistry.ZeroValue.selector);
+        registry.recordReanchorRoot(keccak256("r"), 0, SEPOLIA_REGISTRY, 1, 1);
+        vm.expectRevert(AuditReportRegistry.ZeroValue.selector);
+        registry.recordReanchorRoot(keccak256("r"), 11155111, address(0), 1, 1);
+        vm.expectRevert(AuditReportRegistry.ZeroValue.selector);
+        registry.recordReanchorRoot(keccak256("r"), 11155111, SEPOLIA_REGISTRY, 0, 1);
+        // Zero records is never a complete set.
+        vm.expectRevert(AuditReportRegistry.ZeroValue.selector);
+        registry.recordReanchorRoot(keccak256("r"), 11155111, SEPOLIA_REGISTRY, 1, 0);
+        vm.expectRevert(AuditReportRegistry.ReanchorOfSelf.selector);
+        // forge-lint: disable-next-line(unsafe-typecast)
+        registry.recordReanchorRoot(keccak256("r"), uint64(block.chainid), address(registry), 1, 1);
+        vm.stopPrank();
+        assertEq(registry.reanchorRootCount(), 0);
+    }
+
+    function test_voidReanchorRoot_byTheOwnerOnly_once() public {
+        vm.startPrank(owner);
+        registry.recordReanchorRoot(keccak256("wrong"), 11155111, SEPOLIA_REGISTRY, 1, 3);
+        registry.recordReanchorRoot(keccak256("right"), 11155111, SEPOLIA_REGISTRY, 1, 3);
+        vm.stopPrank();
+
+        vm.expectRevert(AuditReportRegistry.NotOwner.selector);
+        vm.prank(issuer);
+        registry.voidReanchorRoot(0);
+
+        vm.expectEmit(true, false, false, true, address(registry));
+        emit AuditReportRegistry.ReanchorRootVoided(0, owner);
+        vm.prank(owner);
+        registry.voidReanchorRoot(0);
+        AuditReportRegistry.ReanchorRoot[] memory roots = _roots();
+        assertTrue(roots[0].voided);
+        assertFalse(roots[1].voided);
+
+        vm.startPrank(owner);
+        vm.expectRevert(
+            abi.encodeWithSelector(AuditReportRegistry.ReanchorRootAlreadyVoided.selector, 0)
+        );
+        registry.voidReanchorRoot(0);
+        vm.expectRevert(abi.encodeWithSelector(AuditReportRegistry.UnknownReanchorRoot.selector, 2));
+        registry.voidReanchorRoot(2);
+        vm.stopPrank();
+    }
+
+    function test_reanchorRoots_pages() public {
+        vm.startPrank(owner);
+        for (uint256 i = 0; i < 5; ++i) {
+            registry.recordReanchorRoot(keccak256(abi.encode(i)), 11155111, SEPOLIA_REGISTRY, 1, 1);
+        }
+        vm.stopPrank();
+        AuditReportRegistry.ReanchorRoot[] memory page = registry.reanchorRoots(1, 3);
+        assertEq(page.length, 3);
+        assertEq(page[0].root, keccak256(abi.encode(uint256(1))));
+        assertEq(page[2].root, keccak256(abi.encode(uint256(3))));
+        assertEq(registry.reanchorRoots(3, 10).length, 2, "fewer at the end");
+        assertEq(registry.reanchorRoots(5, 10).length, 0, "none past it");
+        assertEq(registry.reanchorRoots(99, 10).length, 0);
+    }
+
     function test_unknownRecord_readsAsZero() public view {
         AuditReportRegistry.RecordView memory r = registry.getRecord(_doc(9));
         assertEq(r.docHash, bytes32(0));

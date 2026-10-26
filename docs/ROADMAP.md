@@ -1074,7 +1074,7 @@ external review findings are closed; re-anchoring has been rehearsed on a copy.
 - [ ] Monitoring and on-call for failed writes, finality lag, RPC disagreement, low balance and verifier errors
 - [ ] `/verify` load-tested at 50 requests per second
 - [ ] Disaster recovery restores the database and re-derives every verdict from the chain
-- [ ] The re-anchoring proof verifies every Sepolia record against the production root
+- [ ] The re-anchoring proof verifies every Sepolia record against the production root (rehearsed on two Anvil chains, #65; the real run waits on #4 and #123)
 
 **As built so far.** 6a is the threat model, the runbooks and the owner's
 script (#61, #67, #68):
@@ -1295,6 +1295,30 @@ locked bucket or a mailbox):
 - **CI runs it last**, after the end-to-end tests, the check and the watch:
   the tests must leave nothing for a person.
 - **Still open on #68:** walking each runbook once on Sepolia, after #4.
+
+6j is re-anchoring (#65), for the Sepolia sunset:
+
+- **The registry keeps re-anchor roots.** `recordReanchorRoot`, the owner's
+  act only, records the Merkle root of every record another deployment held
+  at one finalized block, with that deployment, the block and the count;
+  `voidReanchorRoot` sets a wrong one aside. A stolen issuer key cannot vouch
+  for records that never existed.
+- **`scripts/reanchor.ts build`** reads every record from its Anchored event
+  and `getRecord`, on two endpoints at one agreed finalized block, and writes
+  the archive and a proof per record. It refuses while a revocation still
+  waits out the registry's delay. **`check`** holds every proof to the
+  recorded root, with no Sepolia endpoint needed.
+- **The verifier** (`verifyWithReanchors` in verify-core, and the CLI's
+  `--reanchor`) accepts a record through an archive or its proof once the
+  root is on its own registry. Each leaf commits to the whole record and to
+  everything a verdict shows, so a re-anchored file gets the verdict Sepolia
+  gave it at the snapshot.
+- **Rehearsed on two Anvil chains** (`tests/integration/reanchor.test.ts`):
+  the first chain is stopped and every file still gets its verdict, through
+  the archive, through its proof and through the CLI.
+- **Still open:** `/verify` and `verifier.html` (#126), a re-anchored
+  family's next version (#127, the owner's decision), and the run on Sepolia
+  itself, after #4 and #123.
 
 **Prompt**
 

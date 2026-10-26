@@ -1,5 +1,5 @@
 import { PDFArray, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFString } from '@cantoo/pdf-lib';
-import { checkDetached, sha256, signDetached } from './cms';
+import { sha256, signDetached } from './cms';
 import { SealError, type SealSigner, type Timestamper } from './types';
 
 /**
@@ -99,75 +99,4 @@ export async function sealPdf(stamped: Uint8Array, options: SealOptions): Promis
   return out;
 }
 
-export interface SealReading {
-  /** The bytes the seal covers: the whole file but the signature itself. */
-  content: Uint8Array;
-  /** The CMS signature, without the padding. */
-  cms: Uint8Array;
-  /** Where the signature's update begins: the file before it was sealed is the bytes up to here. */
-  byteRange: [number, number, number, number];
-}
-
-/** The seal of a sealed file: the last signature, which must cover the whole file but its own contents. */
-export function readSeal(bytes: Uint8Array): SealReading {
-  const text = ascii(bytes);
-  const at = text.lastIndexOf('/ByteRange');
-  if (at < 0) throw new SealError('NO_SEAL', 'the file carries no signature');
-  const match = /^\/ByteRange\s*\[\s*(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s*\]/.exec(text.slice(at, at + 200));
-  if (!match) throw new SealError('MALFORMED', 'the byte range cannot be read');
-  const range = match.slice(1, 5).map(Number) as [number, number, number, number];
-  const [start, firstLength, secondStart, secondLength] = range;
-  if (start !== 0 || firstLength >= secondStart || secondStart + secondLength !== bytes.length) {
-    throw new SealError('NOT_WHOLE_FILE', 'the signature does not cover the whole file but itself');
-  }
-  if (bytes[firstLength] !== 0x3c || bytes[secondStart - 1] !== 0x3e) throw new SealError('NOT_WHOLE_FILE', 'the byte range leaves out more than the signature');
-  const hex = text.slice(firstLength + 1, secondStart - 1);
-  if (!/^[0-9A-Fa-f]*$/.test(hex) || hex.length % 2) throw new SealError('MALFORMED', 'the signature contents are not hex');
-  const padded = Buffer.from(hex, 'hex');
-  // The DER length says where the signature ends; the rest is the placeholder's zeros.
-  const cms = new Uint8Array(padded.subarray(0, derLength(padded)));
-  if (padded.subarray(cms.length).some((b) => b !== 0)) throw new SealError('MALFORMED', 'bytes follow the signature in its contents');
-  const content = new Uint8Array(firstLength + secondLength);
-  content.set(bytes.subarray(0, firstLength));
-  content.set(bytes.subarray(secondStart), firstLength);
-  return { content, cms, byteRange: range };
-}
-
-function derLength(bytes: Uint8Array): number {
-  if (bytes[0] !== 0x30) throw new SealError('MALFORMED', 'the signature is not a DER sequence');
-  const first = bytes[1];
-  if (first < 0x80) return 2 + first;
-  const n = first & 0x7f;
-  if (n === 0 || n > 4) throw new SealError('MALFORMED', 'the signature has an unreadable length');
-  let length = 0;
-  for (let i = 0; i < n; i++) length = length * 256 + bytes[2 + i];
-  if (2 + n + length > bytes.length) throw new SealError('MALFORMED', 'the signature is longer than its contents');
-  return 2 + n + length;
-}
-
-export interface SealCheck {
-  /** The seal certificate's subject, as a string. */
-  signer: string;
-  /** The time the timestamping authority vouches for. */
-  sealedAt: Date;
-  timestampSerial: string;
-}
-
-/**
- * Checks a sealed copy: its seal covers the whole file but itself, the file
- * before the seal is `stamped` (when given), and the signature, the seal
- * certificate, its chain and the timestamp all hold against `trustAnchors`.
- */
-export async function checkSeal(sealed: Uint8Array, trustAnchors: Uint8Array[], stamped?: Uint8Array): Promise<SealCheck> {
-  const seal = readSeal(sealed);
-  if (stamped && (sealed.length <= stamped.length || !Buffer.from(sealed.subarray(0, stamped.length)).equals(Buffer.from(stamped)))) {
-    throw new SealError('NOT_WHOLE_FILE', 'the sealed file does not begin with the stamped file');
-  }
-  if (stamped && seal.byteRange[1] < stamped.length) throw new SealError('NOT_WHOLE_FILE', 'the signature lies inside the stamped file');
-  const checked = await checkDetached(seal.cms, seal.content, trustAnchors);
-  return {
-    signer: checked.signer.subject.typesAndValues.map((tv) => `${tv.type === '2.5.4.3' ? 'CN' : tv.type === '2.5.4.10' ? 'O' : tv.type === '2.5.4.6' ? 'C' : tv.type}=${tv.value.valueBlock.value}`).join(', '),
-    sealedAt: checked.sealedAt,
-    timestampSerial: checked.timestampSerial,
-  };
-}
+export { checkSeal, readSeal, type SealCheck, type SealReading } from '../verify-core/seal';

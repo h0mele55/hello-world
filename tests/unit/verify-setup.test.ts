@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it } from 'vitest';
 import { orgIdFor } from '@/lib/chain/deploy';
 import { registryRuntimeBytecodeHash } from '@/lib/chain/registry-artifact';
 import { verifierSetupFromEnv } from '@/lib/verify-setup';
+import { createTestPki, pemOf } from '../helpers/test-pki';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-setup-'));
 const ADDRESS = '0x87ba96d1d48e280429a8ead1059334c34507c31f';
@@ -33,8 +34,22 @@ describe('the verifier setup', () => {
         runtimeBytecodeHash: registryRuntimeBytecodeHash,
         rpcUrls: ['https://rpc.one.example/sepolia', 'https://rpc.two.example'],
         issuers: { [orgIdFor('Ledger Audit Ltd')]: 'Ledger Audit Ltd' },
+        sealRoots: [],
       },
     });
+  });
+
+  it('hands the page the seal’s published roots, and none for a file it cannot read (#120)', async () => {
+    const pki = await createTestPki();
+    const pem = path.join(root, 'roots.pem');
+    fs.writeFileSync(pem, pemOf(pki.rootDer) + pemOf(pki.tsaDer));
+    const result = verifierSetupFromEnv({ ...sepolia, SEAL_TRUST_ANCHORS: pem }, root);
+    expect(result.ok && result.setup.sealRoots).toEqual([Buffer.from(pki.rootDer).toString('base64'), Buffer.from(pki.tsaDer).toString('base64')]);
+    fs.writeFileSync(path.join(root, 'broken.pem'), '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n');
+    for (const file of [path.join(root, 'broken.pem'), path.join(root, 'missing.pem')]) {
+      const unreadable = verifierSetupFromEnv({ ...sepolia, SEAL_TRUST_ANCHORS: file }, root);
+      expect(unreadable.ok && unreadable.setup.sealRoots).toEqual([]);
+    }
   });
 
   it('falls back to the anchoring network, and for a local chain to its one node', () => {

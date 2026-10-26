@@ -3,26 +3,30 @@ import path from 'node:path';
 import { parseArgs } from 'node:util';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { bitcoinTimestampFor, defaultExplorers, issuerProofFetcher, openRegistryView, readDocument, verifyFile, type PdfjsLike } from '@/lib/verify-core';
-import { setupFromDeployment, StandaloneSetupSchema, verdictJson, type StandaloneSetup } from './config';
+import { certificatesFromPem, sealStatusFor } from '@/lib/verify-core/seal';
+import { rootsOf, setupFromDeployment, StandaloneSetupSchema, verdictJson, type StandaloneSetup } from './config';
 
 /**
  * verify-report: the verifier as a command, with the same verify-core the
  * browser runs. Prints the verdict as JSON.
  *
  *   verify-report report.pdf
- *   verify-report report.pdf --deployment deployments/sepolia.json --rpc <url> --rpc <url> [--app-url <url>]
+ *   verify-report report.pdf --deployment deployments/sepolia.json --rpc <url> --rpc <url> [--app-url <url>] [--seal-roots <pem>]
  *
  * Without flags it uses the settings baked in by `npm run build:verifier`.
  * For a file that matches a record, and with the issuer's public origin
  * (baked in, or --app-url), it also checks the report's Bitcoin timestamp
  * (#66) and prints it as `bitcoinTimestamp`; null when it was not asked.
+ * For a file that matches a distribution copy it checks the firm's electronic
+ * seal against the roots baked in, or those in --seal-roots (#120), and prints
+ * it as `seal`; null for any other file. Neither changes the verdict.
  * Exit status: 0 a verdict was reached, 3 cannot verify right now, 2 usage.
  */
 
 declare const __VERIFIER_SETUP__: StandaloneSetup | null;
 
 function usage(message: string): never {
-  process.stderr.write(`${message}\nusage: verify-report <file.pdf> [--deployment <file> --rpc <url> --rpc <url>] [--app-url <url>]\n`);
+  process.stderr.write(`${message}\nusage: verify-report <file.pdf> [--deployment <file> --rpc <url> --rpc <url>] [--app-url <url>] [--seal-roots <pem>]\n`);
   process.exit(2);
 }
 
@@ -47,13 +51,21 @@ function setupOf(values: { deployment?: string; rpc?: string[]; 'app-url'?: stri
 async function main() {
   let parsed;
   try {
-    parsed = parseArgs({ allowPositionals: true, options: { deployment: { type: 'string' }, rpc: { type: 'string', multiple: true }, 'app-url': { type: 'string' } } });
+    parsed = parseArgs({ allowPositionals: true, options: { deployment: { type: 'string' }, rpc: { type: 'string', multiple: true }, 'app-url': { type: 'string' }, 'seal-roots': { type: 'string' } } });
   } catch (error) {
     usage(error instanceof Error ? error.message : String(error));
   }
   if (parsed.positionals.length !== 1) usage('give exactly one PDF');
   const file = parsed.positionals[0];
   const setup = setupOf(parsed.values);
+  let roots: Uint8Array[] = rootsOf(setup);
+  if (parsed.values['seal-roots']) {
+    try {
+      roots = certificatesFromPem(fs.readFileSync(parsed.values['seal-roots'], 'utf8'));
+    } catch {
+      usage(`${parsed.values['seal-roots']} is not a readable PEM file of certificates`);
+    }
+  }
   let bytes: Uint8Array;
   try {
     bytes = new Uint8Array(fs.readFileSync(file));
@@ -67,7 +79,8 @@ async function main() {
     readPdf: (pdf) => readDocument(pdfjs as unknown as PdfjsLike, pdf),
   });
   const bitcoinTimestamp = 'matched' in verdict && setup.appUrl ? await bitcoinTimestampFor(verdict.matched.manifestHash, { fetchProof: issuerProofFetcher(setup.appUrl), explorers: defaultExplorers() }) : null;
-  process.stdout.write(`${verdictJson({ file: path.basename(file), verdict, bitcoinTimestamp })}\n`);
+  const seal = 'matched' in verdict && verdict.matched.kind === 'DISTRIBUTION_COPY' ? await sealStatusFor(bytes, roots) : null;
+  process.stdout.write(`${verdictJson({ file: path.basename(file), verdict, bitcoinTimestamp, seal })}\n`);
   process.exit(verdict.kind === 'CANNOT_VERIFY' ? 3 : 0);
 }
 

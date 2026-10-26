@@ -25,6 +25,9 @@ contract AuditReportRegistryGasTest is Test {
     // An audit-log head writes two fresh slots (#94); the firm's first also
     // writes its list's length, which this measures. Later ones cost less.
     uint256 internal constant AUDIT_HEAD_CEILING = 110_000;
+    // A re-anchor root writes three fresh slots and the list's length (#65),
+    // once per chain sunset.
+    uint256 internal constant REANCHOR_ROOT_CEILING = 140_000;
 
     function setUp() public {
         registry = new AuditReportRegistry(address(this), 1 days);
@@ -55,11 +58,15 @@ contract AuditReportRegistryGasTest is Test {
         registry.recordAuditHead(keccak256("head"));
         uint256 auditHeadGas = vm.snapshotGasLastCall("record_audit_head");
 
+        registry.recordReanchorRoot(keccak256("root"), 11155111, address(0xBEEF), 9_876_543, 120);
+        uint256 reanchorGas = vm.snapshotGasLastCall("record_reanchor_root");
+
         assertLt(anchorV1, ANCHOR_CEILING, "anchor v1");
         assertLt(anchorV2, ANCHOR_CEILING, "anchor v2");
         assertLt(copyGas, COPY_CEILING, "copy");
         assertLt(revokeGas, REVOKE_CEILING, "revoke");
         assertLt(cancelGas, CANCEL_CEILING, "cancel");
         assertLt(auditHeadGas, AUDIT_HEAD_CEILING, "audit head");
+        assertLt(reanchorGas, REANCHOR_ROOT_CEILING, "re-anchor root");
     }
 }

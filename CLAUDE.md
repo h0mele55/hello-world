@@ -41,7 +41,10 @@ person (6i, #68), each manifest hash is also timestamped on Bitcoin through
 OpenTimestamps, which every verifier shows beside its verdict (#66), and the
 worker can seal each distribution copy with the firm's electronic seal through
 any CSC API v2 provider and RFC 3161 authority, the provider being the owner's
-choice (#70).
+choice (#70), and every verifier shows a copy's seal beside its verdict
+(#120). Production is Arbitrum One (#63), and Sepolia's records can be
+re-anchored under a root the owner records there, which the CLI verifier
+already accepts (#65).
 
 ## Rules every phase keeps
 
@@ -90,7 +93,9 @@ npm run contracts:artifact     # regenerate src/lib/chain/registry-artifact.ts a
 npm run test:integration       # chain adapter and verifier against throwaway Anvil nodes
 npx tsx scripts/deploy-registry.ts <network>             # deploy (sepolia, local, base-sepolia, …); of the production networks only arbitrum, after arbitrum-sepolia (#63); REVOCATION_DELAY_HOURS (default 24, local 0)
 npx tsx scripts/measure-chain-costs.ts                   # today's cost per report and finality lag on the production candidates
-npx tsx scripts/owner-call.ts <sepolia|local> <add-issuer|remove-issuer|cancel-revocation|void-audit-head|transfer-owner|accept-owner> [address|recordId|index]   # prints the owner's transaction; sends nothing
+npx tsx scripts/owner-call.ts <sepolia|local> <add-issuer|remove-issuer|cancel-revocation|void-audit-head|record-reanchor-root|void-reanchor-root|transfer-owner|accept-owner> [address|recordId|index|archive.json]   # prints the owner's transaction; sends nothing
+npx tsx scripts/reanchor.ts build <source> <target>      # archive every record of a retiring registry, with a proof per record (#65)
+npx tsx scripts/reanchor.ts check <dir> <target>         # every proof against the root the owner recorded; exit 1 on any failure
 npx tsx scripts/kms-address.ts <KMS key version name>     # the address of a Cloud KMS issuer key, to register it
 
 # Database (Postgres 16: `docker compose up -d`, or any local server; Prisma 7 does not read .env)
@@ -147,6 +152,16 @@ Locally, Playwright needs the browser of its own version:
   and nothing else; only the owner's `voidAuditHead` sets one aside, for a
   head a stolen key wrote. Heads are never removed: the nightly check holds
   the log to every head not voided.
+- **Re-anchor roots are the owner's alone (#65).** `recordReanchorRoot`
+  records the Merkle root of every record another deployment held at one
+  finalized block, with that deployment, the block and the record count;
+  `voidReanchorRoot` sets one aside. Never let an issuer key record one: a
+  root vouches for a whole registry's history. `scripts/reanchor.ts build`
+  archives a registry (`src/lib/chain/reanchor-build.ts`, both endpoints at
+  one agreed finalized block, refusing while a revocation is pending),
+  `owner-call.ts record-reanchor-root` prints the owner's call, and
+  `reanchor.ts check` holds every proof to the recorded root. A re-anchored
+  family is frozen at the snapshot until #127 is decided.
 - **Gas ceilings are tests.** `contracts/test/AuditReportRegistry.gas.t.sol`
   caps each write, and `contracts/snapshots/` pins the exact figures. A change
   that moves them updates the snapshot in the same pull request
@@ -399,6 +414,19 @@ to one inflect-compliance commit.
   `blob:`, and connections to the two endpoints, plus, when it was built with
   `APP_PUBLIC_URL`, that origin and the two Bitcoin explorers. The CLI asks
   for the timestamp only with the issuer's origin (baked in, or `--app-url`).
+- **A retired registry's records verify through their re-anchor root**
+  (`src/lib/verify-core/reanchor.ts`, #65). An archive (every record) or a
+  record's proof (it, its original, its family's latest) is checked against
+  its own root first: each leaf commits, twice hashed under a domain tag, to
+  the whole record at the snapshot and to everything a verifier shows about
+  it. Then the root must be on the verifier's own registry, not voided, for
+  the same source, block and count, read on both endpoints at one finalized
+  block. `archivedView` answers the verdict's reads from the set, and a proof
+  asked about a record it does not hold refuses (`REANCHOR_NOT_COVERED`)
+  rather than say "none". `verifyWithReanchors` tries a set only when the
+  verifier's own registry holds no record of the file. The CLI takes
+  `--reanchor`; `/verify` and `verifier.html` follow in #126. Do not change
+  the leaf encoding: archives already recorded must keep proving.
 - **The tamper suite is the exit gate** (`tests/tamper/`): each case is made
   with the tool a person would use (an incremental save, a re-render keeping
   the reference, qpdf, Chromium's print) and must get the same verdict from

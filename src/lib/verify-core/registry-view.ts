@@ -19,7 +19,18 @@ export interface VerifierConfig {
   rpcUrls: readonly [string, string];
 }
 
-export type CannotVerifyReason = 'RPC_UNREACHABLE' | 'WRONG_CHAIN' | 'WRONG_CONTRACT' | 'RPC_DISAGREE' | 'CHAIN_INCONSISTENT';
+export type CannotVerifyReason =
+  | 'RPC_UNREACHABLE'
+  | 'WRONG_CHAIN'
+  | 'WRONG_CONTRACT'
+  | 'RPC_DISAGREE'
+  | 'CHAIN_INCONSISTENT'
+  /** A re-anchored record (#65) whose root the registry does not hold, or holds voided. */
+  | 'REANCHOR_ROOT_NOT_RECORDED'
+  /** A re-anchor archive or proof that does not hash to its root, or does not fit together. */
+  | 'REANCHOR_PROOF_INVALID'
+  /** A re-anchor proof asked about a record it does not hold, which it can neither confirm nor deny. */
+  | 'REANCHOR_NOT_COVERED';
 
 export class CannotVerify extends Error {
   constructor(
@@ -48,7 +59,7 @@ export interface RegistryView {
 const stable = (value: unknown) => JSON.stringify(value, (_, v) => (typeof v === 'bigint' ? `${v}n` : v));
 
 /** Runs one read on both clients; refuses unless both answer, and answer alike. */
-async function both<T>(clients: readonly PublicClient[], read: (client: PublicClient) => Promise<T>): Promise<T> {
+export async function both<T>(clients: readonly PublicClient[], read: (client: PublicClient) => Promise<T>): Promise<T> {
   let answers: T[];
   try {
     answers = await Promise.all(clients.map(read));
@@ -64,9 +75,13 @@ export function clientsFor(config: VerifierConfig): [PublicClient, PublicClient]
   return [make(config.rpcUrls[0]), make(config.rpcUrls[1])];
 }
 
-export async function openRegistryView(config: VerifierConfig, clients: readonly PublicClient[] = clientsFor(config)): Promise<RegistryView> {
+/**
+ * Checks each endpoint on its own (one on the wrong chain is a refusal even
+ * if the other is right) and returns the block both will be read at: the
+ * older of their finalized blocks, so they answer about the same state.
+ */
+export async function checkEndpoints(config: VerifierConfig, clients: readonly PublicClient[]): Promise<bigint> {
   if (clients.length !== 2) throw new CannotVerify('RPC_UNREACHABLE', 'two endpoints are required');
-  // Each endpoint is checked on its own: one on the wrong chain is a refusal even if the other is right.
   let checks: { chainId: number; code: Hex | undefined; finalized: bigint }[];
   try {
     checks = await Promise.all(
@@ -81,8 +96,11 @@ export async function openRegistryView(config: VerifierConfig, clients: readonly
   }
   if (checks.some((c) => c.chainId !== config.chainId)) throw new CannotVerify('WRONG_CHAIN');
   if (checks.some((c) => !c.code || keccak256(c.code) !== config.runtimeBytecodeHash)) throw new CannotVerify('WRONG_CONTRACT');
-  // Read both at the older of their finalized blocks, so they answer about the same state.
-  const blockNumber = checks.map((c) => c.finalized).reduce((a, b) => (a < b ? a : b));
+  return checks.map((c) => c.finalized).reduce((a, b) => (a < b ? a : b));
+}
+
+export async function openRegistryView(config: VerifierConfig, clients: readonly PublicClient[] = clientsFor(config)): Promise<RegistryView> {
+  const blockNumber = await checkEndpoints(config, clients);
   const at = { blockNumber } as const;
   const address = config.registry;
 

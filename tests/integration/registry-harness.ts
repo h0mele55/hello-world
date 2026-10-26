@@ -27,23 +27,24 @@ export interface Registry {
 
 export type Anchored = Awaited<ReturnType<typeof anchorOriginal>>;
 
-/** Deploys a registry on an Anvil node. Revocation is immediate unless a delay is given (#95). */
-export async function deployOn(url: string, options: { revocationDelaySeconds?: number } = {}): Promise<Registry> {
+/** Deploys a registry on an Anvil node. Revocation is immediate unless a delay is given (#95); the chain is Anvil's unless its id is given. */
+export async function deployOn(url: string, options: { revocationDelaySeconds?: number; chainId?: number } = {}): Promise<Registry> {
+  const chain = options.chainId ? { ...foundry, id: options.chainId } : foundry;
   const transport = http(url);
-  const client = createPublicClient({ chain: foundry, transport, pollingInterval: 50 }) as PublicClient;
+  const client = createPublicClient({ chain, transport, pollingInterval: 50 }) as PublicClient;
   // Anvil's unlocked dev accounts sign through JSON-RPC: no key appears in this repo.
-  const [deployer, issuer] = (await createWalletClient({ chain: foundry, transport }).getAddresses()).map((a) => getAddress(a));
+  const [deployer, issuer] = (await createWalletClient({ chain, transport }).getAddresses()).map((a) => getAddress(a));
   const deployed = await deployRegistry({
     publicClient: client,
-    walletClient: createWalletClient({ chain: foundry, transport, account: deployer }),
+    walletClient: createWalletClient({ chain, transport, account: deployer }),
     issuer: { address: issuer, orgId: orgIdFor(ISSUER_ORG) },
     revocationDelaySeconds: options.revocationDelaySeconds,
   });
   return {
     deployment: deployed,
-    adapter: createChainAdapter({ publicClient: client, walletClient: createWalletClient({ chain: foundry, transport, account: issuer }), deployment: deployed }),
+    adapter: createChainAdapter({ publicClient: client, walletClient: createWalletClient({ chain, transport, account: issuer }), deployment: deployed }),
     publicClient: client,
-    testClient: createTestClient({ chain: foundry, mode: 'anvil', transport }),
+    testClient: createTestClient({ chain, mode: 'anvil', transport }),
   };
 }
 

@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
-import { bitcoinTimestampFor, defaultExplorers, issuerProofFetcher, openRegistryView, readDocument, verifyFile, type PdfjsLike } from '@/lib/verify-core';
+import { bitcoinTimestampFor, CannotVerify, checkReanchorSet, defaultExplorers, issuerProofFetcher, openRegistryView, readDocument, verifyWithReanchors, type CheckedSet, type PdfjsLike } from '@/lib/verify-core';
 import { certificatesFromPem, sealStatusFor } from '@/lib/verify-core/seal';
 import { rootsOf, setupFromDeployment, StandaloneSetupSchema, verdictJson, type StandaloneSetup } from './config';
 
@@ -12,6 +12,7 @@ import { rootsOf, setupFromDeployment, StandaloneSetupSchema, verdictJson, type 
  *
  *   verify-report report.pdf
  *   verify-report report.pdf --deployment deployments/sepolia.json --rpc <url> --rpc <url> [--app-url <url>] [--seal-roots <pem>]
+ *   verify-report report.pdf ... --reanchor archive.json [--reanchor proof.json]
  *
  * Without flags it uses the settings baked in by `npm run build:verifier`.
  * For a file that matches a record, and with the issuer's public origin
@@ -20,13 +21,16 @@ import { rootsOf, setupFromDeployment, StandaloneSetupSchema, verdictJson, type 
  * For a file that matches a distribution copy it checks the firm's electronic
  * seal against the roots baked in, or those in --seal-roots (#120), and prints
  * it as `seal`; null for any other file. Neither changes the verdict.
+ * With --reanchor (#65), a file the registry holds no record of is checked
+ * against a retired registry's archive or a record's proof, through its root
+ * on this registry; `reanchored` then says which root, and is null otherwise.
  * Exit status: 0 a verdict was reached, 3 cannot verify right now, 2 usage.
  */
 
 declare const __VERIFIER_SETUP__: StandaloneSetup | null;
 
 function usage(message: string): never {
-  process.stderr.write(`${message}\nusage: verify-report <file.pdf> [--deployment <file> --rpc <url> --rpc <url>] [--app-url <url>] [--seal-roots <pem>]\n`);
+  process.stderr.write(`${message}\nusage: verify-report <file.pdf> [--deployment <file> --rpc <url> --rpc <url>] [--app-url <url>] [--seal-roots <pem>] [--reanchor <archive or proof>]...\n`);
   process.exit(2);
 }
 
@@ -51,7 +55,7 @@ function setupOf(values: { deployment?: string; rpc?: string[]; 'app-url'?: stri
 async function main() {
   let parsed;
   try {
-    parsed = parseArgs({ allowPositionals: true, options: { deployment: { type: 'string' }, rpc: { type: 'string', multiple: true }, 'app-url': { type: 'string' }, 'seal-roots': { type: 'string' } } });
+    parsed = parseArgs({ allowPositionals: true, options: { deployment: { type: 'string' }, rpc: { type: 'string', multiple: true }, 'app-url': { type: 'string' }, 'seal-roots': { type: 'string' }, reanchor: { type: 'string', multiple: true } } });
   } catch (error) {
     usage(error instanceof Error ? error.message : String(error));
   }
@@ -66,21 +70,30 @@ async function main() {
       usage(`${parsed.values['seal-roots']} is not a readable PEM file of certificates`);
     }
   }
+  const sets: CheckedSet[] = [];
+  for (const reanchor of parsed.values.reanchor ?? []) {
+    try {
+      sets.push(checkReanchorSet(JSON.parse(fs.readFileSync(reanchor, 'utf8'))));
+    } catch (error) {
+      usage(`${reanchor} is not a re-anchor archive or proof that holds together${error instanceof CannotVerify ? `: ${error.message}` : ''}`);
+    }
+  }
   let bytes: Uint8Array;
   try {
     bytes = new Uint8Array(fs.readFileSync(file));
   } catch {
     usage(`${file} cannot be read`);
   }
-  const verdict = await verifyFile({
+  const { verdict, reanchored } = await verifyWithReanchors({
     bytes,
     config: setup,
     openView: () => openRegistryView(setup),
     readPdf: (pdf) => readDocument(pdfjs as unknown as PdfjsLike, pdf),
+    sets,
   });
   const bitcoinTimestamp = 'matched' in verdict && setup.appUrl ? await bitcoinTimestampFor(verdict.matched.manifestHash, { fetchProof: issuerProofFetcher(setup.appUrl), explorers: defaultExplorers() }) : null;
   const seal = 'matched' in verdict && verdict.matched.kind === 'DISTRIBUTION_COPY' ? await sealStatusFor(bytes, roots) : null;
-  process.stdout.write(`${verdictJson({ file: path.basename(file), verdict, bitcoinTimestamp, seal })}\n`);
+  process.stdout.write(`${verdictJson({ file: path.basename(file), verdict, reanchored, bitcoinTimestamp, seal })}\n`);
   process.exit(verdict.kind === 'CANNOT_VERIFY' ? 3 : 0);
 }
 

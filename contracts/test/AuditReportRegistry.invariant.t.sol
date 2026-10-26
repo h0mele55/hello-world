@@ -31,6 +31,11 @@ contract RegistryHandler is Test {
     mapping(uint256 index => bool) public ghostVoided;
     uint256 public nonOwnerVoids;
     uint256 public revoids;
+    /// Re-anchor roots as recorded, and which the owner voided (#65).
+    bytes32[] public ghostRoots;
+    mapping(uint256 index => bool) public ghostRootVoided;
+    uint256 public nonOwnerRootWrites;
+    uint256 public rootRevoids;
     uint256 private nonce;
 
     constructor(
@@ -169,6 +174,39 @@ contract RegistryHandler is Test {
         return ghostHeads.length;
     }
 
+    /// The owner, an issuer key or a stranger tries to record a re-anchor root.
+    function recordRoot(uint256 callerSeed) external atCurrentTime {
+        bytes32 root = _fresh();
+        uint256 pick = callerSeed % 3;
+        address caller = pick == 0 ? owner : pick == 1 ? stranger : _key(callerSeed / 3);
+        vm.prank(caller);
+        try registry.recordReanchorRoot(root, 11155111, address(0xBEEF), 1, 1) returns (
+            uint256 index
+        ) {
+            if (caller != owner) nonOwnerRootWrites++;
+            assertEq(index, ghostRoots.length);
+            ghostRoots.push(root);
+        } catch {}
+    }
+
+    /// The owner, an issuer key or a stranger tries to void a re-anchor root.
+    function voidRoot(uint256 indexSeed, uint256 callerSeed) external atCurrentTime {
+        if (ghostRoots.length == 0) return;
+        uint256 index = indexSeed % ghostRoots.length;
+        uint256 pick = callerSeed % 3;
+        address caller = pick == 0 ? owner : pick == 1 ? stranger : _key(callerSeed / 3);
+        vm.prank(caller);
+        try registry.voidReanchorRoot(index) {
+            if (caller != owner) nonOwnerRootWrites++;
+            if (ghostRootVoided[index]) rootRevoids++;
+            ghostRootVoided[index] = true;
+        } catch {}
+    }
+
+    function rootCount() external view returns (uint256) {
+        return ghostRoots.length;
+    }
+
     function strangerAttempts(uint256 seed) external atCurrentTime {
         bytes32 target = recordIds.length == 0 ? _fresh() : recordIds[seed % recordIds.length];
         vm.startPrank(stranger);
@@ -288,5 +326,19 @@ contract AuditReportRegistryInvariantTest is Test {
         }
         assertEq(handler.nonOwnerVoids(), 0);
         assertEq(handler.revoids(), 0);
+    }
+
+    /// Re-anchor roots are append-only and the owner's alone: each reads as
+    /// recorded, in order, and only its voided flag ever changes, once (#65).
+    function invariant_reanchorRootsAppendOnly() public view {
+        uint256 count = handler.rootCount();
+        assertEq(registry.reanchorRootCount(), count);
+        AuditReportRegistry.ReanchorRoot[] memory roots = registry.reanchorRoots(0, count);
+        for (uint256 i = 0; i < count; i++) {
+            assertEq(roots[i].root, handler.ghostRoots(i));
+            assertEq(roots[i].voided, handler.ghostRootVoided(i));
+        }
+        assertEq(handler.nonOwnerRootWrites(), 0);
+        assertEq(handler.rootRevoids(), 0);
     }
 }

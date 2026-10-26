@@ -25,6 +25,11 @@ pragma solidity 0.8.30;
 /// who rewrites the log cannot also rewrite the record of what it was. A head
 /// is a hash and nothing else; only the owner can void one, for a head a
 /// stolen key wrote.
+///
+/// And it keeps re-anchor roots (#65): the Merkle root of every record another
+/// deployment of this registry held at one finalized block, committed here by
+/// the owner before that chain is shut down, so its records stay verifiable
+/// through a proof against the root. Only the owner can record or void one.
 contract AuditReportRegistry {
     enum Kind {
         ORIGINAL,
@@ -88,6 +93,20 @@ contract AuditReportRegistry {
         bool voided;
     }
 
+    /// @notice A re-anchor root (#65): the Merkle root of the `count` records
+    /// another deployment of this registry held at `sourceBlock`, recorded at
+    /// `recordedBlock` of this chain. Three slots.
+    struct ReanchorRoot {
+        bytes32 root;
+        // The next three pack into one slot (20 + 8 + 4 bytes).
+        address sourceRegistry;
+        uint64 sourceChainId;
+        uint32 count;
+        uint40 sourceBlock;
+        uint40 recordedBlock;
+        bool voided;
+    }
+
     /// @notice The longest delay a deployment may set: past it, a firm could
     /// not withdraw a wrong report in any useful time.
     uint32 public constant MAX_REVOCATION_DELAY = 30 days;
@@ -110,6 +129,7 @@ contract AuditReportRegistry {
     mapping(bytes32 originalId => bytes32 copyId) public copyOf;
     mapping(bytes32 recordId => Revocation) private _revocations;
     mapping(bytes32 orgId => AuditHead[]) private _auditHeads;
+    ReanchorRoot[] private _reanchorRoots;
 
     event OwnershipTransferStarted(address indexed previousOwner, address indexed newOwner);
     event OwnershipTransferred(address indexed previousOwner, address indexed newOwner);
@@ -131,6 +151,15 @@ contract AuditReportRegistry {
         bytes32 indexed orgId, uint256 indexed index, bytes32 head, address issuer
     );
     event AuditHeadVoided(bytes32 indexed orgId, uint256 indexed index, address by);
+    event ReanchorRootRecorded(
+        uint256 indexed index,
+        bytes32 indexed root,
+        uint64 sourceChainId,
+        address sourceRegistry,
+        uint40 sourceBlock,
+        uint32 count
+    );
+    event ReanchorRootVoided(uint256 indexed index, address by);
 
     error NotOwner();
     error NotPendingOwner();
@@ -152,6 +181,9 @@ contract AuditReportRegistry {
     error DelayTooLong(uint32 given, uint32 max);
     error UnknownAuditHead(bytes32 orgId, uint256 index);
     error AuditHeadAlreadyVoided(bytes32 orgId, uint256 index);
+    error ReanchorOfSelf();
+    error UnknownReanchorRoot(uint256 index);
+    error ReanchorRootAlreadyVoided(uint256 index);
 
     modifier onlyOwner() {
         if (msg.sender != owner) revert NotOwner();
@@ -363,7 +395,77 @@ contract AuditReportRegistry {
         emit AuditHeadVoided(orgId, index, msg.sender);
     }
 
+    // ── Re-anchoring (#65) ──
+
+    /// @notice Commits the Merkle root of every record another deployment of
+    /// this registry held at `sourceBlock`, so they stay verifiable after that
+    /// chain is shut down (docs/runbooks/sepolia-sunset.md). The owner's act
+    /// only: a root vouches for a whole deployment's history, and a stolen
+    /// issuer key must never be able to vouch for records that did not exist.
+    /// `count` is how many records are under the root, so a verifier holding
+    /// them can tell the whole set from part of it.
+    function recordReanchorRoot(
+        bytes32 root,
+        uint64 sourceChainId,
+        address sourceRegistry,
+        uint40 sourceBlock,
+        uint32 count
+    ) external onlyOwner returns (uint256 index) {
+        if (
+            root == bytes32(0) || sourceChainId == 0 || sourceRegistry == address(0)
+                || sourceBlock == 0 || count == 0
+        ) revert ZeroValue();
+        // A deployment holds its own records already; a root of them proves nothing.
+        if (sourceChainId == block.chainid && sourceRegistry == address(this)) {
+            revert ReanchorOfSelf();
+        }
+        index = _reanchorRoots.length;
+        _reanchorRoots.push(
+            ReanchorRoot({
+                root: root,
+                sourceRegistry: sourceRegistry,
+                sourceChainId: sourceChainId,
+                count: count,
+                sourceBlock: sourceBlock,
+                // forge-lint: disable-next-line(unsafe-typecast)
+                recordedBlock: uint40(block.number),
+                voided: false
+            })
+        );
+        emit ReanchorRootRecorded(index, root, sourceChainId, sourceRegistry, sourceBlock, count);
+    }
+
+    /// @notice Voids a root, so verifiers no longer accept proofs against it:
+    /// for a root recorded in error. Terminal; a corrected root is recorded anew.
+    function voidReanchorRoot(uint256 index) external onlyOwner {
+        if (index >= _reanchorRoots.length) revert UnknownReanchorRoot(index);
+        ReanchorRoot storage entry = _reanchorRoots[index];
+        if (entry.voided) revert ReanchorRootAlreadyVoided(index);
+        entry.voided = true;
+        emit ReanchorRootVoided(index, msg.sender);
+    }
+
     // ── Reads ──
+
+    /// @notice How many re-anchor roots there are, voided ones included.
+    function reanchorRootCount() external view returns (uint256) {
+        return _reanchorRoots.length;
+    }
+
+    /// @notice Up to `limit` re-anchor roots from `start`, in the order
+    /// recorded; fewer at the end, none past it.
+    function reanchorRoots(uint256 start, uint256 limit)
+        external
+        view
+        returns (ReanchorRoot[] memory page)
+    {
+        if (start >= _reanchorRoots.length) return page;
+        uint256 end = limit > _reanchorRoots.length - start ? _reanchorRoots.length : start + limit;
+        page = new ReanchorRoot[](end - start);
+        for (uint256 i = start; i < end; ++i) {
+            page[i - start] = _reanchorRoots[i];
+        }
+    }
 
     /// @notice How many heads a firm has, voided ones included.
     function auditHeadCount(bytes32 orgId) external view returns (uint256) {

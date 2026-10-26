@@ -14,6 +14,7 @@ on a public testnet; none of this makes its anchors legally binding (rule 9).
 | The registry watch | `npm run watch:registry` | every ten minutes, e.g. `*/10 * * * *` | exit code 1 while any write the journal did not make is unreviewed, an error line for each new one; the console's banner |
 | The backup | `scripts/backup.sh` | nightly, after the check, e.g. `37 2 * * *` | a non-zero exit code |
 | The monitor | `npm run monitor` | every ten minutes, e.g. `*/10 * * * *` | exit code 1 and an `ALERT` line for each thing that needs a person; route it to whoever is on call |
+| The monthly checkpoint | `npm run checkpoint` | monthly, on the 1st, e.g. `23 1 1 * *` | a non-zero exit code; the monitor's `CHECKPOINT_MISSING` from the 3rd (`docs/runbooks/checkpoints.md`) |
 | The chain reconciliation | `npm run reconcile:chain` | after every restore (`docs/runbooks/restore.md`), and weekly, e.g. `47 3 * * 0` | exit code 1 and a `DIFFERENCE` line for each version or record the database and the chain disagree on (#111) |
 
 Run the check, the watch and the backup from the app's directory with the
@@ -76,6 +77,7 @@ for each of these, with ids, codes and times, never a client or a file:
 | `OTS_NOT_SUBMITTED` | a version approved more than a day ago is final on chain and has no OpenTimestamps proof | [opentimestamps.md](runbooks/opentimestamps.md) |
 | `OTS_PENDING_LONG` | a proof has waited more than two days for Bitcoin | [opentimestamps.md](runbooks/opentimestamps.md) |
 | `OTS_BROKEN` | a proof turned out not to lead to the block it names, in the last day | [opentimestamps.md](runbooks/opentimestamps.md) |
+| `CHECKPOINT_MISSING` | a month ended with a version anchored, and by the 3rd it has no checkpoint (#122) | [checkpoints.md](runbooks/checkpoints.md) |
 | `SEAL_WAITING` | a distribution copy has waited more than an hour for the seal provider to answer | [seal-provider.md](runbooks/seal-provider.md) |
 
 A failure stays reported for a day. A key with no work waiting is not
@@ -125,6 +127,17 @@ report a visitor checks, by its manifest hash, though never the file; with the
 server down the verifier still decides and says the timestamp could not be
 checked. `dist/verifier.html` and the CLI ask the origin in `APP_PUBLIC_URL`
 at build time (or the CLI's `--app-url`).
+
+## The monthly checkpoint
+
+Once a month `npm run checkpoint` puts every record the registry holds under
+one Merkle root, read at a finalized block both endpoints agree on, and the
+OpenTimestamps job timestamps it on Bitcoin (#122). It reads `DATABASE_URL`,
+`ANCHOR_NETWORK`, both `<NETWORK>_RPC_URL` endpoints and the deployment
+record, holds no key and writes no chain. Once the timestamp is complete,
+`npm run checkpoint -- --export <YYYY-MM> --out <dir>` writes the files the
+firm publishes; `docs/runbooks/checkpoints.md` says how, and how a record is
+verified through them when the registry cannot be read.
 
 ## The electronic seal
 

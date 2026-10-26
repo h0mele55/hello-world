@@ -30,7 +30,11 @@ export type CannotVerifyReason =
   /** A re-anchor archive or proof that does not hash to its root, or does not fit together. */
   | 'REANCHOR_PROOF_INVALID'
   /** A re-anchor proof asked about a record it does not hold, which it can neither confirm nor deny. */
-  | 'REANCHOR_NOT_COVERED';
+  | 'REANCHOR_NOT_COVERED'
+  /** A checkpoint (#122) whose Bitcoin timestamp is missing, unreadable, of something else, or not yet on Bitcoin. */
+  | 'CHECKPOINT_UNPROVEN'
+  /** A checkpoint that does not hold the file or the record it names: it may have come after the checkpoint. */
+  | 'CHECKPOINT_NOT_COVERED';
 
 export class CannotVerify extends Error {
   constructor(

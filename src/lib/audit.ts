@@ -63,6 +63,8 @@ export type AuditAction =
   | 'ots.submitted'
   | 'ots.complete'
   | 'ots.broken'
+  // The monthly checkpoint of the registry (#122).
+  | 'checkpoint.created'
   // An audit-log head's journal row (#94): the anchor.* steps under their own prefix, and the check that queued it.
   | 'audit_head.queued'
   | 'audit_head.simulated'
@@ -78,7 +80,7 @@ export interface AuditEventInput {
   /** The user, or null for the worker. */
   actorId: string | null;
   action: AuditAction;
-  subjectType: 'Engagement' | 'ReportVersion' | 'IssuerOrg' | 'ChainWrite' | 'User' | 'Revocation' | 'Recipient' | 'Notification' | 'UnjournaledWrite';
+  subjectType: 'Engagement' | 'ReportVersion' | 'IssuerOrg' | 'ChainWrite' | 'User' | 'Revocation' | 'Recipient' | 'Notification' | 'UnjournaledWrite' | 'RegistryCheckpoint';
   subjectId: string;
   /** Plain JSON only: strings, safe integers, booleans, null, arrays and objects. */
   data: Record<string, unknown>;

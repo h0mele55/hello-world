@@ -44,7 +44,8 @@ any CSC API v2 provider and RFC 3161 authority, the provider being the owner's
 choice (#70), and every verifier shows a copy's seal beside its verdict
 (#120). Production is Arbitrum One (#63), and Sepolia's records can be
 re-anchored under a root the owner records there, which the CLI verifier
-already accepts (#65).
+already accepts (#65). Each month every record the registry holds is
+checkpointed under one root timestamped on Bitcoin (#122).
 
 ## Rules every phase keeps
 
@@ -111,6 +112,7 @@ npm run mailer                 # sends the recipients' notices; add `-- --once` 
 npm run ots                    # every 5 min: submits final versions' manifest hashes to OpenTimestamps, upgrades and checks them against Bitcoin; `-- --once`
 scripts/backup.sh              # database dump + encrypted store copy (docs/operations.md)
 npm run reconcile:chain        # every version held to the chain at an agreed finalized block; exit 1 on a difference (after a restore)
+npm run checkpoint             # monthly, on the 1st: the previous month's checkpoint of every record (#122); `-- --export <YYYY-MM> --out <dir>` once its timestamp is complete
 npm run test:backup            # back up, restore into <db>_restore_test, check the copy
 
 # The verifier
@@ -548,6 +550,22 @@ to one inflect-compliance commit.
   reference client's example proof and block 358391's header, recorded in
   `tests/fixtures/ots/` and the test; the job's tests use fake calendars and a
   stubbed check. Do not add a test that sends anything to a public calendar.
+- **The job also timestamps each month's checkpoint (#122)**: `npm run
+  checkpoint` (`src/lib/anchoring/checkpoint.ts`) puts every record the
+  registry holds at an agreed finalized block under one Merkle root, the same
+  tree and leaves as a re-anchor archive (#65), and keeps it in
+  `RegistryCheckpoint`, append-only (a trigger). What is timestamped is the
+  SHA-256 of the checkpoint's HEAD (`checkpointHead`: chain, registry, block,
+  month, count, root), never the bare root, so a month without new records
+  still gets a digest of its own (the digest is unique). An `OtsProof` is of
+  exactly one version or one checkpoint (a CHECK). The checkpoint is exported
+  only once its proof is COMPLETE, with the `.ots`, for the firm to publish
+  (`docs/runbooks/checkpoints.md`).
+- **A checkpoint answers only when the registry cannot be reached**
+  (`verifyWithReanchors`, the CLI's `--checkpoint`), only through its Bitcoin
+  timestamp (`provenCheckpoint`: of this head, reaching a block both explorers
+  agree on, else `CHECKPOINT_UNPROVEN`), and as of its block: it never says a
+  file was not registered, since it may have come after (`CHECKPOINT_NOT_COVERED`).
 
 ## The electronic seal (#70)
 

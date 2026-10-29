@@ -183,6 +183,7 @@ signature. Set these in the worker's environment only (`scripts/seal-env.ts`):
 | `TSA_USERNAME`, `TSA_PASSWORD` | optional: HTTP Basic at the authority |
 | `TSA_POLICY` | optional: the policy to ask the authority for |
 | `SEAL_TRUST_ANCHORS` | a PEM file of the roots the seal certificate and the authority must chain to |
+| `SEAL_LEVEL` | `B-LT`, the default: each copy also carries its certificates' status (#119); or `B-T`, the seal and its timestamp only |
 
 Every URL is HTTPS. The worker refuses to start with `SEAL_PROVIDER=csc` and a
 setting missing, and refuses a credential that needs a person for each
@@ -192,6 +193,16 @@ not answer leaves the copy waiting for the next pass. One that refuses, or a
 seal that does not check, fails the copy for a person
 (`docs/runbooks/seal-provider.md`). The version's page says when its copy is
 sealed.
+
+At `B-LT` the worker then asks for the status of every certificate the seal
+and the timestamping authority rely on, but the roots, from the OCSP responder
+or CRL each certificate names, checks each answer, and adds them to the copy
+before it is stored (PAdES B-LT), so the seal can still be checked once its
+certificates expire or the provider's status services go away. Those URLs are
+the provider's, named in certificates already checked against
+`SEAL_TRUST_ANCHORS`, and are often plain http: let the worker reach them. A
+responder that does not answer leaves the copy waiting, as a provider that
+does not answer does; a revoked certificate fails it.
 
 The verifiers show a copy's seal beside the verdict (#120), checked against
 the same roots, which are public: set `SEAL_TRUST_ANCHORS` in the app's

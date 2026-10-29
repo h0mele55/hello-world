@@ -41,6 +41,14 @@ export type SealErrorCode =
   /** The provider did not answer, or answered 429 or 5xx: tried again on a later pass. */
   | 'SIGNER_UNAVAILABLE'
   | 'TIMESTAMP_UNAVAILABLE'
+  /** A certificate's status could not be fetched (#119): its responder did not answer, or answered 429 or 5xx; tried again later. */
+  | 'REVOCATION_UNAVAILABLE'
+  /** A certificate's status, fetched or carried in the file, does not check: unsigned, signed by someone else, about another certificate, not current, or unknown. */
+  | 'REVOCATION_REFUSED'
+  /** A certificate the seal relies on is revoked. */
+  | 'CERTIFICATE_REVOKED'
+  /** A certificate names neither an OCSP responder nor a CRL, so its status cannot be carried. */
+  | 'NO_REVOCATION_SOURCE'
   /** A check of a sealed file failed; the message says which. */
   | 'NO_SEAL'
   | 'NOT_WHOLE_FILE'
@@ -52,4 +60,4 @@ export type SealErrorCode =
   | 'BAD_TIMESTAMP';
 
 /** Whether a seal that failed with this code may succeed if simply tried again later. */
-export const sealMayRetry = (code: SealErrorCode) => code === 'SIGNER_UNAVAILABLE' || code === 'TIMESTAMP_UNAVAILABLE';
+export const sealMayRetry = (code: SealErrorCode) => code === 'SIGNER_UNAVAILABLE' || code === 'TIMESTAMP_UNAVAILABLE' || code === 'REVOCATION_UNAVAILABLE';

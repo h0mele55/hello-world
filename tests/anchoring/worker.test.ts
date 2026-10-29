@@ -55,6 +55,7 @@ import { collectAlerts } from '@/lib/monitor';
 import { startAnvil, type AnvilHandle } from '../integration/anvil';
 import { readPdf } from '../integration/registry-harness';
 import { fakeKms, KEY_NAME } from '../helpers/fake-kms';
+import { startFakeStatusResponder, type FakeStatusResponder } from '../helpers/fake-status-responder';
 import { createTestPki, type TestPki } from '../helpers/test-pki';
 
 /**
@@ -1316,5 +1317,44 @@ describe('the firm’s electronic seal on the distribution copy (#70)', () => {
     await pass(sealWith());
     expect((await versionOf(versionId)).status).toBe('COMPLETE');
     await checkSeal(await storedCopy(versionId), [pki.rootDer]);
+  });
+});
+
+describe('a long-term seal on the distribution copy (#119)', () => {
+  let pki: TestPki;
+  let responder: FakeStatusResponder;
+  beforeAll(async () => {
+    responder = await startFakeStatusResponder();
+    pki = await createTestPki({ statusUrls: { ocsp: responder.ocspUrl, crl: responder.crlUrl }, intermediate: true });
+    responder.serve(pki);
+  }, 30_000);
+  afterAll(() => responder.close());
+  const longTerm = (): Partial<WorkerDeps> => ({ seal: { signer: pki.signer, timestamper: pki.timestamper, trustAnchors: [pki.rootDer], level: 'B-LT' } });
+
+  it('waits while no status source answers, then anchors a copy that carries its certificates’ status', async () => {
+    await goLive();
+    const versionId = await confirmedVersion((await engagement()).id, 'en-unmodified.pdf');
+    await approveVersion(approver, versionId, target);
+    responder.httpStatus = 503;
+    try {
+      await pass(longTerm());
+      await mine();
+      await pass(longTerm());
+      expect(await copyWriteOf(versionId)).toMatchObject({ status: 'INTENT', error: 'SEAL_REVOCATION_UNAVAILABLE', txHash: null, leaseUntil: null });
+      expect((await versionOf(versionId)).copyDocHash).toBeNull();
+    } finally {
+      responder.httpStatus = null;
+    }
+
+    await pass(longTerm());
+    await mine();
+    await pass(longTerm());
+    const version = await versionOf(versionId);
+    expect(version.status).toBe('COMPLETE');
+    const copy = await files.read(await prisma.storedFile.findUniqueOrThrow({ where: { id: version.copyStoredFileId! } }));
+    expect(docHashOf(copy)).toBe(version.copyDocHash);
+    expect(await checkSeal(copy, [pki.rootDer])).toMatchObject({ longTerm: true });
+    const config: VerifierConfig = { chainId: 31337, registry: deployment.address, runtimeBytecodeHash: deployment.runtimeBytecodeHash, rpcUrls: [anvil.url, anvil.url] };
+    expect(await verifyFile({ bytes: copy, config, openView: () => openRegistryView(config), readPdf })).toMatchObject({ kind: 'AUTHENTIC_LATEST' });
   });
 });

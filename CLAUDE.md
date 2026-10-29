@@ -594,6 +594,24 @@ to one inflect-compliance commit.
   stamped file is the sealed file's prefix and no page or stamp changes.
   `sealPdf` refuses a PDF that already carries a signature: a signed original
   is anchor-only and never stamped, so never sealed either.
+- **PAdES baseline B-LT** (#119, `SEAL_LEVEL`, B-LT by default): once the B-T
+  seal checks, `addValidationData` (`src/lib/eseal/long-term.ts`) fetches the
+  status of every certificate the seal and the timestamping authority rely on
+  but the anchors, from the OCSP responder or CRL that certificate names, and
+  adds the certificates and statuses in one more incremental update, a
+  document security store (`dssUpdate`, `src/lib/verify-core/dss.ts`). A
+  status counts only from the issuer or a delegate carrying ocsp-nocheck,
+  current at the timestamp's time, and good (`revocation.ts`); revoked is
+  `CERTIFICATE_REVOKED`, a responder that does not answer is
+  `REVOCATION_UNAVAILABLE` (the copy waits), anything else
+  `REVOCATION_REFUSED`, and a certificate naming no source
+  `NO_REVOCATION_SOURCE`. The URLs come only from certificates already held to
+  the firm's roots, and may be plain http (what they answer is signed and
+  checked). **Whatever follows a seal must be exactly the update `dssUpdate`
+  writes for the items it carries**: `readSeal` re-writes it and compares byte
+  for byte, so nothing after a seal can change what a reader sees. Do not
+  loosen that to "a DSS somewhere": an update after a signature is how a
+  signed PDF's pages are swapped.
 - **Sealing is not deterministic**: the time is the authority's. A sealed copy
   is made once and kept, never made again for a write that may have landed.
 - **The worker seals the stamped copy before storing it** (`stampCopy`,
@@ -614,15 +632,21 @@ to one inflect-compliance commit.
   Only `scripts/seal-env.ts` reads `CSC_CLIENT_SECRET`, `CSC_PIN` and
   `TSA_PASSWORD` (`tests/unit/key-boundary.test.ts`).
 - **`checkSeal` trusts only the anchors it is given**: the byte range covers
-  the whole file but the signature, the digest and the signature hold, the
+  the whole file but the signature (and a long-term seal's validation data),
+  the digest and the signature hold, the
   signed attributes name the certificate that signed, that certificate chains
   to an anchor and was valid at the timestamp's time, and the timestamp is
   over this signature, signed by a certificate with the timestamping usage
-  that also chains to an anchor. Every failure is a named `SealError`.
+  that also chains to an anchor. For a long-term seal every status it carries
+  is checked again, and it reports `longTerm`. Every failure is a named
+  `SealError`.
 - **Tests use a throwaway PKI** (`tests/helpers/test-pki.ts`), made fresh in
   memory, and a stand-in provider on loopback (`tests/helpers/fake-seal-provider.ts`)
   that serves the CSC API and an RFC 3161 authority with it; the end-to-end
-  run seals every copy through it. Poppler's `pdfsig` and OpenSSL check each
+  run seals every copy through it, at B-LT. With `statusUrls` and
+  `intermediate` the PKI's certificates name a status responder
+  (`tests/helpers/fake-status-responder.ts`) whose OCSP and CRL answers
+  `status.behaviour` can spoil every way a CA's can. Poppler's `pdfsig` and OpenSSL check each
   sealed file independently of this code. No test reaches a real provider. A
   "qualified" validation needs the provider's qualified certificate, which no
   test has.

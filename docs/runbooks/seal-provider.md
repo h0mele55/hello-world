@@ -24,6 +24,7 @@ WHERE kind = 'ANCHOR_COPY' AND status = 'INTENT' AND error LIKE 'SEAL_%';
 | --- | --- | --- |
 | `SEAL_SIGNER_UNAVAILABLE` | the CSC API did not answer, or answered 429 or 5xx | check the server reaches `CSC_URL` (and `CSC_TOKEN_URL`) over HTTPS; check the provider's status page |
 | `SEAL_TIMESTAMP_UNAVAILABLE` | the timestamping authority did not answer, answered 429 or 5xx, or asked to be tried later | check the server reaches `TSA_URL`; check the authority's status page |
+| `SEAL_REVOCATION_UNAVAILABLE` | at `SEAL_LEVEL=B-LT` (#119), none of a certificate's OCSP responders or CRLs answered, or each answered 429 or 5xx | the worker's log names the certificate. Check the server reaches the URLs in its Authority Information Access and CRL Distribution Points (often plain http); check the provider's status page |
 
 Nothing more is needed: the next pass after the provider answers seals the
 copy and anchors it. The worker's log has a `the copy could not be sealed`
@@ -42,6 +43,9 @@ copy there once the cause is fixed.
 | `STAMP_SEAL_UNTRUSTED` | the seal certificate does not chain to a root in `SEAL_TRUST_ANCHORS`, or was not valid at the timestamp's time (expired, or not yet valid) | if the provider renewed its certificate under a new root, add that root to the file. If the certificate expired, renew it with the provider. Never add a root you have not checked against the provider's published one |
 | `STAMP_SEAL_BAD_TIMESTAMP` | the token is not over this signature, not signed by a timestamping authority, or does not chain to a root in `SEAL_TRUST_ANCHORS` | add the authority's root to the file if it is a different one from the seal's |
 | `STAMP_SEAL_TOO_LARGE` | the signature and its timestamp do not fit the 32 KiB reserved | a very long certificate chain; open an issue |
+| `STAMP_SEAL_CERTIFICATE_REVOKED` | a certificate the seal or the timestamp relies on is revoked (#119) | stop: ask the provider why. A revoked seal certificate means a new credential; do not retry until the provider has issued one and `SEAL_TRUST_ANCHORS` is checked |
+| `STAMP_SEAL_REVOCATION_REFUSED` | a status answered but did not check: not signed by the certificate's issuer or a delegated responder with ocsp-nocheck, not current at the timestamp's time, about another certificate, or "unknown" | read the worker's log line for which; ask the provider. To keep sealing at B-T meanwhile, set `SEAL_LEVEL=B-T` and restart the worker |
+| `STAMP_SEAL_NO_REVOCATION_SOURCE` | a certificate names neither an OCSP responder nor a CRL, so its status cannot be carried | ask the provider; a qualified certificate names one. Meanwhile `SEAL_LEVEL=B-T` |
 | `STAMP_SEALED_…` | the sealed file did not re-read as the stamped copy plus a signature | open an issue with the code; do not retry until it is understood |
 
 Then retry the copy from the version's page (an approver), and run one worker

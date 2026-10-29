@@ -217,7 +217,7 @@ function stampSection(stamp: BitcoinTimestamp | 'CHECKING'): HTMLElement {
 }
 
 const SEAL_TONE: Record<SealStatus['status'], string> = { SEALED: 'ok', NOT_SEALED: 'muted', NO_ROOTS: 'muted', INVALID: 'bad' };
-const SEAL_CHECK_REASONS = new Set(['NOT_WHOLE_FILE', 'MALFORMED', 'DIGEST_MISMATCH', 'BAD_SIGNATURE', 'WRONG_CERTIFICATE', 'UNTRUSTED', 'BAD_TIMESTAMP']);
+const SEAL_CHECK_REASONS = new Set(['NOT_WHOLE_FILE', 'MALFORMED', 'DIGEST_MISMATCH', 'BAD_SIGNATURE', 'WRONG_CERTIFICATE', 'UNTRUSTED', 'BAD_TIMESTAMP', 'CERTIFICATE_REVOKED', 'REVOCATION_REFUSED']);
 
 /** A matched copy's electronic seal, beside the verdict and never part of it. */
 function sealSection(seal: SealStatus | 'CHECKING'): HTMLElement {
@@ -233,6 +233,8 @@ function sealSection(seal: SealStatus | 'CHECKING'): HTMLElement {
           ? t('seal.INVALID', { reason: t(`seal.reasons.${SEAL_CHECK_REASONS.has(seal.reason) ? seal.reason : 'MALFORMED'}`) })
           : t(`seal.${seal.status}`);
     section.append(el('p', text, { class: SEAL_TONE[seal.status], 'data-testid': 'seal-body' }));
+    // A long-term seal (#119) carries its certificates' status too, checked with the seal.
+    if (seal.status === 'SEALED' && seal.longTerm) section.append(el('p', t('seal.longTerm'), { 'data-testid': 'seal-long-term' }));
   }
   section.append(el('p', t('seal.apart'), { class: 'muted' }));
   return section;

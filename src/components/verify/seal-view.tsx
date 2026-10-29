@@ -9,7 +9,7 @@ import { utcDate } from './record-view';
 
 const VARIANT = { SEALED: 'success', NOT_SEALED: 'neutral', NO_ROOTS: 'neutral', INVALID: 'error' } as const satisfies Record<SealStatus['status'], string>;
 /** The reasons a check of a sealed file can give; anything else reads as an unreadable signature. */
-const CHECK_REASONS = new Set(['NOT_WHOLE_FILE', 'MALFORMED', 'DIGEST_MISMATCH', 'BAD_SIGNATURE', 'WRONG_CERTIFICATE', 'UNTRUSTED', 'BAD_TIMESTAMP']);
+const CHECK_REASONS = new Set(['NOT_WHOLE_FILE', 'MALFORMED', 'DIGEST_MISMATCH', 'BAD_SIGNATURE', 'WRONG_CERTIFICATE', 'UNTRUSTED', 'BAD_TIMESTAMP', 'CERTIFICATE_REVOKED', 'REVOCATION_REFUSED']);
 
 const fromBase64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 
@@ -17,6 +17,7 @@ const fromBase64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCode
  * A matched distribution copy's electronic seal (#120), checked here in the
  * browser against the roots the firm publishes. It sits beside the verdict and
  * never changes it. The check's code (pkijs) is loaded only when a copy matches.
+ * A long-term seal (#119) also carries its certificates' status, checked too.
  */
 export function SealView({ bytes, roots }: { bytes: Uint8Array; roots: string[] }) {
   const t = useTranslations('verify.seal');
@@ -51,6 +52,11 @@ export function SealView({ bytes, roots }: { bytes: Uint8Array; roots: string[] 
             : reason
               ? t('INVALID', { reason: t(`reasons.${reason}`) })
               : t(seal.status)}
+        </p>
+      ) : null}
+      {seal?.status === 'SEALED' && seal.longTerm ? (
+        <p className="text-sm text-content-default" data-testid="seal-long-term">
+          {t('longTerm')}
         </p>
       ) : null}
       <p className="text-sm text-content-muted">{t('apart')}</p>

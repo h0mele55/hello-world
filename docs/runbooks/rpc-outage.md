@@ -89,8 +89,10 @@ verdict, never a wrong one.
    URLs of one provider, and never a URL with a key in it, because every
    visitor receives these URLs.
 3. Set `VERIFY_RPC_URL_1` / `VERIFY_RPC_URL_2` and restart the app.
-4. Rebuild and republish the single-file verifier, whose endpoints are built
-   in (`npm run build:verifier`, #85).
+4. Republish the single-file verifier, whose endpoints are built in: set the
+   repository variables `VERIFY_RPC_URL_1` / `VERIFY_RPC_URL_2` and run the
+   "Publish the single-file verifier" workflow (#85, `docs/operations.md`).
+   Copies recipients already keep still read the old endpoints.
 
 **Two endpoints that disagree** at the same finalized block means one is
 lagging, forked or lying. Do not "fix" the disagreement by pointing both at

@@ -9,9 +9,10 @@ import { z } from 'zod';
  * The one-page verification certificate for an anchor-only version: a report
  * that is signed or edit-protected, so it is anchored as issued and never
  * stamped (#74). It says, in English and Bulgarian, where the anchor is and
- * how to check it, with a QR code to the verifier. The certificate itself is
- * not anchored: it points at the record, and the record vouches for the
- * report, not for the certificate.
+ * how to check it, with a QR code to the verifier, and, when the firm publishes
+ * one, where the single-file verifier is (#85): the way to check without the
+ * firm's site. The certificate itself is not anchored: it points at the
+ * record, and the record vouches for the report, not for the certificate.
  *
  * Deterministic: the same input gives the same bytes. No dates.
  */
@@ -31,6 +32,8 @@ export const CertificateInputSchema = z.strictObject({
   blockNumber: z.int().min(1),
   verifyUrl: z.url().max(200),
   explorerTxUrl: z.url().max(300).nullable(),
+  /** The published single-file verifier (#85); without one the page is as it was. */
+  standaloneVerifierUrl: z.url({ protocol: /^https$/ }).max(200).nullable().optional(),
 });
 
 export type CertificateInput = z.infer<typeof CertificateInputSchema>;
@@ -59,6 +62,10 @@ const TEXT = {
   block: ['Block (finalized)', 'Блок (финализиран)'],
   explorer: ['Block explorer', 'Обозревател на блокове'],
   verify: ['Verify', 'Проверка'],
+  standalone: [
+    'Or check without this site: the single-file verifier, published with its SHA-256, runs in your browser and can be kept and opened from your own disk.',
+    'Или проверете без този сайт: проверката в един файл, публикувана с нейния SHA-256, работи във вашия браузър и може да се пази и отваря от собствения ви диск.',
+  ],
   footer: [
     'Anchored on a public test network: prototype evidence, not a legally binding record.',
     'Закотвено в публична тестова мрежа: доказателство от прототип, а не правно обвързващ запис.',
@@ -175,6 +182,14 @@ export async function certificatePdf(input: CertificateInput): Promise<Uint8Arra
   text(`${TEXT.verify[0]} / ${TEXT.verify[1]}`, bold, 11, INK, textX);
   for (const line of chunk(data.verifyUrl, mono, 9, textWidth)) text(line, mono, 9, INK, textX);
   y = Math.min(y, top - qrSize) - 20;
+
+  if (data.standaloneVerifierUrl) {
+    for (const [i, paragraph] of TEXT.standalone.entries()) {
+      for (const line of wrap(paragraph, regular, 8.5, width)) text(line, regular, 8.5, i === 0 ? INK : MUTED);
+    }
+    for (const line of chunk(data.standaloneVerifierUrl, mono, 9, width)) text(line, mono, 9);
+    y -= 16;
+  }
 
   for (const [i, line] of TEXT.footer.entries()) {
     for (const part of wrap(line, regular, 8, width)) text(part, regular, 8, i === 0 ? INK : MUTED);

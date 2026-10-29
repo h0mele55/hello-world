@@ -9,6 +9,8 @@
  *   FILE_ENCRYPTION_KEY, FILE_ENCRYPTION_KEY_VERSION, FILE_STORAGE_DIR
  *                       the same values as the app's: the worker reads originals and stores copies
  *   APP_PUBLIC_URL      the app's public origin; stamps and certificates point at <origin>/verify
+ *   STANDALONE_VERIFIER_URL  optional; the published single-file verifier (#85), which
+ *                       certificates name as the way to check without the app
  *   <NETWORK>_RPC_URL_2 a second endpoint, from another provider: a row is settled only on
  *                       what both read at one finalized block (#92)
  *   SEAL_PROVIDER, …    the firm's electronic seal on distribution copies (#70), in scripts/seal-env.ts
@@ -21,6 +23,7 @@
 import path from 'node:path';
 import { runWorkerPass } from '../src/lib/anchoring/worker';
 import { createFileStore } from '../src/lib/file-store';
+import { standaloneVerifierUrlOf } from '../src/lib/verify-setup';
 import { issuerEnv, refuse, requireEnv, secondPublicClient } from './issuer-env';
 import { sealEnv } from './seal-env';
 
@@ -39,6 +42,8 @@ async function main() {
   const files = createFileStore({ dir: path.resolve(process.env.FILE_STORAGE_DIR || 'storage'), current: sealingKey, keys: [sealingKey] });
   const verifyBaseUrl = env('APP_PUBLIC_URL');
   if (!/^https?:\/\/[^\s]+$/.test(verifyBaseUrl)) fail('APP_PUBLIC_URL must be an http(s) URL');
+  const standaloneVerifierUrl = standaloneVerifierUrlOf();
+  if (standaloneVerifierUrl === 'INVALID') fail('STANDALONE_VERIFIER_URL must be an https URL with no credentials, at most 200 characters');
 
   const seal = sealEnv('worker');
   const { network, account, deployment, publicClient, prisma, lockClient, close } = await issuerEnv('worker');
@@ -59,7 +64,7 @@ async function main() {
     do {
       let report;
       try {
-        report = await runWorkerPass({ prisma, lockClient, publicClient, checkClient, account, deployment, files, verifyBaseUrl, seal });
+        report = await runWorkerPass({ prisma, lockClient, publicClient, checkClient, account, deployment, files, verifyBaseUrl, standaloneVerifierUrl, seal });
         failedPasses = 0;
       } catch (error) {
         // An endpoint or the database out for a moment must not stop anchoring:

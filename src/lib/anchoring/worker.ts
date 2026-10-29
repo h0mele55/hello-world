@@ -143,6 +143,8 @@ export interface WorkerDeps {
   files: FileStore;
   /** The app's public origin; stamps and certificates point at `${verifyBaseUrl}/verify`. */
   verifyBaseUrl: string;
+  /** The published single-file verifier (#85); certificates name it as the way to check without the app. */
+  standaloneVerifierUrl?: string | null;
   /** The firm's electronic seal (#70): when given, every distribution copy is sealed before it is stored and anchored. */
   seal?: CopySeal;
   now?: () => Date;
@@ -215,6 +217,7 @@ interface Context {
   log: WorkerLog;
   files: FileStore;
   verifyUrl: string;
+  standaloneVerifierUrl: string | null;
   seal: CopySeal | null;
 }
 
@@ -293,6 +296,7 @@ export async function runWorkerPass(deps: WorkerDeps): Promise<PassReport> {
     log: deps.log ?? defaultLog,
     files: deps.files,
     verifyUrl: `${deps.verifyBaseUrl.replace(/\/+$/, '')}/verify`,
+    standaloneVerifierUrl: deps.standaloneVerifierUrl ?? null,
     seal: deps.seal ?? null,
   };
   const report: PassReport = { ran: false, steps: [], errors: [], certified: [], revocations: [], rpcDisagreed: false };
@@ -973,6 +977,7 @@ async function certifyAnchorOnly(ctx: Context, report: PassReport) {
         blockNumber: Number(version.anchorBlock),
         verifyUrl: ctx.verifyUrl,
         explorerTxUrl: version.anchorTxHash ? explorerTxUrl(ctx.chainId, version.anchorTxHash) : null,
+        standaloneVerifierUrl: ctx.standaloneVerifierUrl,
       });
       const stored = await ctx.files.store(certificate);
       storedPath = stored.path;

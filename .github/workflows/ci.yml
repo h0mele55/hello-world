@@ -135,6 +135,11 @@ jobs:
         run: npx playwright install --with-deps chromium
       - name: The single-file verifier and the CLI, for the local chain
         run: npm run build:verifier
+      - name: Its published site and release notes, as the Pages workflow makes them (#85)
+        run: |
+          npx tsx scripts/verifier-site.ts --out "$RUNNER_TEMP/verifier-site" --notes "$RUNNER_TEMP/verifier-notes.md"
+          (cd "$RUNNER_TEMP/verifier-site" && sha256sum -c verifier.html.sha256)
+          cmp dist/verifier.html "$RUNNER_TEMP/verifier-site/verifier.html"
       - name: Tamper suite (the Phase 4 exit gate)
         run: |
           sudo apt-get update -q && sudo apt-get install -y --no-install-recommends qpdf

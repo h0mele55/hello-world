@@ -1,4 +1,5 @@
 import jsQR from 'jsqr';
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { describe, expect, it } from 'vitest';
 import { certificatePdf, qrSquares, type CertificateInput } from '@/lib/certificate';
 import { sha256 } from '@/lib/commitments';
@@ -32,6 +33,15 @@ function decodeSquares(text: string): string | null {
   return jsQR(pixels, size, size)?.data ?? null;
 }
 
+/** The certificate's text, as a reader's PDF viewer extracts it. */
+async function textOf(bytes: Uint8Array): Promise<string> {
+  const task = pdfjs.getDocument({ data: bytes.slice(), verbosity: 0 });
+  const page = await (await task.promise).getPage(1);
+  const content = await page.getTextContent();
+  await task.destroy();
+  return content.items.map((item) => ('str' in item ? item.str : '')).join(' ');
+}
+
 describe('the verification certificate', () => {
   it('draws a QR code that decodes to the verify URL', () => {
     expect(decodeSquares(INPUT.verifyUrl)).toBe(INPUT.verifyUrl);
@@ -48,5 +58,24 @@ describe('the verification certificate', () => {
   it('refuses input that is not a record', async () => {
     await expect(certificatePdf({ ...INPUT, recordId: '0x12' })).rejects.toThrow();
     await expect(certificatePdf({ ...INPUT, verifyUrl: 'not a url' })).rejects.toThrow();
+  });
+
+  it('names the published single-file verifier when there is one, and is unchanged without it (#85)', async () => {
+    const url = 'https://firm.github.io/audit-anchor/';
+    const [without, explicitNone, withUrl, again] = await Promise.all([
+      certificatePdf(INPUT),
+      certificatePdf({ ...INPUT, standaloneVerifierUrl: null }),
+      certificatePdf({ ...INPUT, standaloneVerifierUrl: url }),
+      certificatePdf({ ...INPUT, standaloneVerifierUrl: url }),
+    ]);
+    expect(sha256(explicitNone)).toBe(sha256(without));
+    expect(sha256(again)).toBe(sha256(withUrl));
+    expect(sha256(withUrl)).not.toBe(sha256(without));
+    const text = await textOf(withUrl);
+    expect(text).toContain(url);
+    expect(text).toContain('check without this site');
+    expect(text).toContain('проверете без този сайт');
+    expect(await textOf(without)).not.toContain('without this site');
+    await expect(certificatePdf({ ...INPUT, standaloneVerifierUrl: 'http://firm.github.io/' })).rejects.toThrow();
   });
 });

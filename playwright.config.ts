@@ -9,6 +9,10 @@ const PORT = 3100;
 // stand-in provider's keys; the server reads the file on every render.
 process.env.E2E_SEAL_ROOTS ??= path.join(os.tmpdir(), 'anchor-e2e-seal-roots.pem');
 
+// Where the single-file verifier is published (#85): /verify links it, and the
+// worker the anchoring test runs names it on certificates.
+process.env.STANDALONE_VERIFIER_URL ??= 'https://verifier.example/audit-anchor/';
+
 // The app's server never holds the issuer key: only the worker does
 // (scripts/worker.ts, run by tests/e2e/anchoring.spec.ts as its own process).
 const serverEnv = {

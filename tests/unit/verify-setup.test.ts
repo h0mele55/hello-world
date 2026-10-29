@@ -4,7 +4,7 @@ import path from 'node:path';
 import { afterAll, describe, expect, it } from 'vitest';
 import { orgIdFor } from '@/lib/chain/deploy';
 import { registryRuntimeBytecodeHash } from '@/lib/chain/registry-artifact';
-import { verifierSetupFromEnv } from '@/lib/verify-setup';
+import { standaloneVerifierUrlOf, verifierSetupFromEnv } from '@/lib/verify-setup';
 import { createTestPki, pemOf } from '../helpers/test-pki';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'verify-setup-'));
@@ -73,5 +73,15 @@ describe('the verifier setup', () => {
     expect(reason({ ...sepolia, VERIFY_RPC_URL_2: 'http://rpc.two.example' })).toBe('RPC_URLS_INVALID');
     expect(reason({ ...sepolia, VERIFY_RPC_URL_2: 'https://user:secret@rpc.two.example' })).toBe('RPC_URLS_INVALID');
     expect(reason({ ...sepolia, VERIFY_RPC_URL_2: 'https://rpc.one.example/other' })).toBe('RPC_URLS_NOT_INDEPENDENT');
+  });
+
+  it('links the published single-file verifier only by an https URL with no credentials (#85)', () => {
+    expect(standaloneVerifierUrlOf({})).toBeNull();
+    expect(standaloneVerifierUrlOf({ STANDALONE_VERIFIER_URL: '  ' })).toBeNull();
+    expect(standaloneVerifierUrlOf({ STANDALONE_VERIFIER_URL: 'https://firm.github.io/verifier' })).toBe('https://firm.github.io/verifier');
+    expect(standaloneVerifierUrlOf({ STANDALONE_VERIFIER_URL: 'https://firm.github.io' })).toBe('https://firm.github.io/');
+    for (const bad of ['firm.github.io', 'http://firm.github.io/', 'https://user:secret@firm.github.io/', 'javascript:alert(1)', `https://firm.github.io/${'a'.repeat(200)}`]) {
+      expect(standaloneVerifierUrlOf({ STANDALONE_VERIFIER_URL: bad }), bad).toBe('INVALID');
+    }
   });
 });

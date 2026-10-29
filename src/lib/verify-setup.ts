@@ -23,6 +23,9 @@ import { pemCertificates } from '@/lib/eseal/pem';
  *                       one. Public chain data: /reanchor/<n> serves the n-th, and
  *                       the page fetches them only for a file this registry holds
  *                       no record of (#126). Their paths are never sent.
+ *   STANDALONE_VERIFIER_URL  optional; where the single-file verifier is
+ *                       published with its SHA-256 (#85), linked from /verify and
+ *                       from the certificate as the way to check without this site
  */
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -123,4 +126,23 @@ export function verifierSetupFromEnv(env: Env = process.env, root = process.cwd(
       reanchorArchives: reanchorArchivesOf(env).length,
     },
   };
+}
+
+/**
+ * The published single-file verifier (#85): an https URL with no credentials,
+ * short enough for the certificate. Null when the firm publishes none;
+ * INVALID for anything else, which the worker refuses to start with and
+ * /verify does not link.
+ */
+export function standaloneVerifierUrlOf(env: Env = process.env): string | null | 'INVALID' {
+  const raw = env.STANDALONE_VERIFIER_URL?.trim();
+  if (!raw) return null;
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    return 'INVALID';
+  }
+  if (url.protocol !== 'https:' || url.username || url.password || url.href.length > 200) return 'INVALID';
+  return url.href;
 }

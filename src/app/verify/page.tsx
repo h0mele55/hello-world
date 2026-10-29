@@ -5,18 +5,21 @@ import { Heading } from '@inflect/ui/components/ui/typography';
 import { PreferencesBar } from '@/components/preferences-bar';
 import { VerifyClient } from '@/components/verify/verify-client';
 import { explorerAddressUrl, networkNameOf } from '@/lib/chain/explorer';
-import { verifierSetupFromEnv } from '@/lib/verify-setup';
+import { standaloneVerifierUrlOf, verifierSetupFromEnv } from '@/lib/verify-setup';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * Public, no sign-in: anyone checks a report here. The server only hands the
  * page the registry's address and two public RPC endpoints; the check itself
- * runs in the visitor's browser and never uploads the file (rule 5).
+ * runs in the visitor's browser and never uploads the file (rule 5). When the
+ * firm publishes the single-file verifier (#85), the page links it, so a
+ * visitor can check without this site.
  */
 export default async function VerifyPage() {
   const t = await getTranslations('verify');
   const result = verifierSetupFromEnv();
+  const standaloneUrl = standaloneVerifierUrlOf();
   return (
     <main className="mx-auto flex max-w-3xl flex-col gap-section px-default py-page">
       <PreferencesBar />
@@ -45,6 +48,14 @@ export default async function VerifyPage() {
           <p className="text-sm text-content-muted">{t(`setupRefusal.${result.reason}`)}</p>
         </Card>
       )}
+      {standaloneUrl && standaloneUrl !== 'INVALID' ? (
+        <p className="text-sm text-content-muted" data-testid="verify-standalone">
+          {t('standalone.text')}{' '}
+          <a href={standaloneUrl} target="_blank" rel="noreferrer" className="text-content-info underline">
+            {t('standalone.link')}
+          </a>
+        </p>
+      ) : null}
     </main>
   );
 }

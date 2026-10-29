@@ -117,6 +117,7 @@ npm run test:backup            # back up, restore into <db>_restore_test, check 
 
 # The verifier
 npm run build:verifier         # dist/verifier.html and dist/verify-report.mjs, for VERIFY_NETWORK (or ANCHOR_NETWORK)
+npx tsx scripts/verifier-site.ts --out <dir> --notes <file>   # the Pages site and release notes for dist/verifier.html (#85)
 node bin/verify-report.mjs report.pdf [--deployment <file> --rpc <url> --rpc <url>]   # verdict as JSON
 npm run test:tamper            # the tamper suite on Anvil, through verify-core and the CLI; needs qpdf and Chromium
 k6 run -e BASE_URL=<deploy> tests/load/verify.js   # /verify at 50 requests a second for 5 minutes (#69); a staging deploy, not CI
@@ -416,6 +417,15 @@ to one inflect-compliance commit.
   `blob:`, and connections to the two endpoints, plus, when it was built with
   `APP_PUBLIC_URL`, that origin and the two Bitcoin explorers. The CLI asks
   for the timestamp only with the issuer's origin (baked in, or `--app-url`).
+- **The published copy (#85).** `.github/workflows/verifier-pages.yml`
+  builds `verifier.html` for its `NETWORK` (Sepolia) and publishes it on
+  GitHub Pages and, once per SHA-256, on a release named by that hash. The
+  site (`standalone/site.ts`) is made from the `dist/verifier.json` the build
+  writes, whose hash must be the file's. It does nothing until
+  `deployments/<NETWORK>.json` exists. The build reads repository variables,
+  never secrets: everything baked into the file is public, and
+  `tests/unit/workflows.test.ts` refuses a secret. `STANDALONE_VERIFIER_URL`
+  (https only) makes `/verify` and new certificates link the published copy.
 - **A retired registry's records verify through their re-anchor root**
   (`src/lib/verify-core/reanchor.ts`, #65). An archive (every record) or a
   record's proof (it, its original, its family's latest) is checked against

@@ -427,8 +427,12 @@ to one inflect-compliance commit.
   asked about a record it does not hold refuses (`REANCHOR_NOT_COVERED`)
   rather than say "none". `verifyWithReanchors` tries a set only when the
   verifier's own registry holds no record of the file. The CLI takes
-  `--reanchor`; `/verify` and `verifier.html` follow in #126. Do not change
-  the leaf encoding: archives already recorded must keep proving.
+  `--reanchor`. The archives in `REANCHOR_ARCHIVES` are fetched by `/verify`
+  from `/reanchor/<n>` and baked into `verifier.html` and the CLI by
+  `build:verifier` (#126); all three pass them as `loadSets`, which runs only
+  for a file the registry holds no record of, and an archive that cannot be
+  loaded is `REANCHOR_UNAVAILABLE`, never NOT_REGISTERED. Do not change the
+  leaf encoding: archives already recorded must keep proving.
 - **The tamper suite is the exit gate** (`tests/tamper/`): each case is made
   with the tool a person would use (an incremental save, a re-render keeping
   the reference, qpdf, Chromium's print) and must get the same verdict from
@@ -441,7 +445,8 @@ to one inflect-compliance commit.
   request: every page is, because the root layout reads the theme cookie, and
   `tests/e2e/csp.spec.ts` walks every page from git and fails on a script
   without its response's nonce. The proxy also holds the rate limit of the
-  lookup page and the public proof route, `/ots/*`
+  lookup page, the public proof route, `/ots/*`, and the re-anchor
+  archives, `/reanchor/*`
   (`src/lib/rate-limit.ts`: 60 a minute per address, 600 in all; the
   address only behind a proxy that sets it, `TRUST_PROXY_HEADERS=1`).
 

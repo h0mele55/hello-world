@@ -31,6 +31,8 @@ export type CannotVerifyReason =
   | 'REANCHOR_PROOF_INVALID'
   /** A re-anchor proof asked about a record it does not hold, which it can neither confirm nor deny. */
   | 'REANCHOR_NOT_COVERED'
+  /** The re-anchor archives a verifier is configured with could not be loaded (#126), so the file was not checked against them. */
+  | 'REANCHOR_UNAVAILABLE'
   /** A checkpoint (#122) whose Bitcoin timestamp is missing, unreadable, of something else, or not yet on Bitcoin. */
   | 'CHECKPOINT_UNPROVEN'
   /** A checkpoint that does not hold the file or the record it names: it may have come after the checkpoint. */

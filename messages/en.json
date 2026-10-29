@@ -482,6 +482,7 @@
       "REANCHOR_ROOT_NOT_RECORDED": "This report was anchored on a network that has been retired. Its records were carried over with a proof, but the registry does not hold that proof's root, or the registry's owner has withdrawn it.",
       "REANCHOR_PROOF_INVALID": "This report was anchored on a network that has been retired. The proof of its records that was given does not check.",
       "REANCHOR_NOT_COVERED": "This report was anchored on a network that has been retired. The proof given does not cover the record this file names.",
+      "REANCHOR_UNAVAILABLE": "This report may have been anchored on a network that has been retired, and the archive of that network's records could not be loaded, so the file was not checked against it. Try again shortly.",
       "CHECKPOINT_UNPROVEN": "The registry could not be reached, and the monthly checkpoint given does not carry a Bitcoin timestamp that checks.",
       "CHECKPOINT_NOT_COVERED": "The registry could not be reached, and the monthly checkpoint given does not hold this file or the record it names. It may have been anchored after the checkpoint.",
       "FILE_TOO_LARGE": "The file is larger than 25 MB.",
@@ -562,6 +563,12 @@
         "UNTRUSTED": "the seal's certificate does not chain to the firm's roots, or was not valid when it sealed.",
         "BAD_TIMESTAMP": "its timestamp is not over this signature, or not from a timestamping authority the roots vouch for."
       }
+    },
+    "reanchored": {
+      "title": "Carried over from a retired network",
+      "body": "This record was on the registry {registry} on {network}, which has been retired. Every record it held at block {block} was carried over: the root of all {count} is entry {index} on this registry, recorded in block {recordedBlock}.",
+      "frozen": "The report's versions are shown as they stood at that block.",
+      "sourceRegistry": "Retired registry"
     }
   },
   "latest": {

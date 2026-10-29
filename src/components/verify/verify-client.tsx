@@ -6,13 +6,17 @@ import { Button } from '@inflect/ui/components/ui/button';
 import { Card } from '@inflect/ui/components/ui/card';
 import { EmptyState } from '@inflect/ui/components/ui/empty-state';
 import { CloudUpload } from '@inflect/ui/components/ui/icons/nucleo/cloud-upload';
-import { openRegistryView, readDocument, verifyFile, type PdfjsLike } from '@/lib/verify-core';
+import { checkReanchorSet, openRegistryView, readDocument, verifyWithReanchors, type CheckedSet, type PdfjsLike, type Reanchored } from '@/lib/verify-core';
 import type { VerifierSetup } from '@/lib/verify-setup';
 import { BitcoinTimestampView } from './bitcoin-timestamp-view';
+import { ReanchoredView } from './reanchored-view';
 import { SealView } from './seal-view';
 import { VerdictView, type ShownVerdict } from './verdict-view';
 
-type State = { step: 'idle' } | { step: 'checking'; name: string } | { step: 'done'; name: string; bytes: Uint8Array; verdict: ShownVerdict };
+type State =
+  | { step: 'idle' }
+  | { step: 'checking'; name: string }
+  | { step: 'done'; name: string; bytes: Uint8Array; verdict: ShownVerdict; reanchored: Reanchored | null };
 
 let pdfjsLoad: Promise<PdfjsLike> | null = null;
 
@@ -25,6 +29,28 @@ function loadPdfjs(): Promise<PdfjsLike> {
   return pdfjsLoad;
 }
 
+let setsLoad: Promise<CheckedSet[]> | null = null;
+
+/**
+ * The re-anchor archives this site publishes (#126), fetched from its public
+ * /reanchor route only for a file the registry holds no record of, and held to
+ * their own roots here. Kept for the page's life once they load; a failed load
+ * is tried again for the next file.
+ */
+function loadReanchorSets(count: number): Promise<CheckedSet[]> {
+  setsLoad ??= Promise.all(
+    Array.from({ length: count }, async (_, n) => {
+      const response = await fetch(`/reanchor/${n}`, { credentials: 'omit' });
+      if (!response.ok) throw new Error(`archive ${n}: HTTP ${response.status}`);
+      return checkReanchorSet(await response.json());
+    }),
+  ).catch((error: unknown) => {
+    setsLoad = null;
+    throw error;
+  });
+  return setsLoad;
+}
+
 /**
  * The verifier, entirely in the browser (rule 5): the file is read from disk
  * into memory, hashed, parsed by pdf.js and compared with what two RPC
@@ -33,7 +59,9 @@ function loadPdfjs(): Promise<PdfjsLike> {
  * this site's public /ots route for that report's Bitcoin timestamp by its
  * manifest hash (#66), which only adds to the verdict. A matched distribution
  * copy's electronic seal is checked here too, against the roots the firm
- * publishes (#120), and only adds to it as well.
+ * publishes (#120), and only adds to it as well. A file the registry holds no
+ * record of is checked against the archives of the registries it replaced
+ * (#126), through their roots on this one.
  */
 export function VerifyClient({ setup }: { setup: VerifierSetup }) {
   const t = useTranslations('verify');
@@ -44,19 +72,21 @@ export function VerifyClient({ setup }: { setup: VerifierSetup }) {
   async function check(file: File) {
     setState({ step: 'checking', name: file.name });
     let verdict: ShownVerdict;
+    let reanchored: Reanchored | null = null;
     let bytes = new Uint8Array(0);
     try {
       bytes = new Uint8Array(await file.arrayBuffer());
-      verdict = await verifyFile({
+      ({ verdict, reanchored } = await verifyWithReanchors({
         bytes,
         config: setup,
         openView: () => openRegistryView(setup),
         readPdf: async (pdf) => readDocument(await loadPdfjs(), pdf),
-      });
+        loadSets: setup.reanchorArchives > 0 ? () => loadReanchorSets(setup.reanchorArchives) : undefined,
+      }));
     } catch {
       verdict = { kind: 'CANNOT_VERIFY', reason: 'UNEXPECTED' };
     }
-    setState({ step: 'done', name: file.name, bytes, verdict });
+    setState({ step: 'done', name: file.name, bytes, verdict, reanchored });
   }
 
   function onDrop(event: DragEvent) {
@@ -105,7 +135,13 @@ export function VerifyClient({ setup }: { setup: VerifierSetup }) {
       ) : (
         <>
           <p className="break-all text-sm text-content-muted">{state.name}</p>
-          <VerdictView verdict={state.verdict} chainId={setup.chainId} issuers={setup.issuers} />
+          {state.reanchored?.kind === 'registry' ? (
+            // The records are the retired registry's: its chain's explorer, its issuers, and no link to this registry's latest.
+            <VerdictView verdict={state.verdict} chainId={state.reanchored.sourceChainId} issuers={{ ...setup.issuers, ...state.reanchored.issuers }} retired />
+          ) : (
+            <VerdictView verdict={state.verdict} chainId={setup.chainId} issuers={setup.issuers} />
+          )}
+          {state.reanchored ? <ReanchoredView reanchored={state.reanchored} /> : null}
           {'matched' in state.verdict ? <BitcoinTimestampView key={state.verdict.matched.manifestHash} manifestHash={state.verdict.matched.manifestHash} /> : null}
           {'matched' in state.verdict && state.verdict.matched.kind === 'DISTRIBUTION_COPY' ? (
             <SealView key={state.verdict.docHash} bytes={state.bytes} roots={setup.sealRoots} />

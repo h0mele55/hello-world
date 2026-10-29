@@ -598,22 +598,30 @@ export type Reanchored =
  *     only through its Bitcoin timestamp, and answering as of its block (#122).
  *
  * Until a set is proven, the verdict is CANNOT_VERIFY with the reason.
+ *
+ * Re-anchor sets may also come from `loadSets` (#126), which is called only
+ * once the registry has answered that it holds no record of the file: an
+ * archive can be large, and a browser verifier fetches it. One that cannot be
+ * loaded leaves the file unchecked against it, so the verdict is CANNOT_VERIFY
+ * (REANCHOR_UNAVAILABLE), never NOT_REGISTERED (rule 7).
  */
 export async function verifyWithReanchors(input: {
   bytes: Uint8Array;
   config: VerifierConfig;
   openView: () => Promise<RegistryView>;
   readPdf: (bytes: Uint8Array) => Promise<DocumentRead>;
-  sets: readonly CheckedSet[];
+  sets?: readonly CheckedSet[];
+  loadSets?: () => Promise<readonly CheckedSet[]>;
   clients?: readonly PublicClient[];
   bitcoinCheck?: CheckpointBitcoinCheck;
 }): Promise<{ verdict: Verdict; reanchored: Reanchored | null }> {
   const primary = await verifyFile(input);
   const docHash = docHashOf(input.bytes);
   const holds = (set: CheckedSet) => set.records.some((r) => r.docHash === docHash);
+  const given = input.sets ?? [];
 
   if (primary.kind === 'CANNOT_VERIFY' && primary.reason === 'RPC_UNREACHABLE') {
-    const ofThisRegistry = input.sets.filter((set) => set.checkpoint && set.source.chainId === input.config.chainId && same(set.source.registry, input.config.registry));
+    const ofThisRegistry = given.filter((set) => set.checkpoint && set.source.chainId === input.config.chainId && same(set.source.registry, input.config.registry));
     // One holding the very file first, then the latest, then a whole checkpoint before a proof.
     const set = [...ofThisRegistry].sort((a, b) => Number(holds(b)) - Number(holds(a)) || b.source.block - a.source.block || Number(b.complete) - Number(a.complete))[0];
     if (!set?.checkpoint) return { verdict: primary, reanchored: null };
@@ -635,10 +643,19 @@ export async function verifyWithReanchors(input: {
     };
   }
 
-  if ((primary.kind !== 'NOT_REGISTERED' && primary.kind !== 'UNKNOWN_REGISTRY') || input.sets.length === 0) return { verdict: primary, reanchored: null };
+  if (primary.kind !== 'NOT_REGISTERED' && primary.kind !== 'UNKNOWN_REGISTRY') return { verdict: primary, reanchored: null };
+  let sets = given;
+  if (input.loadSets) {
+    try {
+      sets = [...given, ...(await input.loadSets())];
+    } catch (error) {
+      return { verdict: { kind: 'CANNOT_VERIFY', reason: error instanceof CannotVerify ? error.reason : 'REANCHOR_UNAVAILABLE' }, reanchored: null };
+    }
+  }
+  if (sets.length === 0) return { verdict: primary, reanchored: null };
   const named = (set: CheckedSet) => primary.kind === 'UNKNOWN_REGISTRY' && primary.claimedChainId === set.source.chainId && same(primary.claimedContract, set.source.registry);
   // A set holding the very file first, then whole archives before single proofs.
-  const candidates = input.sets.filter((set) => set.target && (holds(set) || named(set))).sort((a, b) => Number(holds(b)) - Number(holds(a)) || Number(b.complete) - Number(a.complete));
+  const candidates = sets.filter((set) => set.target && (holds(set) || named(set))).sort((a, b) => Number(holds(b)) - Number(holds(a)) || Number(b.complete) - Number(a.complete));
   const set = candidates[0];
   if (!set) return { verdict: primary, reanchored: null };
   let recorded: RecordedRoot | null = null;

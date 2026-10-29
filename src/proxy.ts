@@ -8,12 +8,13 @@ import { verifierRpcUrls } from '@/lib/verify-setup';
  * Every page gets a nonce-based CSP (#84). The public verifier's pages may
  * also reach their two RPC endpoints and the two Bitcoin explorers (#66);
  * every other page, this origin only. The lookup page is rate-limited, since
- * it reads the chain on the server for every request, and so is the public
- * proof route, which reads the database.
+ * it reads the chain on the server for every request, and so are the public
+ * proof route, which reads the database, and the re-anchor archives (#126),
+ * which can be large.
  */
 export function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  if (pathname.startsWith('/r/') || pathname.startsWith('/ots/')) {
+  if (pathname.startsWith('/r/') || pathname.startsWith('/ots/') || pathname.startsWith('/reanchor/')) {
     const taken = takeLookup(clientAddressOf(request.headers));
     if (!taken.ok) {
       return new NextResponse('Too many requests. Try again shortly.', {

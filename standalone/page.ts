@@ -1,6 +1,20 @@
 import * as pdfjs from 'pdfjs-dist';
 import { explorerAddressUrl, explorerBlockUrl, explorerTxUrl, networkNameOf } from '@/lib/chain/explorer';
-import { bitcoinTimestampFor, defaultExplorers, issuerProofFetcher, openRegistryView, readDocument, verifyFile, type BitcoinTimestamp, type PdfjsLike, type RecordSummary, type Verdict } from '@/lib/verify-core';
+import {
+  bitcoinTimestampFor,
+  checkReanchorSet,
+  defaultExplorers,
+  issuerProofFetcher,
+  openRegistryView,
+  readDocument,
+  verifyWithReanchors,
+  type BitcoinTimestamp,
+  type CheckedSet,
+  type PdfjsLike,
+  type Reanchored,
+  type RecordSummary,
+  type Verdict,
+} from '@/lib/verify-core';
 import { sealStatusFor, type SealStatus } from '@/lib/verify-core/seal';
 import { rootsOf, type StandaloneSetup } from './config';
 
@@ -13,12 +27,16 @@ import { rootsOf, type StandaloneSetup } from './config';
  * to the two endpoints only, and, when it was built with the issuer's origin,
  * to that origin's /ots route and the two Bitcoin explorers, for a matched
  * report's Bitcoin timestamp (#66). A matched distribution copy's electronic
- * seal is checked against the roots baked in (#120), offline. It writes text,
- * never markup, into the page.
+ * seal is checked against the roots baked in (#120), offline. The archives of
+ * the registries this one replaced are baked in too (#126): a file the
+ * registry holds no record of is checked against them, through their roots on
+ * this registry, with the retired chain gone. It writes text, never markup,
+ * into the page.
  */
 
 type Tree = { [key: string]: string | Tree };
 declare const __VERIFIER_SETUP__: StandaloneSetup;
+declare const __REANCHOR_SETS__: unknown[];
 declare const __PDF_WORKER__: string;
 declare const __MESSAGES__: { en: Tree; bg: Tree };
 
@@ -29,8 +47,20 @@ const setup = __VERIFIER_SETUP__;
 pdfjs.GlobalWorkerOptions.workerSrc = URL.createObjectURL(new Blob([__PDF_WORKER__], { type: 'text/javascript' }));
 
 let locale: Locale = navigator.language.toLowerCase().startsWith('bg') ? 'bg' : 'en';
-type Checked = { name: string; verdict: Shown; stamp?: BitcoinTimestamp | 'CHECKING'; seal?: SealStatus | 'CHECKING' };
+type Checked = { name: string; verdict: Shown; reanchored: Reanchored | null; stamp?: BitcoinTimestamp | 'CHECKING'; seal?: SealStatus | 'CHECKING' };
 let last: Checked | null = null;
+
+/** The baked archives, held to their own roots the first time a file needs them. */
+let setsCheck: Promise<CheckedSet[]> | null = null;
+const loadSets = __REANCHOR_SETS__.length > 0 ? () => (setsCheck ??= Promise.resolve().then(() => __REANCHOR_SETS__.map((set) => checkReanchorSet(set)))) : undefined;
+
+/** Whose records a verdict shows: this registry's, or a retired one's (#126). */
+interface Source {
+  chainId: number;
+  issuers: Record<string, string>;
+}
+const sourceOf = (reanchored: Reanchored | null): Source =>
+  reanchored?.kind === 'registry' ? { chainId: reanchored.sourceChainId, issuers: { ...setup.issuers, ...reanchored.issuers } } : { chainId: setup.chainId, issuers: setup.issuers };
 
 function t(key: string, values: Record<string, string | number> = {}): string {
   let node: string | Tree | undefined = __MESSAGES__[locale];
@@ -55,12 +85,12 @@ function link(href: string | null, label: string): HTMLElement {
 
 const utcDate = (seconds: number) => `${new Date(seconds * 1000).toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 
-function issuerLabel(orgId: string | null) {
-  return orgId === null ? t('details.noIssuer') : (setup.issuers[orgId.toLowerCase()] ?? t('details.unknownIssuer', { orgId }));
+function issuerLabel(orgId: string | null, issuers: Record<string, string>) {
+  return orgId === null ? t('details.noIssuer') : (issuers[orgId.toLowerCase()] ?? t('details.unknownIssuer', { orgId }));
 }
 
-function recordSection(title: string, record: RecordSummary, testId: string): HTMLElement {
-  const section = el('section', undefined, { class: 'record', 'data-testid': testId });
+function recordSection(title: string, record: RecordSummary, testId: string, source: Source): HTMLElement {
+  const section = el('section', undefined, { class: 'record', 'data-testid': testId, 'data-record-id': record.recordId });
   section.append(el('h3', title));
   const head = el('p', `${t('details.version', { version: record.version })} · ${t(`details.kind.${record.kind}`)}`);
   if (record.revoked) head.append(el('span', ` · ${t('details.revokedReason', { code: record.revokeReason })}`, { class: 'bad' }));
@@ -69,14 +99,38 @@ function recordSection(title: string, record: RecordSummary, testId: string): HT
   }
   section.append(head);
   const block = el('p', `${t('details.block', { block: record.blockNumber })}, ${utcDate(record.blockTime)} `);
-  block.append(link(explorerBlockUrl(setup.chainId, record.blockNumber), t('details.block', { block: record.blockNumber })));
+  block.append(link(explorerBlockUrl(source.chainId, record.blockNumber), t('details.block', { block: record.blockNumber })));
   section.append(block);
   if (record.txHash) {
     const tx = el('p', `${t('details.transaction')}: `);
-    tx.append(el('code', record.txHash), document.createTextNode(' '), link(explorerTxUrl(setup.chainId, record.txHash), t('details.transaction')));
+    tx.append(el('code', record.txHash), document.createTextNode(' '), link(explorerTxUrl(source.chainId, record.txHash), t('details.transaction')));
     section.append(tx);
   }
-  section.append(el('p', `${t('details.issuer')}: ${issuerLabel(record.orgId)}`, { 'data-testid': `${testId}-issuer` }));
+  section.append(el('p', `${t('details.issuer')}: ${issuerLabel(record.orgId, source.issuers)}`, { 'data-testid': `${testId}-issuer` }));
+  return section;
+}
+
+/** Where a re-anchored record's verdict comes from: the retired registry and the root on this one (#126). */
+function reanchoredSection(reanchored: Extract<Reanchored, { kind: 'registry' }>): HTMLElement {
+  const section = el('section', undefined, { class: 'record', 'data-testid': 'reanchored', 'data-index': String(reanchored.index) });
+  section.append(el('h3', t('reanchored.title')));
+  section.append(
+    el(
+      'p',
+      t('reanchored.body', {
+        registry: reanchored.sourceRegistry,
+        network: networkNameOf(reanchored.sourceChainId),
+        block: reanchored.sourceBlock,
+        count: reanchored.count,
+        index: reanchored.index,
+        recordedBlock: reanchored.recordedBlock,
+      }),
+      { 'data-testid': 'reanchored-body' },
+    ),
+  );
+  const registry = el('p', `${t('reanchored.sourceRegistry')}: `);
+  registry.append(el('code', reanchored.sourceRegistry), document.createTextNode(' '), link(explorerAddressUrl(reanchored.sourceChainId, reanchored.sourceRegistry), t('reanchored.sourceRegistry')));
+  section.append(registry, el('p', t('reanchored.frozen'), { class: 'muted' }));
   return section;
 }
 
@@ -115,6 +169,7 @@ function renderVerdict() {
   out.replaceChildren();
   if (!last) return;
   const { name, verdict } = last;
+  const source = sourceOf(last.reanchored);
   const box = el('div', undefined, { 'data-testid': 'verdict', 'data-kind': verdict.kind, class: `verdict ${TONE[verdict.kind]}` });
   box.append(el('p', name, { class: 'muted' }), el('h2', t(`verdict.${verdict.kind}.title`)), el('p', bodyOf(verdict), { 'data-testid': 'verdict-body' }));
   if ('docHash' in verdict) {
@@ -126,7 +181,7 @@ function renderVerdict() {
     const add = (title: string, record: RecordSummary, testId: string) => {
       if (seen.has(record.recordId)) return;
       seen.add(record.recordId);
-      box.append(recordSection(title, record, testId));
+      box.append(recordSection(title, record, testId, source));
     };
     if ('matched' in verdict) add(t('details.matched'), verdict.matched, 'record-matched');
     if ('claimed' in verdict) add(t('details.claimed'), verdict.claimed, 'record-claimed');
@@ -134,6 +189,7 @@ function renderVerdict() {
     if ('latest' in verdict) add(t('details.latest'), verdict.latest, 'record-latest');
     box.append(el('p', t('details.asOf', { block: verdict.asOfBlock }), { class: 'muted' }));
   }
+  if (last.reanchored?.kind === 'registry') box.append(reanchoredSection(last.reanchored));
   if (last.stamp) box.append(stampSection(last.stamp));
   if (last.seal) box.append(sealSection(last.seal));
   out.append(box);
@@ -203,21 +259,23 @@ async function check(file: File) {
   renderVerdict();
   $('status').textContent = t('checking', { name: file.name });
   let verdict: Shown;
+  let reanchored: Reanchored | null = null;
   let bytes = new Uint8Array(0);
   try {
     bytes = new Uint8Array(await file.arrayBuffer());
-    verdict = await verifyFile({
+    ({ verdict, reanchored } = await verifyWithReanchors({
       bytes,
       config: setup,
       openView: () => openRegistryView(setup),
       readPdf: (pdf) => readDocument(pdfjs as unknown as PdfjsLike, pdf),
-    });
+      loadSets,
+    }));
   } catch {
     verdict = { kind: 'CANNOT_VERIFY', reason: 'UNEXPECTED' };
   }
   $('status').textContent = '';
   const copy = 'matched' in verdict && verdict.matched.kind === 'DISTRIBUTION_COPY';
-  const current: Checked = { name: file.name, verdict, stamp: 'matched' in verdict && setup.appUrl ? 'CHECKING' : undefined, seal: copy ? 'CHECKING' : undefined };
+  const current: Checked = { name: file.name, verdict, reanchored, stamp: 'matched' in verdict && setup.appUrl ? 'CHECKING' : undefined, seal: copy ? 'CHECKING' : undefined };
   last = current;
   renderVerdict();
   if (copy) {

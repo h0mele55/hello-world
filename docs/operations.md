@@ -139,6 +139,24 @@ record, holds no key and writes no chain. Once the timestamp is complete,
 firm publishes; `docs/runbooks/checkpoints.md` says how, and how a record is
 verified through them when the registry cannot be read.
 
+## Retired registries in the verifiers
+
+Once a registry has been re-anchored (#65, `docs/runbooks/sepolia-sunset.md`),
+set `REANCHOR_ARCHIVES` to its `archive.json`, comma-separated if there are
+several, in the app's environment and when building the single-file verifier
+(#126):
+
+- `/verify` serves the n-th file at `/reanchor/<n>` and the visitor's browser
+  fetches it only for a file this registry holds no record of, then holds its
+  records to their root on this registry. The route is rate-limited with the
+  lookup page. It learns only that a visitor checked some file this registry
+  does not hold, never which. An archive it cannot serve makes that verdict
+  `REANCHOR_UNAVAILABLE` ("cannot verify"), never "not registered".
+- `npm run build:verifier` bakes the archives into `dist/verifier.html` and the
+  CLI, so a re-anchored file verifies with no server at all. It refuses an
+  archive that does not hold together, a checkpoint (the CLI's `--checkpoint`
+  takes those), or one whose root is on another registry.
+
 ## The electronic seal
 
 The firm can seal every distribution copy with its electronic seal (#70): a

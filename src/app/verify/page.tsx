@@ -51,7 +51,7 @@ export default async function VerifyPage() {
       {standaloneUrl && standaloneUrl !== 'INVALID' ? (
         <p className="text-sm text-content-muted" data-testid="verify-standalone">
           {t('standalone.text')}{' '}
-          <a href={standaloneUrl} target="_blank" rel="noreferrer" className="text-content-info hover:underline">
+          <a href={standaloneUrl} target="_blank" rel="noreferrer" className="text-content-info underline">
             {t('standalone.link')}
           </a>
         </p>

@@ -1339,6 +1339,21 @@ outlive its infrastructure:
 - **Rehearsed on Anvil** (`tests/anchoring/checkpoint.test.ts`), with fake
   calendars and a stubbed Bitcoin check as in #66's tests.
 
+6l makes the seal long-term (#119, PAdES B-LT), so a copy's seal can still be
+checked once its certificates expire:
+
+- **The worker adds each certificate's status** at the timestamp's time, from
+  the OCSP responder or CRL it names, in one more incremental update
+  (`SEAL_LEVEL`, B-LT by default). Each status is checked first: signed by the
+  issuer or a delegate with ocsp-nocheck, current, good.
+- **Every verifier checks it again**, and accepts bytes after a seal only when
+  they are exactly that update; `/verify`, `verifier.html` and the CLI say a
+  seal is long-term.
+- **Tested against a stand-in PKI** with an intermediate CA and a status
+  responder that can misbehave every way a CA's can. Still open: a real copy
+  validated as B-LT (for example in the EU DSS validator), once Evrotrust's
+  credential is set up (#70).
+
 **Prompt**
 
 ```text

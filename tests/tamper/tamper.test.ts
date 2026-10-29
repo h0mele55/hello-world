@@ -172,7 +172,7 @@ describe('a copy’s electronic seal, beside the verdict (#120)', () => {
     const verdict = await expectVerdict('sealed copy', sealed, 'AUTHENTIC_LATEST');
     const checked = runCli(sealed, ['--seal-roots', sealRoots]);
     expect(checked.verdict).toEqual(verdict);
-    expect(checked.seal).toEqual({ status: 'SEALED', signer: expect.stringContaining('Example Audit OOD'), sealedAt: expect.any(Number) });
+    expect(checked.seal).toEqual({ status: 'SEALED', signer: expect.stringContaining('Example Audit OOD'), sealedAt: expect.any(Number), longTerm: false });
     expect(runCli(sealed).seal).toEqual({ status: 'NO_ROOTS' });
     const untrusted = runCli(sealed, ['--seal-roots', strangerRoots]);
     expect(untrusted.verdict).toEqual(verdict);

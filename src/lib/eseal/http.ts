@@ -25,10 +25,12 @@ export function providerUrl(value: string, what: string): URL {
 
 export interface ProviderCall {
   url: URL;
-  body: Uint8Array | string;
+  /** POST by default; a CRL is fetched with GET (#119). */
+  method?: 'POST' | 'GET';
+  body?: Uint8Array | string;
   headers: Record<string, string>;
   /** Which side failed, for the error's code. */
-  side: 'SIGNER' | 'TIMESTAMP';
+  side: 'SIGNER' | 'TIMESTAMP' | 'REVOCATION';
   timeoutMs: number;
   maxBytes: number;
   fetch: typeof fetch;
@@ -40,14 +42,14 @@ export interface ProviderAnswer {
   body: Uint8Array;
 }
 
-/** POSTs to a provider. Any answer is returned, up to `maxBytes`; no answer is UNAVAILABLE. */
+/** POSTs to a provider (or GETs, for a CRL). Any answer is returned, up to `maxBytes`; no answer is UNAVAILABLE. */
 export async function post(call: ProviderCall): Promise<ProviderAnswer> {
   let response: Response;
   try {
     response = await call.fetch(call.url, {
-      method: 'POST',
+      method: call.method ?? 'POST',
       headers: call.headers,
-      body: typeof call.body === 'string' ? call.body : new Uint8Array(call.body),
+      body: call.body === undefined || typeof call.body === 'string' ? call.body : new Uint8Array(call.body),
       redirect: 'error',
       signal: AbortSignal.timeout(call.timeoutMs),
     });

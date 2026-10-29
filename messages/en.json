@@ -317,8 +317,8 @@
       "CANNOT_REPLACE": "The pending transaction could not be replaced.",
       "NotIssuer": "The issuer key is not registered with the registry.",
       "STAMP_CHECK": "The stamped copy did not pass its check against the original and the final record, so nothing was stored or sent.",
-      "SEAL_WAITING": "The seal provider did not answer. The worker tries again on every pass; nothing was stored or sent.",
-      "SEAL_REFUSED": "The copy could not be sealed: the seal provider refused, or its seal did not check against the firm’s trusted roots. Nothing was stored or sent.",
+      "SEAL_WAITING": "The seal provider, or the service that gives its certificates’ status, did not answer. The worker tries again on every pass; nothing was stored or sent.",
+      "SEAL_REFUSED": "The copy could not be sealed: the seal provider refused, its seal did not check against the firm’s trusted roots, or a certificate’s status did not check. Nothing was stored or sent.",
       "ANCHOR_ONLY": "This version is signed or edit-protected, so it is never stamped.",
       "VERSION_NOT_ANCHORED": "The original is not anchored.",
       "COPY_NEEDS_LIVE": "A distribution copy is anchored only in Live mode.",
@@ -544,6 +544,7 @@
       "title": "The firm's electronic seal",
       "checking": "Checking this copy's electronic seal…",
       "SEALED": "This copy carries the electronic seal of {signer}, timestamped {when}. The seal holds against the roots the firm publishes.",
+      "longTerm": "It also carries its certificates' status at that time, all good, so it can still be checked after they expire.",
       "NOT_SEALED": "This copy carries no electronic seal.",
       "NO_ROOTS": "This copy carries a signature, but this verifier was given no roots to check a seal against. A PDF reader shows the signature and who made it.",
       "INVALID": "This copy carries a signature that does not hold: {reason}",
@@ -561,7 +562,9 @@
         "BAD_SIGNATURE": "the signature does not verify.",
         "WRONG_CERTIFICATE": "the signature names another certificate than the one that made it.",
         "UNTRUSTED": "the seal's certificate does not chain to the firm's roots, or was not valid when it sealed.",
-        "BAD_TIMESTAMP": "its timestamp is not over this signature, or not from a timestamping authority the roots vouch for."
+        "BAD_TIMESTAMP": "its timestamp is not over this signature, or not from a timestamping authority the roots vouch for.",
+        "CERTIFICATE_REVOKED": "a certificate it relies on is revoked.",
+        "REVOCATION_REFUSED": "the certificate status it carries does not check, or is missing for a certificate."
       }
     },
     "reanchored": {

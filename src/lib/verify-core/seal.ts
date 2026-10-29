@@ -1,75 +1,26 @@
 import * as asn1js from 'asn1js';
 import * as pkijs from 'pkijs';
-import { bytesToHex, hexToBytes, sha256 as sha256Of } from 'viem';
+import { bytesToHex, hexToBytes } from 'viem';
 import { pemCertificates } from '../eseal/pem';
 import { SealError, type SealErrorCode } from '../eseal/types';
+import { readDssUpdate, vriKeyOf } from './dss';
+import { ascii, ensureEngine, OID, parse, parseCertificate, sameBytes, sha256, view } from './pki';
+import { chainToAnchor, statusOf, type ValidationData } from './revocation';
+
+export { OID, parseCertificate, sameBytes, sha256 } from './pki';
 
 /**
  * Checking the firm's electronic seal on a PDF (#70), in the browser as in
  * Node: a PAdES signature (ETSI EN 319 142-1 baseline B-T), a detached CAdES
  * signature over the file's byte ranges with an RFC 3161 timestamp over the
- * signature value. The worker checks every seal it makes with this, and the
+ * signature value. A long-term seal (baseline B-LT, #119) also carries, in one
+ * more update after it, its certificates' status at the timestamp's time,
+ * which is checked too. The worker checks every seal it makes with this, and the
  * verifiers check a matched copy's seal with it (#120), against the roots the
  * firm publishes. A seal never changes a verdict; only the registry decides.
  *
  * Signing lives in src/lib/eseal/, which needs Node.
  */
-
-export const OID = {
-  data: '1.2.840.113549.1.7.1',
-  signedData: '1.2.840.113549.1.7.2',
-  contentType: '1.2.840.113549.1.9.3',
-  messageDigest: '1.2.840.113549.1.9.4',
-  signingTime: '1.2.840.113549.1.9.5',
-  signingCertificateV2: '1.2.840.113549.1.9.16.2.47',
-  signatureTimeStampToken: '1.2.840.113549.1.9.16.2.14',
-  tstInfo: '1.2.840.113549.1.9.16.1.4',
-  sha256: '2.16.840.1.101.3.4.2.1',
-  rsaEncryption: '1.2.840.113549.1.1.1',
-  sha256WithRSA: '1.2.840.113549.1.1.11',
-  ecPublicKey: '1.2.840.10045.2.1',
-  ecdsaWithSHA256: '1.2.840.10045.4.3.2',
-  timeStamping: '1.3.6.1.5.5.7.3.8',
-} as const;
-
-/** pkijs finds WebCrypto by itself in a browser, but not in Node, where it is `globalThis.crypto`. */
-function ensureEngine() {
-  if (pkijs.getEngine().crypto) return;
-  const webcrypto = globalThis.crypto;
-  if (!webcrypto?.subtle) throw new SealError('MALFORMED', 'no WebCrypto to check a seal with');
-  pkijs.setEngine('webcrypto', new pkijs.CryptoEngine({ name: 'webcrypto', crypto: webcrypto }));
-}
-
-export const sha256 = (...parts: Uint8Array[]): Uint8Array => {
-  if (parts.length === 1) return sha256Of(parts[0], 'bytes');
-  const joined = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
-  let at = 0;
-  for (const part of parts) {
-    joined.set(part, at);
-    at += part.length;
-  }
-  return sha256Of(joined, 'bytes');
-};
-const view = (bytes: Uint8Array) => new Uint8Array(bytes);
-export const sameBytes = (a: Uint8Array, b: Uint8Array) => a.length === b.length && a.every((byte, i) => byte === b[i]);
-/** Bytes as one character each, in chunks: a call takes only so many arguments. */
-function ascii(bytes: Uint8Array): string {
-  let out = '';
-  for (let i = 0; i < bytes.length; i += 0x2000) out += String.fromCharCode(...bytes.subarray(i, i + 0x2000));
-  return out;
-}
-
-function parse<T>(der: Uint8Array, read: (schema: asn1js.AsnType) => T, what: string): T {
-  const asn = asn1js.fromBER(view(der));
-  if (asn.offset === -1) throw new SealError('MALFORMED', `${what} is not DER`);
-  try {
-    return read(asn.result);
-  } catch {
-    throw new SealError('MALFORMED', `${what} is not what it should be`);
-  }
-}
-
-export const parseCertificate = (der: Uint8Array) => parse(der, (schema) => new pkijs.Certificate({ schema }), 'a certificate');
 
 export interface TimestampReading {
   /** What the token stamps: the SHA-256 digest it was asked for. */
@@ -117,6 +68,11 @@ function hasTimeStampingUsage(cert: pkijs.Certificate) {
 
 export interface CmsCheck {
   signer: pkijs.Certificate;
+  /** The certificates the signature carries. */
+  certificates: pkijs.Certificate[];
+  /** The timestamping authority's certificate, and the certificates its token carries. */
+  stamper: pkijs.Certificate;
+  stamperCertificates: pkijs.Certificate[];
   /** The time the timestamping authority vouches for. */
   sealedAt: Date;
   timestampSerial: string;
@@ -181,7 +137,21 @@ export async function checkDetached(der: Uint8Array, content: Uint8Array, trustA
   const stamper = await verifyChain(tst.signedData, signatureValue, anchors, tst.genTime, 'the timestamp', 'BAD_TIMESTAMP');
   if (!hasTimeStampingUsage(stamper)) throw new SealError('BAD_TIMESTAMP', 'the timestamp was not signed by a timestamping authority');
 
-  return { signer, sealedAt: tst.genTime, timestampSerial: tst.serial };
+  const carried = (data: pkijs.SignedData) => (data.certificates ?? []).filter((c): c is pkijs.Certificate => c instanceof pkijs.Certificate);
+  return { signer, certificates: carried(signedData), stamper, stamperCertificates: carried(tst.signedData), sealedAt: tst.genTime, timestampSerial: tst.serial };
+}
+
+/**
+ * The statuses a long-term seal carries (#119): one for every certificate from
+ * the seal's and the timestamping authority's up to a trust anchor, each good
+ * at the timestamp's time (src/lib/verify-core/revocation.ts).
+ */
+export async function checkValidationData(checked: CmsCheck, data: ValidationData, trustAnchors: readonly Uint8Array[], now = new Date()): Promise<void> {
+  const anchors = trustAnchors.map(parseCertificate);
+  const pool = [...checked.certificates, ...checked.stamperCertificates, ...data.certs.map(parseCertificate)];
+  for (const leaf of [checked.signer, checked.stamper]) {
+    for (const { cert, issuer } of await chainToAnchor(leaf, pool, anchors)) await statusOf(cert, issuer, data, checked.sealedAt, now);
+  }
 }
 
 /** The signer's signature, and its certificate chain to a trust anchor at `at`; returns the signer's certificate. */
@@ -209,18 +179,26 @@ function lastIndexOf(bytes: Uint8Array, pattern: readonly number[]): number {
 }
 
 export interface SealReading {
-  /** The bytes the seal covers: the whole file but the signature itself. */
+  /** The bytes the seal covers: the whole signed revision but the signature itself. */
   content: Uint8Array;
   /** The CMS signature, without the padding. */
   cms: Uint8Array;
+  /** The signature's /Contents as written, padding included: what its VRI key is the hash of. */
+  contents: Uint8Array;
   /** Where the signature's update begins: the file before it was sealed is the bytes up to here. */
   byteRange: [number, number, number, number];
+  /** The validation data a long-term seal carries after the signed revision (#119), or null. */
+  dss: { data: ValidationData; vriKey: string } | null;
 }
 
 /** Whether a file carries a signature dictionary at all. */
 export const carriesSeal = (bytes: Uint8Array) => lastIndexOf(bytes, BYTE_RANGE) >= 0;
 
-/** The seal of a sealed file: the last signature, which must cover the whole file but its own contents. */
+/**
+ * The seal of a sealed file: the last signature, which must cover the whole
+ * file but its own contents, or all of it but the validation data a long-term
+ * seal adds after it, and nothing else (#119).
+ */
 export function readSeal(bytes: Uint8Array): SealReading {
   const at = lastIndexOf(bytes, BYTE_RANGE);
   if (at < 0) throw new SealError('NO_SEAL', 'the file carries no signature');
@@ -228,7 +206,8 @@ export function readSeal(bytes: Uint8Array): SealReading {
   if (!match) throw new SealError('MALFORMED', 'the byte range cannot be read');
   const range = match.slice(1, 5).map(Number) as [number, number, number, number];
   const [start, firstLength, secondStart, secondLength] = range;
-  if (start !== 0 || firstLength >= secondStart || secondStart + secondLength !== bytes.length) {
+  const signedEnd = secondStart + secondLength;
+  if (start !== 0 || firstLength >= secondStart || signedEnd > bytes.length) {
     throw new SealError('NOT_WHOLE_FILE', 'the signature does not cover the whole file but itself');
   }
   if (bytes[firstLength] !== 0x3c || bytes[secondStart - 1] !== 0x3e) throw new SealError('NOT_WHOLE_FILE', 'the byte range leaves out more than the signature');
@@ -240,8 +219,9 @@ export function readSeal(bytes: Uint8Array): SealReading {
   if (padded.subarray(cms.length).some((b) => b !== 0)) throw new SealError('MALFORMED', 'bytes follow the signature in its contents');
   const content = new Uint8Array(firstLength + secondLength);
   content.set(bytes.subarray(0, firstLength));
-  content.set(bytes.subarray(secondStart), firstLength);
-  return { content, cms, byteRange: range };
+  content.set(bytes.subarray(secondStart, signedEnd), firstLength);
+  const dss = signedEnd === bytes.length ? null : readDssUpdate(bytes, signedEnd);
+  return { content, cms, contents: padded, byteRange: range, dss };
 }
 
 function derLength(bytes: Uint8Array): number {
@@ -262,6 +242,8 @@ export interface SealCheck {
   /** The time the timestamping authority vouches for. */
   sealedAt: Date;
   timestampSerial: string;
+  /** Whether the seal carries its certificates' status at that time, all good (PAdES B-LT, #119). */
+  longTerm: boolean;
 }
 
 const NAME_FIELDS: Record<string, string> = { '2.5.4.3': 'CN', '2.5.4.10': 'O', '2.5.4.6': 'C' };
@@ -278,10 +260,15 @@ export async function checkSeal(sealed: Uint8Array, trustAnchors: readonly Uint8
   }
   if (stamped && seal.byteRange[1] < stamped.length) throw new SealError('NOT_WHOLE_FILE', 'the signature lies inside the stamped file');
   const checked = await checkDetached(seal.cms, seal.content, trustAnchors);
+  if (seal.dss) {
+    if (seal.dss.vriKey !== (await vriKeyOf(seal.contents))) throw new SealError('NOT_WHOLE_FILE', 'the validation data is filed under another signature');
+    await checkValidationData(checked, seal.dss.data, trustAnchors);
+  }
   return {
     signer: checked.signer.subject.typesAndValues.map((tv) => `${NAME_FIELDS[tv.type] ?? tv.type}=${tv.value.valueBlock.value}`).join(', '),
     sealedAt: checked.sealedAt,
     timestampSerial: checked.timestampSerial,
+    longTerm: seal.dss !== null,
   };
 }
 
@@ -294,7 +281,7 @@ export async function checkSeal(sealed: Uint8Array, trustAnchors: readonly Uint8
  */
 export type SealStatus =
   /** The seal holds, against the roots the firm publishes. */
-  | { status: 'SEALED'; signer: string; sealedAt: number }
+  | { status: 'SEALED'; signer: string; sealedAt: number; longTerm: boolean }
   /** The file carries no signature. */
   | { status: 'NOT_SEALED' }
   /** The verifier was given no roots to check a seal against. */
@@ -307,7 +294,7 @@ export async function sealStatusFor(bytes: Uint8Array, roots: readonly Uint8Arra
   if (roots.length === 0) return { status: 'NO_ROOTS' };
   try {
     const checked = await checkSeal(bytes, roots);
-    return { status: 'SEALED', signer: checked.signer, sealedAt: Math.floor(checked.sealedAt.getTime() / 1000) };
+    return { status: 'SEALED', signer: checked.signer, sealedAt: Math.floor(checked.sealedAt.getTime() / 1000), longTerm: checked.longTerm };
   } catch (error) {
     return { status: 'INVALID', reason: error instanceof SealError ? error.code : 'MALFORMED' };
   }

@@ -16,6 +16,9 @@
  *   TSA_POLICY          optional; the policy to ask the authority for (the token must name it)
  *   SEAL_TRUST_ANCHORS  a PEM file of the roots the seal certificate and the timestamping
  *                       authority must chain to: the provider's, as the firm accepts them
+ *   SEAL_LEVEL          B-LT (the default): each copy also carries its certificates' status
+ *                       at the seal's time, fetched from the responders they name (#119);
+ *                       or B-T, the seal and its timestamp only
  *
  * With SEAL_PROVIDER=csc, a setting missing or malformed stops the worker at
  * start-up, before any copy is made: a copy is never made unsealed by accident.
@@ -23,7 +26,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { certificatesFromPem } from '../src/lib/verify-core/seal';
-import type { CopySeal } from '../src/lib/eseal/copy';
+import type { CopySeal, SealLevel } from '../src/lib/eseal/copy';
 import { cscSigner } from '../src/lib/eseal/csc';
 import { rfc3161Timestamper } from '../src/lib/eseal/tsa';
 import { refuse, requireEnv } from './issuer-env';
@@ -35,6 +38,8 @@ export function sealEnv(tool: string): CopySeal | undefined {
   if (provider !== 'csc') refuse(tool, 'SEAL_PROVIDER must be none or csc');
   const env = (name: string) => requireEnv(tool, name);
   const optional = (name: string) => process.env[name] || undefined;
+  const level = (process.env.SEAL_LEVEL || 'B-LT') as SealLevel;
+  if (level !== 'B-LT' && level !== 'B-T') refuse(tool, 'SEAL_LEVEL must be B-LT or B-T');
   try {
     return {
       signer: cscSigner({
@@ -47,6 +52,7 @@ export function sealEnv(tool: string): CopySeal | undefined {
       }),
       timestamper: rfc3161Timestamper({ url: env('TSA_URL'), username: optional('TSA_USERNAME'), password: optional('TSA_PASSWORD'), policy: optional('TSA_POLICY') }),
       trustAnchors: readAnchors(tool, env('SEAL_TRUST_ANCHORS')),
+      level,
     };
   } catch (error) {
     refuse(tool, error instanceof Error ? error.message : String(error));

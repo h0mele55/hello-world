@@ -6,6 +6,7 @@ import { expect, test, type Browser, type Page } from '@playwright/test';
 import { hexToBytes } from 'viem';
 import { serializeProof } from '../../src/lib/ots/format';
 import { startFakeSealProvider, type FakeSealProvider } from '../helpers/fake-seal-provider';
+import { startFakeStatusResponder, type FakeStatusResponder } from '../helpers/fake-status-responder';
 import { createTestPki, pemOf } from '../helpers/test-pki';
 import { admin, approver, createEngagement, preparer, runTag, signIn, uniquePdf, uploadAndConfirm, watchCsp, type TestUser } from './helpers';
 
@@ -29,15 +30,20 @@ import { admin, approver, createEngagement, preparer, runTag, signIn, uniquePdf,
  * email needs Mailpit: SMTP_URL and MAIL_FROM for the mailer, MAILPIT_URL to
  * read what it sent. See the CI job. The firm seals its copies (#70) through a
  * stand-in trust service provider on this machine, which the worker reaches
- * through the same settings as a real one's (scripts/seal-env.ts).
+ * through the same settings as a real one's (scripts/seal-env.ts), at the
+ * default level, B-LT (#119): the stand-in's certificates name a status
+ * responder on this machine too, which the worker asks for their status.
  */
 
 test.skip(!process.env.ANCHOR_NETWORK && !process.env.CI, 'needs a local chain (ANCHOR_NETWORK=local; see CI)');
 
 let sealProvider: FakeSealProvider | undefined;
+let statusResponder: FakeStatusResponder | undefined;
 let sealEnv: Record<string, string> = {};
 test.beforeAll(async () => {
-  const pki = await createTestPki();
+  statusResponder = await startFakeStatusResponder();
+  const pki = await createTestPki({ statusUrls: { ocsp: statusResponder.ocspUrl, crl: statusResponder.crlUrl }, intermediate: true });
+  statusResponder.serve(pki);
   sealProvider = await startFakeSealProvider(pki);
   // The same file the app's server reads (playwright.config.ts), so /verify checks the seal against these roots (#120).
   const roots = process.env.E2E_SEAL_ROOTS!;
@@ -55,6 +61,7 @@ test.beforeAll(async () => {
 });
 test.afterAll(async () => {
   await sealProvider?.close();
+  await statusResponder?.close();
 });
 
 /** One pass of the worker, as its own process; run without blocking, as the seal provider answers it from this one. */
@@ -272,6 +279,8 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     // The copy's electronic seal (#120), checked in the browser against the roots the firm publishes, beside the verdict.
     await expect(visitor.getByTestId('seal')).toHaveAttribute('data-status', 'SEALED', { timeout: 30_000 });
     await expect(visitor.getByTestId('seal-body')).toContainText('Example Audit OOD (test seal)');
+    // Long-term (#119): the copy carries its certificates' status, and /verify checked it too.
+    await expect(visitor.getByTestId('seal-long-term')).toBeVisible();
 
     // Had the issuer submitted it, the page would say it waits for Bitcoin: a pending proof of the very manifest it asked for.
     const asked: string[] = [];

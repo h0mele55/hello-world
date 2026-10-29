@@ -113,11 +113,17 @@ jobs:
           # Finalize the deployment, as a real one long is: the verifier reads the
           # registry's code at the finalized block and refuses a chain without it.
           cast rpc --rpc-url http://127.0.0.1:8545 anvil_mine 0x3 > /dev/null
+          # A retired chain (#126): a report anchored on a second node standing in for
+          # Sepolia, archived, its root recorded here by the owner, and that node stopped.
+          DEPLOYER_PRIVATE_KEY="$deployer" LOCAL_RPC_URL=http://127.0.0.1:8545 E2E_REANCHOR_DIR="$RUNNER_TEMP/reanchor" \
+            npx tsx tests/e2e/reanchor-fixture.ts
           {
             echo "ANCHOR_NETWORK=local"
             echo "LOCAL_RPC_URL=http://127.0.0.1:8545"
             echo "ISSUER_ADDRESS=$issuer_address"
             echo "ISSUER_PRIVATE_KEY=$issuer"
+            echo "E2E_REANCHOR_DIR=$RUNNER_TEMP/reanchor"
+            echo "REANCHOR_ARCHIVES=$RUNNER_TEMP/reanchor/archive.json"
           } >> "$GITHUB_ENV"
       - run: npm run build
         env:

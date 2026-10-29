@@ -26,9 +26,11 @@ const VARIANT = {
 /**
  * What a verdict proves and what it does not (rule 4): only an exact-file
  * match is called authentic, and every record shown links to the block and
- * transaction so a reader can check it by hand.
+ * transaction so a reader can check it by hand. A record carried over from a
+ * retired registry (#126) has no page of its own here: `retired` drops the
+ * link to its family's latest, which this registry does not hold.
  */
-export function VerdictView({ verdict, chainId, issuers }: { verdict: ShownVerdict; chainId: number; issuers: Record<string, string> }) {
+export function VerdictView({ verdict, chainId, issuers, retired = false }: { verdict: ShownVerdict; chainId: number; issuers: Record<string, string>; retired?: boolean }) {
   const t = useTranslations('verify');
   const body = (() => {
     switch (verdict.kind) {
@@ -75,7 +77,7 @@ export function VerdictView({ verdict, chainId, issuers }: { verdict: ShownVerdi
           {records.map(({ title, record, testId }) => (
             <RecordView key={record.recordId} title={title} record={record} chainId={chainId} issuers={issuers} testId={testId} />
           ))}
-          {'latest' in verdict ? (
+          {'latest' in verdict && !retired ? (
             <Link href={`/r/${verdict.latest.familyId}/latest`} className="text-sm text-content-info hover:underline" data-testid="latest-link">
               {t('details.latestLink')}
             </Link>

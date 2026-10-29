@@ -249,6 +249,35 @@ describe('re-anchoring a registry whose chain is shut down (#65)', () => {
     expect((await throughSets(files['C v1 copy, bytes appended'], [proofOf('A v2'), set])).verdict.kind).toBe('ALTERED_OPINION_APPEARS_UNCHANGED');
   });
 
+  it('loads its sets only for a file the registry holds no record of, and fails closed when they cannot be loaded (#126)', async () => {
+    // A file the verifier's own registry holds: the archives are never asked for.
+    const held = fixture('bg-qualified.pdf');
+    await anchorOriginal(target, held, family(0xd1));
+    await finalise(target);
+    let asked = 0;
+    const lazily = (bytes: Uint8Array, loadSets: () => Promise<readonly CheckedSet[]>) =>
+      verifyWithReanchors({ bytes, config: targetConfig, openView: () => openRegistryView(targetConfig), readPdf, loadSets });
+    const counting = async () => {
+      asked += 1;
+      return [set];
+    };
+    expect(await lazily(held, counting)).toMatchObject({ verdict: { kind: 'AUTHENTIC_LATEST' }, reanchored: null });
+    expect(asked).toBe(0);
+
+    // A retired registry's file: asked for, and the same verdict as sets given up front.
+    for (const [name, bytes] of Object.entries(files)) expect(await lazily(bytes, counting), name).toEqual(await throughSets(bytes, [set]));
+    expect(asked).toBe(Object.keys(files).length);
+
+    // Archives that cannot be loaded: the file may be in them, so never NOT_REGISTERED, even for one in neither registry.
+    const offline = () => Promise.reject(new TypeError('Failed to fetch'));
+    for (const bytes of [files['A v2'], fixture('en-disclaimer.pdf')]) {
+      expect(await lazily(bytes, offline)).toEqual({ verdict: { kind: 'CANNOT_VERIFY', reason: 'REANCHOR_UNAVAILABLE' }, reanchored: null });
+    }
+    // An archive that does not hold together keeps its own reason.
+    const broken = () => Promise.resolve().then(() => [checkReanchorSet({ ...archive, root: `0x${'ab'.repeat(32)}` })]);
+    expect((await lazily(files['A v2'], broken)).verdict).toEqual({ kind: 'CANNOT_VERIFY', reason: 'REANCHOR_PROOF_INVALID' });
+  });
+
   it('the CLI verifies through an archive or a proof', async () => {
     execFileSync(path.join(ROOT, 'node_modules', '.bin', 'tsx'), ['scripts/build-verifier.ts', '--cli-only'], { cwd: ROOT, stdio: 'pipe' });
     const pdf = path.join(work, 'report.pdf');

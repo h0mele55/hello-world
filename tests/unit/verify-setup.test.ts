@@ -35,8 +35,15 @@ describe('the verifier setup', () => {
         rpcUrls: ['https://rpc.one.example/sepolia', 'https://rpc.two.example'],
         issuers: { [orgIdFor('Ledger Audit Ltd')]: 'Ledger Audit Ltd' },
         sealRoots: [],
+        reanchorArchives: 0,
       },
     });
+  });
+
+  it('tells the page how many re-anchor archives there are, never where they are (#126)', () => {
+    const result = verifierSetupFromEnv({ ...sepolia, REANCHOR_ARCHIVES: ' /srv/a/archive.json , ,/srv/b/proof.json,' }, root);
+    expect(result.ok && result.setup.reanchorArchives).toBe(2);
+    expect(JSON.stringify(result)).not.toContain('/srv/');
   });
 
   it('hands the page the seal’s published roots, and none for a file it cannot read (#120)', async () => {

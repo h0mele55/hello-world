@@ -25,6 +25,9 @@ import { rootsOf, setupFromDeployment, StandaloneSetupSchema, verdictJson, type 
  * With --reanchor (#65), a file the registry holds no record of is checked
  * against a retired registry's archive or a record's proof, through its root
  * on this registry; `reanchored` then says which root, and is null otherwise.
+ * The archives baked in by `npm run build:verifier` (REANCHOR_ARCHIVES, #126)
+ * are used the same way, with the baked settings only: they are rooted on the
+ * baked registry.
  * With --checkpoint (#122), a file is checked, when this registry cannot be
  * reached, against its latest monthly checkpoint, through the checkpoint's
  * Bitcoin timestamp (read from the two block explorers), and as of its block;
@@ -33,6 +36,7 @@ import { rootsOf, setupFromDeployment, StandaloneSetupSchema, verdictJson, type 
  */
 
 declare const __VERIFIER_SETUP__: StandaloneSetup | null;
+declare const __REANCHOR_SETS__: unknown[];
 
 function usage(message: string): never {
   process.stderr.write(`${message}\nusage: verify-report <file.pdf> [--deployment <file> --rpc <url> --rpc <url>] [--app-url <url>] [--seal-roots <pem>] [--reanchor <archive or proof>]... [--checkpoint <checkpoint or proof>]...\n`);
@@ -89,12 +93,15 @@ async function main() {
   } catch {
     usage(`${file} cannot be read`);
   }
+  const baked = !parsed.values.deployment && __REANCHOR_SETS__.length > 0;
   const { verdict, reanchored } = await verifyWithReanchors({
     bytes,
     config: setup,
     openView: () => openRegistryView(setup),
     readPdf: (pdf) => readDocument(pdfjs as unknown as PdfjsLike, pdf),
     sets,
+    // Held to their roots only for a file the registry holds no record of.
+    loadSets: baked ? async () => __REANCHOR_SETS__.map((set) => checkReanchorSet(set)) : undefined,
   });
   const bitcoinTimestamp = 'matched' in verdict && setup.appUrl ? await bitcoinTimestampFor(verdict.matched.manifestHash, { fetchProof: issuerProofFetcher(setup.appUrl), explorers: defaultExplorers() }) : null;
   const seal = 'matched' in verdict && verdict.matched.kind === 'DISTRIBUTION_COPY' ? await sealStatusFor(bytes, roots) : null;

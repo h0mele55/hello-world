@@ -18,6 +18,11 @@ import { pemCertificates } from '@/lib/eseal/pem';
  *   SEAL_TRUST_ANCHORS  optional; the PEM file of roots the firm's electronic seal
  *                       chains to (#70), the worker's own: public certificates, so
  *                       a verifier can check a matched copy's seal (#120)
+ *   REANCHOR_ARCHIVES   optional; comma-separated re-anchor archives or proofs of
+ *                       retired registries (#65), whose roots are recorded on this
+ *                       one. Public chain data: /reanchor/<n> serves the n-th, and
+ *                       the page fetches them only for a file this registry holds
+ *                       no record of (#126). Their paths are never sent.
  */
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -28,6 +33,8 @@ export interface VerifierSetup extends VerifierConfig {
   issuers: Record<string, string>;
   /** The roots a copy's seal is checked against, as base64 DER; none when the firm publishes none. */
   sealRoots: string[];
+  /** How many re-anchor archives /reanchor/<n> serves (#126); none when the firm has retired no registry. */
+  reanchorArchives: number;
 }
 
 export type VerifierSetupRefusal = 'NOT_CONFIGURED' | 'NETWORK_INVALID' | 'DEPLOYMENT_UNAVAILABLE' | 'RPC_URLS_MISSING' | 'RPC_URLS_INVALID' | 'RPC_URLS_NOT_INDEPENDENT';
@@ -55,6 +62,14 @@ export function sealRootsOf(file: string | undefined): string[] {
   } catch {
     return [];
   }
+}
+
+/** The re-anchor archives' files, in the order /reanchor/<n> serves them. */
+export function reanchorArchivesOf(env: Env = process.env): string[] {
+  return (env.REANCHOR_ARCHIVES ?? '')
+    .split(',')
+    .map((file) => file.trim())
+    .filter(Boolean);
 }
 
 /** The verifier's two endpoints, or why they are refused; no file is read, so the proxy may ask on every request. */
@@ -105,6 +120,7 @@ export function verifierSetupFromEnv(env: Env = process.env, root = process.cwd(
       rpcUrls,
       issuers: issuersOf(network, root),
       sealRoots: sealRootsOf(env.SEAL_TRUST_ANCHORS),
+      reanchorArchives: reanchorArchivesOf(env).length,
     },
   };
 }

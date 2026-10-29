@@ -1316,9 +1316,13 @@ locked bucket or a mailbox):
 - **Rehearsed on two Anvil chains** (`tests/integration/reanchor.test.ts`):
   the first chain is stopped and every file still gets its verdict, through
   the archive, through its proof and through the CLI.
-- **Still open:** `/verify` and `verifier.html` (#126), a re-anchored
-  family's next version (#127, the owner's decision), and the run on Sepolia
-  itself, after #4 and #123.
+- **The browser verifiers** (#126): `/verify` fetches the archives in
+  `REANCHOR_ARCHIVES` from `/reanchor/<n>`, only for a file its registry holds
+  no record of, and `verifier.html` and the CLI carry them baked in. Rehearsed
+  end to end: a file anchored on a second Anvil chain verifies on all three,
+  with the same verdict, after that chain is stopped.
+- **Still open:** a re-anchored family's next version (#127, the owner's
+  decision), and the run on Sepolia itself, after #4 and #123.
 
 6k is the monthly checkpoint (#122), so the production chain's records
 outlive its infrastructure:

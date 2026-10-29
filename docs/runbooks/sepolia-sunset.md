@@ -15,7 +15,7 @@ This is why testnet anchors are prototype evidence and never legally binding
 | --- | --- |
 | #63 | The production chain: Arbitrum One, chosen by the owner on 2026-10-26. |
 | #65 | `scripts/reanchor.ts`: an archive of every Sepolia record and its Merkle root, which the registry's owner records on the production registry, and a proof per record. The CLI verifier accepts both (`--reanchor`). Rehearsed on two Anvil chains (`tests/integration/reanchor.test.ts`). |
-| #126 | `/verify` and `verifier.html` accepting them too. Not built yet. |
+| #126 | `/verify` and `verifier.html` accepting them too, from `REANCHOR_ARCHIVES` (`docs/operations.md`). Rehearsed end to end with the source chain stopped (`tests/e2e/reanchor.spec.ts`). |
 | #66 | A Bitcoin timestamp of each manifest (OpenTimestamps), independent of any Ethereum network. |
 
 A re-anchored family is frozen at the snapshot: the production registry
@@ -80,8 +80,12 @@ Ethereum Foundation's announcements and those of the two RPC providers.
    names the root and the Arbitrum block it was recorded in. A proof asked
    about a record it does not hold says `REANCHOR_NOT_COVERED`; it never
    says "not registered".
-7. **Switch the browser verifiers** once #126 is built, and publish a new
-   `verifier.html` (#85).
+7. **Switch the browser verifiers.** Set `REANCHOR_ARCHIVES` to the
+   archive's path in the app's environment and restart it, so `/verify`
+   checks Sepolia's files through the root. Rebuild `verifier.html` and the
+   CLI with the same setting, so the archive is baked in, and publish them
+   (#85). Check one re-anchored report on each: the verdict names the retired
+   registry and the root's entry on Arbitrum.
 8. **Tell recipients and clients** which reports were re-anchored and where.
 
 If the shutdown comes before step 5, prototype anchors simply stop being

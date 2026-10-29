@@ -415,6 +415,10 @@
     "checking": "Checking {name}…",
     "another": "Check another file",
     "checksAgainst": "Checked against the registry {contract} on {network}, read through two endpoints whose answers must agree.",
+    "standalone": {
+      "text": "This check does not depend on this site: the same verifier is published as a single file, with its SHA-256, that you can keep and open from your own disk. It reads the registry directly.",
+      "link": "Get the single-file verifier"
+    },
     "disclaimer": "Records on a public test network are prototype evidence, not a legally binding record.",
     "notConfigured": "The verifier is not configured on this server.",
     "setupRefusal": {

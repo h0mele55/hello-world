@@ -18,6 +18,11 @@
  * anchored on a retired chain verifies with no server and that chain gone
  * (#126). Each must hold together and have its root on this registry, or the
  * build is refused.
+ *
+ * Beside the HTML file it writes dist/verifier.json, what was built: the
+ * file's SHA-256, the network and registry, and every origin the file may
+ * connect to. scripts/verifier-site.ts publishes the file from that record
+ * (#85), so the published description is of this build and no other.
  */
 import { createHash } from 'node:crypto';
 import fs from 'node:fs';
@@ -70,6 +75,7 @@ async function main() {
     process.exit(1);
   }
   const result = verifierSetupFromEnv();
+  const network = result.ok ? result.setup.network : null;
   const setup: StandaloneSetup | null = result.ok
     ? {
         chainId: result.setup.chainId,
@@ -142,7 +148,18 @@ async function main() {
     .replace('__STYLE__', () => style)
     .replace('__SCRIPT__', () => script);
   fs.writeFileSync(path.join(DIST, 'verifier.html'), html);
-  console.log(`wrote dist/verifier.html (${Math.round(html.length / 1024)} KiB; connects only to ${origins})`);
+  const built = {
+    sha256: createHash('sha256').update(html, 'utf8').digest('hex'),
+    network,
+    chainId: setup.chainId,
+    registry: setup.registry,
+    connectsTo: origins.split(' '),
+    appUrl: setup.appUrl,
+    sealRoots: setup.sealRoots.length,
+    reanchorArchives: reanchorSets.length,
+  };
+  fs.writeFileSync(path.join(DIST, 'verifier.json'), `${JSON.stringify(built, null, 2)}\n`);
+  console.log(`wrote dist/verifier.html (${Math.round(html.length / 1024)} KiB; connects only to ${origins}; SHA-256 ${built.sha256})`);
 }
 
 main().catch((error: unknown) => {

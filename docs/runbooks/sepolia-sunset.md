@@ -83,8 +83,10 @@ Ethereum Foundation's announcements and those of the two RPC providers.
 7. **Switch the browser verifiers.** Set `REANCHOR_ARCHIVES` to the
    archive's path in the app's environment and restart it, so `/verify`
    checks Sepolia's files through the root. Rebuild `verifier.html` and the
-   CLI with the same setting, so the archive is baked in, and publish them
-   (#85). Check one re-anchored report on each: the verdict names the retired
+   CLI with the same setting, so the archive is baked in, and publish them:
+   one pull request moves `NETWORK` in `.github/workflows/verifier-pages.yml`
+   to the production network, commits the archive, and names it in the build
+   step's `REANCHOR_ARCHIVES` (#85, `docs/operations.md`). Check one re-anchored report on each: the verdict names the retired
    registry and the root's entry on Arbitrum.
 8. **Tell recipients and clients** which reports were re-anchored and where.
 

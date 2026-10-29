@@ -85,6 +85,14 @@ test('an endpoint on the wrong chain, or two that disagree, give no verdict', as
   });
 });
 
+test('links the published single-file verifier, as the way to check without this site (#85)', async ({ page }) => {
+  await page.goto('/verify');
+  const link = page.getByTestId('verify-standalone').getByRole('link');
+  await expect(link).toHaveAttribute('href', process.env.STANDALONE_VERIFIER_URL!);
+  await expect(link).toHaveText('Get the single-file verifier');
+  await expect(page.getByTestId('verify-standalone')).toContainText('does not depend on this site');
+});
+
 test('the verdict reads in Bulgarian', async ({ page }) => {
   await page.goto('/verify');
   await page.getByTestId('locale-bg').click();

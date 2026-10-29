@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import pg from 'pg';
 import { expect, test, type Browser, type Page } from '@playwright/test';
+import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { hexToBytes } from 'viem';
 import { serializeProof } from '../../src/lib/ots/format';
 import { startFakeSealProvider, type FakeSealProvider } from '../helpers/fake-seal-provider';
@@ -334,6 +335,11 @@ test('a dry run is simulated; a live anchor is final, copied and downloadable; v
     const response = await approving.request.get(await approving.getByTestId('download-certificate').getAttribute('href') ?? '');
     expect(response.status()).toBe(200);
     expect((await response.body()).subarray(0, 5).toString()).toBe('%PDF-');
+    // The worker names the published single-file verifier on it (#85).
+    const task = pdfjs.getDocument({ data: new Uint8Array(await response.body()), verbosity: 0 });
+    const content = await (await (await task.promise).getPage(1)).getTextContent();
+    await task.destroy();
+    expect(content.items.map((item) => ('str' in item ? item.str : '')).join(' ')).toContain(process.env.STANDALONE_VERIFIER_URL!);
   });
 
   const recipients = { en: `maria-${tag}@lender.example`, bg: `georgi-${tag}@regulator.example` };

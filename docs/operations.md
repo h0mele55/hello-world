@@ -15,6 +15,7 @@ on a public testnet; none of this makes its anchors legally binding (rule 9).
 | The backup | `scripts/backup.sh` | nightly, after the check, e.g. `37 2 * * *` | a non-zero exit code |
 | The monitor | `npm run monitor` | every ten minutes, e.g. `*/10 * * * *` | exit code 1 and an `ALERT` line for each thing that needs a person; route it to whoever is on call |
 | The monthly checkpoint | `npm run checkpoint` | monthly, on the 1st, e.g. `23 1 1 * *` | a non-zero exit code; the monitor's `CHECKPOINT_MISSING` from the 3rd (`docs/runbooks/checkpoints.md`) |
+| The published verifier | `.github/workflows/verifier-pages.yml` (GitHub Actions) | on every push to master, and on demand | a failed run (#85); see "The published verifier" |
 | The chain reconciliation | `npm run reconcile:chain` | after every restore (`docs/runbooks/restore.md`), and weekly, e.g. `47 3 * * 0` | exit code 1 and a `DIFFERENCE` line for each version or record the database and the chain disagree on (#111) |
 
 Run the check, the watch and the backup from the app's directory with the
@@ -138,6 +139,58 @@ record, holds no key and writes no chain. Once the timestamp is complete,
 `npm run checkpoint -- --export <YYYY-MM> --out <dir>` writes the files the
 firm publishes; `docs/runbooks/checkpoints.md` says how, and how a record is
 verified through them when the registry cannot be read.
+
+## The published verifier
+
+`.github/workflows/verifier-pages.yml` (#85) publishes the single-file
+verifier, so a recipient can check a report without the firm's site and keep
+a copy whose hash they can check. On every push to master, and on demand
+(Actions, "Publish the single-file verifier", Run workflow), it:
+
+1. builds `dist/verifier.html` for Sepolia from the repository's variables
+   (below), and makes the site from it (`scripts/verifier-site.ts`), checking
+   the file against its SHA-256;
+2. attaches `verifier.html` and `verifier.html.sha256` to a release named by
+   that hash, `verifier-sepolia-<its first 12 hex digits>`, once: an unchanged
+   file makes no new release;
+3. deploys the site to GitHub Pages: the file itself and an `index.html` that
+   gives, in English and Bulgarian, its SHA-256, its release, how to check a
+   kept copy, the registry and every origin the file connects to.
+
+Until `deployments/sepolia.json` is committed (#25) it publishes nothing and
+says so in the run's summary. It publishes only from master: a run started by
+hand on another branch says so and stops, so no release is built from code
+nobody merged. For this repository the site is
+`https://h0mele55.github.io/hello-world/`.
+
+**Once, before the first run.**
+
+1. Settings, Pages, Build and deployment: set the source to GitHub Actions.
+   (Pages on a private repository needs a plan that allows it.)
+2. Settings, Secrets and variables, Actions, **Variables**, not secrets:
+   every copy of the file carries them, and the workflow reads no secret (a
+   test refuses one).
+   - `VERIFY_RPC_URL_1`, `VERIFY_RPC_URL_2`: two Sepolia endpoints from
+     different providers, https, with no key in them, as for `/verify`.
+     Without them the run fails with `RPC_URLS_MISSING`.
+   - `APP_PUBLIC_URL`, optional: the issuer's origin, whose `/ots` route gives
+     a matched report's Bitcoin timestamp (#66).
+   - `SEAL_TRUST_ANCHORS_PEM`, optional: the seal's roots as PEM text (#120).
+3. Set `STANDALONE_VERIFIER_URL` to the Pages site, for example
+   `https://<owner>.github.io/<repository>/`, in the app's environment and the
+   worker's. `/verify` then links it, and every certificate made from then on
+   names it. Without it, neither does; the worker refuses a value that is not
+   an https URL.
+
+**Changing the endpoints.** Change the two variables and run the workflow: the
+file changes, so a new release is made. Copies recipients already keep still
+read the old endpoints, so choose providers that last.
+
+**Another network.** After the Sepolia sunset the published file checks the
+production registry, with Sepolia's archive baked in: a pull request changes
+`NETWORK` in the workflow, the two variables, and gives the build step
+`REANCHOR_ARCHIVES` naming the archive committed beside the deployment record
+(`docs/runbooks/sepolia-sunset.md`).
 
 ## Retired registries in the verifiers
 

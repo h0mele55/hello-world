@@ -748,7 +748,11 @@ privacy, resilience and accessibility tests, the CSP and the rate limit (#48,
   `bin/verify-report.mjs` runs: the verdict as JSON, exit 3 for "cannot verify
   right now". The page writes only text into the document and carries its own
   CSP: its script by hash, the worker as `blob:`, connections to the two
-  endpoints only. Publishing it for Sepolia is #85, after #4.
+  endpoints only. Publishing it for Sepolia is #85:
+  `.github/workflows/verifier-pages.yml` puts it on GitHub Pages and on a
+  release named by its SHA-256, and `/verify` and the certificate link it
+  (`STANDALONE_VERIFIER_URL`); it publishes once `deployments/sepolia.json`
+  exists (#4, #25).
 - **The tamper suite** (`npm run test:tamper`, on Anvil) starts from a
   COMPLETE version and checks every case through verify-core and through the
   CLI, which must agree. Its table is the exit gate:

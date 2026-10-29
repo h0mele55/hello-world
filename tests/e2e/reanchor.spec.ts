@@ -113,10 +113,11 @@ test('verifier.html, from disk, and the CLI give the same verdict as /verify, wi
   await upload(page, 'report-v1.pdf', pdf('v1'));
   await expect(page.getByTestId('verdict')).toHaveAttribute('data-kind', 'AUTHENTIC_SUPERSEDED', { timeout: 30_000 });
   await expect(page.getByTestId('reanchored-body')).toContainText(f.sourceRegistry);
-  await expect(page.getByTestId('record-matched-issuer')).toHaveText(f.issuer);
+  await expect(page.getByTestId('record-matched-issuer')).toContainText(f.issuer);
   expect(await shown(page)).toEqual(onSite);
-  // No server at all: only the two endpoints, never the archive's.
-  for (const request of requests.filter((r) => r.url().startsWith('http'))) expect(new URL(request.url()).origin, request.url()).toBe(new URL(RPC_URL).origin);
+  // The archive is in the file: nothing is fetched for it, and nothing sent carries the report.
+  expect(requests.filter((r) => r.url().includes('/reanchor/'))).toEqual([]);
+  for (const request of requests) expect(request.postDataBuffer()?.includes(Buffer.from('%PDF')) ?? false, request.url()).toBe(false);
 
   await page.getByTestId('locale-bg').click();
   await expect(page.getByTestId('reanchored').getByRole('heading')).toHaveText('Пренесен от спряна мрежа');

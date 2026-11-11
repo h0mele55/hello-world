@@ -58,6 +58,8 @@ interface Resolved {
 
 export type Verdict =
   | (Resolved & { kind: 'AUTHENTIC_LATEST' | 'AUTHENTIC_SUPERSEDED'; matched: RecordSummary })
+  /** Only through a checkpoint (#151): the exact file, and the latest version as of the checkpoint's block, which is all a checkpoint can say. */
+  | (Resolved & { kind: 'AUTHENTIC_AS_OF_CHECKPOINT'; matched: RecordSummary })
   | (Resolved & { kind: 'REVOKED'; matched: RecordSummary; revoked: RecordSummary })
   /** The issuer asked to withdraw it; the registry's owner may still cancel that until `pending.revokeEffectiveAt`. Never authentic. */
   | (Resolved & { kind: 'REVOCATION_PENDING'; matched: RecordSummary; pending: RecordSummary })

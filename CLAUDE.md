@@ -594,6 +594,15 @@ to one inflect-compliance commit.
   timestamp (`provenCheckpoint`: of this head, reaching a block both explorers
   agree on, else `CHECKPOINT_UNPROVEN`), and as of its block: it never says a
   file was not registered, since it may have come after (`CHECKPOINT_NOT_COVERED`).
+- **A checkpoint is believed only because the issuer published it (#151).**
+  Bitcoin says when a checkpoint existed, never who made it: anyone can build
+  one over any records and timestamp it. So `provenCheckpoint` first requires
+  its head's SHA-256 to be one the verifier trusts (`trustedCheckpoints`), baked
+  into the CLI by `build:verifier` from `CHECKPOINTS` (the exported
+  `checkpoint.json` files) or given with `--trust-checkpoint`. Never take the
+  trusted digest from the checkpoint file itself. An exact match through a
+  checkpoint is `AUTHENTIC_AS_OF_CHECKPOINT`, never `AUTHENTIC_LATEST`: a later
+  version or a withdrawal is not in it.
 
 ## The electronic seal (#70)
 

@@ -31,15 +31,23 @@ import { rootsOf, setupFromDeployment, StandaloneSetupSchema, verdictJson, type 
  * With --checkpoint (#122), a file is checked, when this registry cannot be
  * reached, against its latest monthly checkpoint, through the checkpoint's
  * Bitcoin timestamp (read from the two block explorers), and as of its block;
- * `reanchored` then names the checkpoint and the Bitcoin block.
+ * `reanchored` then names the checkpoint and the Bitcoin block. Only a
+ * checkpoint the issuer published is believed: its head must be one baked in
+ * by `npm run build:verifier` (CHECKPOINTS, #151) or given with
+ * --trust-checkpoint (the SHA-256 of a head the issuer published, read from its
+ * own release, never from the checkpoint file), since Bitcoin says when a
+ * checkpoint existed and never who made it. Through a checkpoint the exact
+ * file is AUTHENTIC_AS_OF_CHECKPOINT, never AUTHENTIC_LATEST.
  * Exit status: 0 a verdict was reached, 3 cannot verify right now, 2 usage.
  */
 
 declare const __VERIFIER_SETUP__: StandaloneSetup | null;
 declare const __REANCHOR_SETS__: unknown[];
+/** The head digests of the checkpoints the issuer published, baked in by build:verifier (#151). No other checkpoint is believed. */
+declare const __CHECKPOINT_DIGESTS__: string[];
 
 function usage(message: string): never {
-  process.stderr.write(`${message}\nusage: verify-report <file.pdf> [--deployment <file> --rpc <url> --rpc <url>] [--app-url <url>] [--seal-roots <pem>] [--reanchor <archive or proof>]... [--checkpoint <checkpoint or proof>]...\n`);
+  process.stderr.write(`${message}\nusage: verify-report <file.pdf> [--deployment <file> --rpc <url> --rpc <url>] [--app-url <url>] [--seal-roots <pem>] [--reanchor <archive or proof>]... [--checkpoint <checkpoint or proof>]... [--trust-checkpoint <head sha256>]...\n`);
   process.exit(2);
 }
 
@@ -64,7 +72,7 @@ function setupOf(values: { deployment?: string; rpc?: string[]; 'app-url'?: stri
 async function main() {
   let parsed;
   try {
-    parsed = parseArgs({ allowPositionals: true, options: { deployment: { type: 'string' }, rpc: { type: 'string', multiple: true }, 'app-url': { type: 'string' }, 'seal-roots': { type: 'string' }, reanchor: { type: 'string', multiple: true }, checkpoint: { type: 'string', multiple: true } } });
+    parsed = parseArgs({ allowPositionals: true, options: { deployment: { type: 'string' }, rpc: { type: 'string', multiple: true }, 'app-url': { type: 'string' }, 'seal-roots': { type: 'string' }, reanchor: { type: 'string', multiple: true }, checkpoint: { type: 'string', multiple: true }, 'trust-checkpoint': { type: 'string', multiple: true } } });
   } catch (error) {
     usage(error instanceof Error ? error.message : String(error));
   }
@@ -87,6 +95,11 @@ async function main() {
       usage(`${given} is not a re-anchor archive, a checkpoint or a proof that holds together${error instanceof CannotVerify ? `: ${error.message}` : ''}`);
     }
   }
+  const trusted = [...__CHECKPOINT_DIGESTS__];
+  for (const head of parsed.values['trust-checkpoint'] ?? []) {
+    if (!/^(0x)?[0-9a-fA-F]{64}$/.test(head)) usage(`--trust-checkpoint ${head} is not the SHA-256 of a checkpoint's head`);
+    trusted.push(head.startsWith('0x') ? head : `0x${head}`);
+  }
   let bytes: Uint8Array;
   try {
     bytes = new Uint8Array(fs.readFileSync(file));
@@ -102,6 +115,7 @@ async function main() {
     sets,
     // Held to their roots only for a file the registry holds no record of.
     loadSets: baked ? async () => __REANCHOR_SETS__.map((set) => checkReanchorSet(set)) : undefined,
+    trustedCheckpoints: trusted,
   });
   const bitcoinTimestamp = 'matched' in verdict && setup.appUrl ? await bitcoinTimestampFor(verdict.matched.manifestHash, { fetchProof: issuerProofFetcher(setup.appUrl), explorers: defaultExplorers() }) : null;
   const seal = 'matched' in verdict && verdict.matched.kind === 'DISTRIBUTION_COPY' ? await sealStatusFor(bytes, roots) : null;

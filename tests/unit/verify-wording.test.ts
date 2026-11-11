@@ -29,7 +29,13 @@ describe.each(LOCALES)('%s verifier wording', (locale) => {
   it('says "authentic" only for an exact-file match', () => {
     const claiming = verifier.filter(([, text]) => AUTHENTIC.test(text)).map(([key]) => key);
     expect(claiming.length).toBeGreaterThan(0);
-    for (const key of claiming) expect(key).toMatch(/^verify\.verdict\.AUTHENTIC_(LATEST|SUPERSEDED)\./);
+    for (const key of claiming) expect(key).toMatch(/^verify\.verdict\.AUTHENTIC_(LATEST|SUPERSEDED|AS_OF_CHECKPOINT)\./);
+  });
+
+  it('says a checkpoint answers only as of its block, and cannot see a later version or withdrawal (#151)', () => {
+    const verdict = (messages.verify as { verdict: Record<string, { title: string; body: string }> }).verdict.AUTHENTIC_AS_OF_CHECKPOINT;
+    expect(verdict.body).toMatch(locale === 'en' ? /newer version or a withdrawal since then/ : /По-нова версия или оттегляне след това/);
+    expect(verdict.title).not.toMatch(locale === 'en' ? /latest/i : /последна/i);
   });
 
   it('says plainly that an altered file is not the registered file', () => {

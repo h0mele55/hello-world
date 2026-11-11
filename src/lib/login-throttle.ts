@@ -11,10 +11,13 @@
  * per-email limit applies. The price is that a stranger can lock an account
  * for 15 minutes; for a handful of staff accounts that is the better trade.
  *
- * An attempt counts as a failure from the moment it starts (#150), before
- * any password is checked, and only one attempt per email is checked at a
- * time: otherwise attempts sent together all pass the check before the first
- * failure is recorded. Every sign-in also costs a bcrypt compare, so all of
+ * Attempts for one email are checked one at a time, in the order they came
+ * (#150): each waits for the one before it to end, then is held to the
+ * lockout that one left, and counts as a failure from that moment until it
+ * succeeds. Otherwise attempts sent together all pass the check before the
+ * first failure is recorded. A second attempt is not refused for arriving
+ * early (a double click, two tabs, two test workers); only past two waiting
+ * is one refused unchecked. Every sign-in also costs a bcrypt compare, so all of
  * them together are held to a few at a time and a number a minute, refused
  * before the compare; that bounds the CPU sign-in can take whatever the
  * address.
@@ -30,6 +33,8 @@ const ATTEMPTS_PER_ADDRESS_PER_MINUTE = 10;
 /** All sign-ins together: each one runs a cost-12 bcrypt compare in this process. */
 export const SIGN_INS_PER_MINUTE = 120;
 export const MAX_CONCURRENT_SIGN_INS = 4;
+/** Attempts that may wait behind the one being checked for an email; more are refused unchecked (IN_FLIGHT). */
+export const MAX_WAITING_PER_EMAIL = 2;
 /** Expired failures are swept once this many keys are tracked. */
 const SWEEP_AT = 10_000;
 
@@ -37,9 +42,9 @@ let attempts = createLimiter({ limit: ATTEMPTS_PER_ADDRESS_PER_MINUTE, windowMs:
 let total = createLimiter({ limit: SIGN_INS_PER_MINUTE, windowMs: 60_000 });
 
 const failures = new Map<string, number[]>();
-/** Lower-cased emails with an attempt being checked. */
-const inFlight = new Set<string>();
-/** Attempts holding a slot: every one but BUSY, until it ends. */
+/** Per lower-cased email: the end of the last attempt in line, and how many hold or wait for the turn. */
+const turns = new Map<string, { tail: Promise<void>; pending: number }>();
+/** Attempts holding a slot (being checked, or refused and running the dummy compare), until they end. */
 let running = 0;
 let sweepAt = SWEEP_AT;
 
@@ -93,8 +98,8 @@ function forget(key: string, at: number): void {
  * this minute, checked first, so one address cannot spend the overall budget
  * (only behind a trusted proxy, which names the address). BUSY: too many
  * sign-ins at once or this minute. The caller spends no compare on either.
- * The others are answered like a wrong password: IN_FLIGHT, an attempt for
- * this email is being checked; LOCKED, too many failures.
+ * The others are answered like a wrong password: IN_FLIGHT, more attempts for
+ * this email are already waiting than may; LOCKED, too many failures.
  */
 export type SignInRefusal = 'BUSY' | 'ADDRESS_LIMIT' | 'IN_FLIGHT' | 'LOCKED';
 /**
@@ -106,39 +111,74 @@ export type SignInOutcome = 'FAILED' | 'SUCCEEDED' | 'RELEASED';
 export type SignInAttempt = { ok: true; end(outcome: SignInOutcome): void } | { ok: false; reason: SignInRefusal; end(outcome?: SignInOutcome): void };
 
 /**
- * Starts a sign-in attempt, synchronously, before anything is awaited: it is
- * counted as a failure and marked in flight for its email at once. Every
- * attempt must be ended, a refused one included (it holds a slot while the
- * caller runs its dummy compare).
+ * Starts a sign-in attempt. Call it before anything else is awaited: the
+ * limits on the address and on all sign-ins are taken at once, and the
+ * attempt takes its place in its email's line. It resolves when its turn
+ * comes, counted as a failure from then on. Every attempt must be ended, a
+ * refused one included (it holds a slot while the caller runs its dummy
+ * compare, and its email's turn until then).
  */
-export function beginSignIn(email: string, address: string | null, now = Date.now()): SignInAttempt {
-  if (!takeSignInAttempt(address, now)) return { ok: false, reason: 'ADDRESS_LIMIT', end: () => {} };
-  if (running >= MAX_CONCURRENT_SIGN_INS || !total.take('*', now).ok) return { ok: false, reason: 'BUSY', end: () => {} };
-  running++;
-  let ended = false;
-  const finish = (settle: () => void) => {
-    if (ended) return;
-    ended = true;
-    running--;
-    settle();
+export async function beginSignIn(email: string, address: string | null, now?: number): Promise<SignInAttempt> {
+  const startedAt = now ?? Date.now();
+  const unchecked = (reason: SignInRefusal): SignInAttempt => ({ ok: false, reason, end: () => {} });
+  if (!takeSignInAttempt(address, startedAt)) return unchecked('ADDRESS_LIMIT');
+  if (!total.take('*', startedAt).ok) return unchecked('BUSY');
+  /** A slot for a refusal answered like a wrong password, or BUSY when none is free. */
+  const refuseWithSlot = (reason: SignInRefusal, leave: () => void): SignInAttempt => {
+    if (running >= MAX_CONCURRENT_SIGN_INS) {
+      leave();
+      return unchecked('BUSY');
+    }
+    running++;
+    let ended = false;
+    return {
+      ok: false,
+      reason,
+      end: () => {
+        if (ended) return;
+        ended = true;
+        running--;
+        leave();
+      },
+    };
   };
-  const refuse = (reason: SignInRefusal): SignInAttempt => ({ ok: false, reason, end: () => finish(() => {}) });
   const account = email.toLowerCase();
-  if (inFlight.has(account)) return refuse('IN_FLIGHT');
-  if (isThrottled(email, address, now)) return refuse('LOCKED');
-  inFlight.add(account);
-  recordFailure(email, address, now);
+  const turn = turns.get(account) ?? { tail: Promise.resolve(), pending: 0 };
+  if (turn.pending > MAX_WAITING_PER_EMAIL) return refuseWithSlot('IN_FLIGHT', () => {});
+  turn.pending++;
+  turns.set(account, turn);
+  const previous = turn.tail;
+  let release!: () => void;
+  turn.tail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const leave = () => {
+    release();
+    if (--turn.pending === 0) turns.delete(account);
+  };
+  await previous;
+  const at = now ?? Date.now();
+  if (isThrottled(email, address, at)) return refuseWithSlot('LOCKED', leave);
+  if (running >= MAX_CONCURRENT_SIGN_INS) {
+    leave();
+    return unchecked('BUSY');
+  }
+  running++;
+  recordFailure(email, address, at);
+  let ended = false;
   return {
     ok: true,
-    end: (outcome) =>
-      finish(() => {
-        inFlight.delete(account);
-        if (outcome === 'FAILED') return;
-        const [accountKey, addressKey] = keysFor(email, address);
-        if (outcome === 'SUCCEEDED') recordSuccess(email);
-        else forget(accountKey, now);
-        if (addressKey) forget(addressKey, now);
-      }),
+    end: (outcome) => {
+      if (ended) return;
+      ended = true;
+      running--;
+      leave();
+      if (outcome === 'FAILED') return;
+      const [accountKey, addressKey] = keysFor(email, address);
+      if (outcome === 'SUCCEEDED') recordSuccess(email);
+      else forget(accountKey, at);
+      if (addressKey) forget(addressKey, at);
+    },
   };
 }
 
@@ -150,7 +190,7 @@ export function trackedFailureKeys(): number {
 /** Test seam: forget every recorded failure. */
 export function resetThrottle(): void {
   failures.clear();
-  inFlight.clear();
+  turns.clear();
   running = 0;
   sweepAt = SWEEP_AT;
   attempts = createLimiter({ limit: ATTEMPTS_PER_ADDRESS_PER_MINUTE, windowMs: 60_000 });

@@ -480,13 +480,16 @@ to one inflect-compliance commit.
   `Retry-After`). The address is read only with `TRUST_PROXY_HEADERS=1`, and
   only the rightmost `X-Forwarded-For` entry, by `clientAddressOf` alone.
 - **A sign-in attempt is a failure until it succeeds** (#150): `authorize`
-  calls `beginSignIn` before any `await`, which counts the failure and marks
-  the email in flight (one attempt per email is checked at a time); the
+  calls `beginSignIn` before any other `await`. It takes the per-address
+  limit (ADDRESS_LIMIT) and the 120-a-minute cap at once, then puts the
+  attempt in its email's line: attempts for one email are checked one at a
+  time, in order, each held to the lockout the one before left and counted as
+  a failure from its turn. A second attempt is not refused for arriving early
+  (a double click, two tabs, two e2e workers); only past two waiting is one
+  refused unchecked (IN_FLIGHT). At most 4 are checked at once (BUSY). The
   attempt ends SUCCEEDED, RELEASED (`MFA_CODE_REQUIRED`) or, by default in
-  `finally`, FAILED. The per-address limit is checked first (ADDRESS_LIMIT),
-  then all sign-ins together are held to 4 at a time and 120 a minute (BUSY);
-  neither spends a bcrypt compare. Never move the check after an `await`:
-  attempts sent together would all pass it.
+  `finally`, FAILED. Never check the lockout outside the line: attempts sent
+  together would all pass it.
 - **E2E**: the seeded approver and admin have two-step sign-in on with
   `SEED_APPROVER_TOTP_SECRET` and `SEED_ADMIN_TOTP_SECRET`, and
   `tests/e2e/helpers.ts` computes their codes;

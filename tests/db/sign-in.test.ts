@@ -52,12 +52,18 @@ describe('concurrent password attempts', () => {
     expect(results.filter((r) => r !== 'REFUSED')).toEqual([]);
   });
 
-  it('refuses a second attempt for the same email while one is in flight, even with the right password', async () => {
+  it('checks a second attempt for the same email after the first, so the right password sent with a wrong one signs in', async () => {
     await make('preparer@example.test', 'PREPARER');
     const results = await Promise.all([attempt({ email: 'Preparer@example.test', password: 'wrong' }), attempt({ email: 'preparer@example.test', password: PASSWORD })]);
+    expect(results).toEqual(['REFUSED', 'SIGNED_IN']);
+  });
+
+  it('holds an attempt that waited to the lockout the ones before it reached', async () => {
+    await make('preparer@example.test', 'PREPARER');
+    for (let i = 0; i < 4; i++) expect(await attempt({ email: 'preparer@example.test', password: `wrong ${i}` })).toBe('REFUSED');
+    // The fifth failure is being checked when the right password arrives: it waits, then finds the account locked.
+    const results = await Promise.all([attempt({ email: 'preparer@example.test', password: 'wrong 4' }), attempt({ email: 'preparer@example.test', password: PASSWORD })]);
     expect(results).toEqual(['REFUSED', 'REFUSED']);
-    // Once nothing is in flight, the right password signs in.
-    expect(await attempt({ email: 'preparer@example.test', password: PASSWORD })).toBe('SIGNED_IN');
   });
 
   it('counts each guess before it is checked, so five wrong ones lock the account', async () => {
@@ -83,14 +89,15 @@ describe('concurrent second-factor attempts', () => {
     expect(results.filter((r) => r !== 'REFUSED')).toEqual([]);
   });
 
-  it('refuses a second code for the same email while one is in flight', async () => {
+  it('checks a second code for the same email after the first, each held to the lockout', async () => {
     const secret = await enrolled();
     const right = await codeAt(secret, now());
+    const wrong = right === '000000' ? '111111' : '000000';
     const results = await Promise.all([
-      attempt({ email: 'admin@example.test', password: PASSWORD, otp: right === '000000' ? '111111' : '000000' }),
+      attempt({ email: 'admin@example.test', password: PASSWORD, otp: wrong }),
       attempt({ email: 'admin@example.test', password: PASSWORD, otp: right }),
     ]);
-    expect(results).toEqual(['REFUSED', 'REFUSED']);
+    expect(results).toEqual(['REFUSED', 'SIGNED_IN']);
   });
 
   it('does not count asking for the code as a failure, and clears the count on success', async () => {

@@ -58,8 +58,9 @@ export const authOptions: NextAuthOptions = {
         const parsed = Login.safeParse(credentials);
         if (!parsed.success) return null;
         const { email, password } = parsed.data;
-        // Counted as a failure before anything is awaited (#150); only success or asking for the code takes it back.
-        const attempt = beginSignIn(email, clientAddressOf(req?.headers));
+        // In line for this email before anything else is awaited (#150), and counted as a failure once its turn comes;
+        // only success or asking for the code takes that back.
+        const attempt = await beginSignIn(email, clientAddressOf(req?.headers));
         try {
           if (!attempt.ok) {
             // A limit on the address or on all sign-ins spends no compare: that is what keeps the CPU for everything else.

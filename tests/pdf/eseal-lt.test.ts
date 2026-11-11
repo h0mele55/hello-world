@@ -151,9 +151,16 @@ describe('fetching the statuses', () => {
   it('uses a certificate’s CRL when its OCSP responder’s answer does not hold', async () => {
     const pki = await pkiServed();
     pki.status.behaviour = { responder: 'stranger' };
-    const data = await validationDataFor(await sealWith(pki), [pki.rootDer]);
+    const sealed = await sealWith(pki);
+    responder.requests.length = 0;
+    const data = await validationDataFor(sealed, [pki.rootDer]);
     expect(data.ocsps).toHaveLength(0);
     expect(data.crls).toHaveLength(2);
+    // The seal's and the authority's certificates share a CRL: it is fetched once, so a CA that
+    // re-issues it between two fetches cannot leave two versions in the file.
+    const crlGets = responder.requests.filter((r) => r.method === 'GET').map((r) => r.path);
+    expect(crlGets).toHaveLength(2);
+    expect(new Set(crlGets).size).toBe(2);
   }, 60_000);
 
   it('waits when no status source answers, and the worker tries again later', async () => {

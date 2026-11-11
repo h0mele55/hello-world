@@ -837,6 +837,7 @@
       "subject": "Subject"
     },
     "worker": "Automatic (worker, mailer or watch)",
+    "named": "{email}, named at the command line, not signed in",
     "details": "Details",
     "hash": "Hash: {hash}",
     "older": "Older events",

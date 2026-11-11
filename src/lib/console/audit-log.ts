@@ -17,7 +17,12 @@ export async function listAuditEvents(user: SessionUser, before?: number) {
     take: AUDIT_PAGE_SIZE,
     select: { seq: true, at: true, actorId: true, action: true, subjectType: true, subjectId: true, data: true, hash: true },
   });
-  const actorIds = [...new Set(events.map((e) => e.actorId).filter((id): id is string => id !== null))];
+  // An operator tool's events name a person who did not sign in (#140): shown as named, never as the actor.
+  const namedOf = (data: unknown): string | null => {
+    const id = data && typeof data === 'object' && !Array.isArray(data) ? (data as Record<string, unknown>).namedOperatorId : undefined;
+    return typeof id === 'string' ? id : null;
+  };
+  const actorIds = [...new Set(events.flatMap((e) => [e.actorId, namedOf(e.data)]).filter((id): id is string => id !== null))];
   const actors = await db().user.findMany({ where: { id: { in: actorIds }, orgId: user.orgId }, select: { id: true, email: true } });
   const emailOf = new Map(actors.map((a) => [a.id, a.email]));
   return events.map((e) => ({
@@ -25,6 +30,8 @@ export async function listAuditEvents(user: SessionUser, before?: number) {
     at: e.at,
     /** Null for the worker; the id when the user is no longer known. */
     actor: e.actorId === null ? null : (emailOf.get(e.actorId) ?? e.actorId),
+    /** The person an operator tool was told acted, when it was (settle-write's --operator); not authenticated. */
+    named: e.actorId === null && namedOf(e.data) !== null ? (emailOf.get(namedOf(e.data)!) ?? namedOf(e.data)) : null,
     action: e.action,
     subjectType: e.subjectType,
     subjectId: e.subjectId,

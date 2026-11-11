@@ -311,7 +311,14 @@ to one inflect-compliance commit.
   #139): its nonce is reserved and its fate unknown. When it cannot be
   settled (its transaction unknown, its nonce unused), an approver runs
   `scripts/settle-write.ts`, which uses the nonce with a no-op transfer; the
-  worker then reads the outcome.
+  worker then reads the outcome. A write whose transaction is final but whose
+  record does not match (`RECORD_MISMATCH`) is held for a person on every
+  pass; once an approver has looked, `settle-write.ts … --release-mismatch`
+  marks it released (no chain access) and the worker reads it again on both
+  endpoints: still a mismatch, it is FAILED `RECORD_MISMATCH_RESOLVED`,
+  keeping its nonce and hash (#140). settle-write's `--operator` is named,
+  not signed in: its events carry `namedOperatorId` and no actor, and an
+  audit-log head's are `audit_head.*`.
 - **Replacement is bounded** (#139): at most `maxReplacements` (6), never
   above `WORKER_MAX_FEE_GWEI`, and a refused replacement's hash stays in
   `replacedTxHashes`, since its bytes reached a node. `firstBroadcastAt` is
@@ -644,7 +651,9 @@ to one inflect-compliance commit.
   file on chain is the sealed one and `copySealedAt` holds its timestamp's
   time. A provider that does not answer (`*_UNAVAILABLE`) leaves the copy's
   write INTENT for the next pass; any other `SealError` fails it for a person.
-  While sealing is on, a copy is never anchored unsealed.
+  While sealing is on, a copy is never anchored unsealed: a copy stored
+  unsealed before sealing was turned on, and not on chain, is stamped and
+  sealed again (`replacedUnsealedCopy` on its `version.stamped` event, #140).
 - **The providers** are `cscSigner` (`csc.ts`, CSC API v2: `credentials/info`,
   `credentials/authorize`, `signatures/signHash`) and `rfc3161Timestamper`
   (`tsa.ts`, with a fresh nonce, and the token's bytes kept as written). Both

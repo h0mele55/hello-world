@@ -13,6 +13,7 @@ export type ShownVerdict = Verdict | { kind: 'CANNOT_VERIFY'; reason: 'UNEXPECTE
 const VARIANT = {
   AUTHENTIC_LATEST: 'success',
   AUTHENTIC_SUPERSEDED: 'warning',
+  AUTHENTIC_AS_OF_CHECKPOINT: 'warning',
   REVOKED: 'error',
   REVOCATION_PENDING: 'warning',
   ALTERED_OPINION_CHANGED: 'error',

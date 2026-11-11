@@ -154,6 +154,7 @@ function bodyOf(verdict: Shown): string {
 const TONE: Record<Shown['kind'], string> = {
   AUTHENTIC_LATEST: 'good',
   AUTHENTIC_SUPERSEDED: 'warn',
+  AUTHENTIC_AS_OF_CHECKPOINT: 'warn',
   REVOKED: 'bad',
   REVOCATION_PENDING: 'warn',
   ALTERED_OPINION_CHANGED: 'bad',

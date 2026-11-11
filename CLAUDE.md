@@ -165,6 +165,13 @@ Locally, Playwright needs the browser of its own version:
   `owner-call.ts record-reanchor-root` prints the owner's call, and
   `reanchor.ts check` holds every proof to the recorded root. A re-anchored
   family is frozen at the snapshot until #127 is decided.
+- **A record's block is the block its transaction is in (#138).** On Arbitrum
+  `block.number` is the L1 block, so `_blockNumber()` asks the ArbSys
+  precompile (`arbBlockNumber`) on chain ids 42161 and 421614 and reads
+  `block.number` elsewhere. It is keyed on the chain id, never set at
+  deployment, so every network runs one bytecode. Never write
+  `block.number` into a record directly. Forge answers ArbSys itself on an
+  Arbitrum chain id, shadowing an etched mock, so tests use `vm.mockCall`.
 - **Gas ceilings are tests.** `contracts/test/AuditReportRegistry.gas.t.sol`
   caps each write, and `contracts/snapshots/` pins the exact figures. A change
   that moves them updates the snapshot in the same pull request

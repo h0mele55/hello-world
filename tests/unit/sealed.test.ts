@@ -124,6 +124,17 @@ describe('login throttle', () => {
     expect(beginSignIn('one-more@example.test', null, now + 60_000)).toMatchObject({ ok: true });
   });
 
+  it('checks the address limit before the overall one, so one address cannot spend it', () => {
+    resetThrottle();
+    const now = Date.now();
+    for (let i = 0; i < SIGN_INS_PER_MINUTE; i++) {
+      const attempt = beginSignIn(`user${i}@example.test`, '203.0.113.9', now);
+      attempt.end('FAILED');
+    }
+    expect(beginSignIn('one-more@example.test', '203.0.113.9', now)).toMatchObject({ ok: false, reason: 'ADDRESS_LIMIT' });
+    expect(beginSignIn('colleague@example.test', '198.51.100.4', now)).toMatchObject({ ok: true });
+  });
+
   it('forgets expired failures once it tracks many, so random emails cannot grow it without bound', () => {
     resetThrottle();
     const now = Date.now();

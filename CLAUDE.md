@@ -483,9 +483,10 @@ to one inflect-compliance commit.
   calls `beginSignIn` before any `await`, which counts the failure and marks
   the email in flight (one attempt per email is checked at a time); the
   attempt ends SUCCEEDED, RELEASED (`MFA_CODE_REQUIRED`) or, by default in
-  `finally`, FAILED. All sign-ins together are held to 4 at a time and 60 a
-  minute, refused (BUSY) before any bcrypt compare. Never move the check after
-  an `await`: attempts sent together would all pass it.
+  `finally`, FAILED. The per-address limit is checked first (ADDRESS_LIMIT),
+  then all sign-ins together are held to 4 at a time and 120 a minute (BUSY);
+  neither spends a bcrypt compare. Never move the check after an `await`:
+  attempts sent together would all pass it.
 - **E2E**: the seeded approver and admin have two-step sign-in on with
   `SEED_APPROVER_TOTP_SECRET` and `SEED_ADMIN_TOTP_SECRET`, and
   `tests/e2e/helpers.ts` computes their codes;

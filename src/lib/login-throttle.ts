@@ -28,7 +28,7 @@ const PER_ACCOUNT = 5;
 const PER_ADDRESS = 10;
 const ATTEMPTS_PER_ADDRESS_PER_MINUTE = 10;
 /** All sign-ins together: each one runs a cost-12 bcrypt compare in this process. */
-export const SIGN_INS_PER_MINUTE = 60;
+export const SIGN_INS_PER_MINUTE = 120;
 export const MAX_CONCURRENT_SIGN_INS = 4;
 /** Expired failures are swept once this many keys are tracked. */
 const SWEEP_AT = 10_000;
@@ -89,11 +89,12 @@ function forget(key: string, at: number): void {
 }
 
 /**
- * Why an attempt is refused unchecked. BUSY: too many sign-ins at once or this
- * minute, so the caller spends no compare. The others are answered like a
- * wrong password: ADDRESS_LIMIT, the address's attempts this minute;
- * IN_FLIGHT, an attempt for this email is being checked; LOCKED, too many
- * failures.
+ * Why an attempt is refused unchecked. ADDRESS_LIMIT: the address's attempts
+ * this minute, checked first, so one address cannot spend the overall budget
+ * (only behind a trusted proxy, which names the address). BUSY: too many
+ * sign-ins at once or this minute. The caller spends no compare on either.
+ * The others are answered like a wrong password: IN_FLIGHT, an attempt for
+ * this email is being checked; LOCKED, too many failures.
  */
 export type SignInRefusal = 'BUSY' | 'ADDRESS_LIMIT' | 'IN_FLIGHT' | 'LOCKED';
 /**
@@ -111,6 +112,7 @@ export type SignInAttempt = { ok: true; end(outcome: SignInOutcome): void } | { 
  * caller runs its dummy compare).
  */
 export function beginSignIn(email: string, address: string | null, now = Date.now()): SignInAttempt {
+  if (!takeSignInAttempt(address, now)) return { ok: false, reason: 'ADDRESS_LIMIT', end: () => {} };
   if (running >= MAX_CONCURRENT_SIGN_INS || !total.take('*', now).ok) return { ok: false, reason: 'BUSY', end: () => {} };
   running++;
   let ended = false;
@@ -122,7 +124,6 @@ export function beginSignIn(email: string, address: string | null, now = Date.no
   };
   const refuse = (reason: SignInRefusal): SignInAttempt => ({ ok: false, reason, end: () => finish(() => {}) });
   const account = email.toLowerCase();
-  if (!takeSignInAttempt(address, now)) return refuse('ADDRESS_LIMIT');
   if (inFlight.has(account)) return refuse('IN_FLIGHT');
   if (isThrottled(email, address, now)) return refuse('LOCKED');
   inFlight.add(account);

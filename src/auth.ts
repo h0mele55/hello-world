@@ -62,8 +62,8 @@ export const authOptions: NextAuthOptions = {
         const attempt = beginSignIn(email, clientAddressOf(req?.headers));
         try {
           if (!attempt.ok) {
-            // Too many sign-ins at once spends no compare: that is what keeps the CPU for everything else.
-            if (attempt.reason !== 'BUSY') await bcrypt.compare(password, DUMMY_HASH);
+            // A limit on the address or on all sign-ins spends no compare: that is what keeps the CPU for everything else.
+            if (attempt.reason === 'IN_FLIGHT' || attempt.reason === 'LOCKED') await bcrypt.compare(password, DUMMY_HASH);
             return null;
           }
           const user = await db().user.findUnique({ where: { email: email.toLowerCase() } });

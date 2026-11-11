@@ -25,7 +25,7 @@ async function healthyFirm() {
   await prisma.registryWatch.create({ data: { orgId, chainId: 31337, registry: `0x${'2'.repeat(40)}`, lastBlock: 10n, checkedAt: ago(5 * MINUTE) } });
 }
 /** A journal row in a given state: an audit-log head, which needs no report version, each on a registry of its own, as one head is in flight per registry. */
-function write(status: ChainWriteStatus, data: { updatedAt?: Date; broadcastAt?: Date; error?: string } = {}) {
+function write(status: ChainWriteStatus, data: { updatedAt?: Date; broadcastAt?: Date; firstBroadcastAt?: Date; replacedTxHashes?: string[]; error?: string } = {}) {
   n += 1;
   return prisma.chainWrite.create({
     data: { orgId, kind: 'AUDIT_HEAD', auditHead: `0x${n.toString(16).padStart(64, '0')}`, mode: 'LIVE', status, chainId: 31337, registry: `0x${n.toString(16).padStart(40, '0')}`, issuer: ISSUER, txHash: status === 'INTENT' ? null : `0x${n.toString(16).padStart(64, 'a')}`, ...data },
@@ -79,9 +79,33 @@ describe('the monitor', () => {
       expect.arrayContaining([
         { code: 'WRITE_FAILED', orgId, detail: { chainWriteId: failed.id, kind: 'AUDIT_HEAD', error: 'TX_REVERTED', at: ago(HOUR).toISOString() } },
         expect.objectContaining({ code: 'WRITE_INDETERMINATE', detail: expect.objectContaining({ chainWriteId: held.id, reason: 'SEND_OUTCOME_UNKNOWN', runbook: 'docs/runbooks/stuck-writes.md' }) }),
-        { code: 'FINALITY_LAG', orgId, detail: { chainWriteId: lagging.id, kind: 'AUDIT_HEAD', txHash: lagging.txHash, broadcastAt: ago(2 * HOUR).toISOString() } },
+        {
+          code: 'FINALITY_LAG',
+          orgId,
+          detail: { chainWriteId: lagging.id, kind: 'AUDIT_HEAD', txHash: lagging.txHash, broadcastAt: ago(2 * HOUR).toISOString(), replacements: 0, reason: null },
+        },
       ]),
     );
+  });
+
+  it('measures finality lag from the first send, so a write replaced every few minutes still lags (#139)', async () => {
+    await healthyFirm();
+    await keyStatus({ checkedAt: ago(MINUTE) });
+    // Replaced 5 minutes ago, first sent 2 hours ago: broadcastAt alone would never reach the hour.
+    const replaced = await write('BROADCAST', {
+      broadcastAt: ago(5 * MINUTE),
+      firstBroadcastAt: ago(2 * HOUR),
+      replacedTxHashes: [`0x${'a'.repeat(64)}`, `0x${'b'.repeat(64)}`],
+      error: 'REPLACEMENTS_EXHAUSTED',
+    });
+    await write('BROADCAST', { broadcastAt: ago(5 * MINUTE), firstBroadcastAt: ago(10 * MINUTE) });
+    expect(await collectAlerts(prisma, NOW)).toEqual([
+      {
+        code: 'FINALITY_LAG',
+        orgId,
+        detail: { chainWriteId: replaced.id, kind: 'AUDIT_HEAD', txHash: replaced.txHash, broadcastAt: ago(2 * HOUR).toISOString(), replacements: 2, reason: 'REPLACEMENTS_EXHAUSTED' },
+      },
+    ]);
   });
 
   it('reports a worker that has not passed while work waits for its key, and not one whose key has nothing to do', async () => {

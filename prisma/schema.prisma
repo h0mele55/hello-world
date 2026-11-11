@@ -347,6 +347,8 @@ model ChainWrite {
   error                String?
   attempts             Int              @default(0)
   broadcastAt          DateTime?
+  /// When the write was first sent; replacements never move it, so the finality-lag alert sees the whole wait (#139).
+  firstBroadcastAt     DateTime?
   /// The worker holding this row; another may take it once this passes.
   leaseUntil           DateTime?
   createdAt            DateTime         @default(now())

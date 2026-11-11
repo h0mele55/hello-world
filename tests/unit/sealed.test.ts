@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { decrypt, encrypt, open, openJson, seal, SealError, sealJson } from '@/lib/sealed';
-import { isThrottled, recordFailure, recordSuccess, resetThrottle, takeSignInAttempt } from '@/lib/login-throttle';
+import { beginSignIn, isThrottled, MAX_CONCURRENT_SIGN_INS, recordFailure, recordSuccess, resetThrottle, SIGN_INS_PER_MINUTE, takeSignInAttempt, trackedFailureKeys } from '@/lib/login-throttle';
 
 const key = { key: new Uint8Array(randomBytes(32)), version: 1 };
 const text = new TextEncoder().encode('In our opinion, the financial statements present fairly.');
@@ -75,5 +75,62 @@ describe('login throttle', () => {
     expect(takeSignInAttempt('10.0.0.3', now + 10)).toBe(true);
     expect(takeSignInAttempt(null, now + 10)).toBe(true);
     expect(takeSignInAttempt('10.0.0.2', now + 60_001)).toBe(true);
+  });
+
+  it('counts an attempt as a failure from the moment it starts, until it succeeds or is released', () => {
+    resetThrottle();
+    const now = Date.now();
+    for (let i = 0; i < 4; i++) {
+      const attempt = beginSignIn('preparer@example.test', null, now);
+      expect(attempt.ok).toBe(true);
+      attempt.end('FAILED');
+    }
+    const fifth = beginSignIn('preparer@example.test', '10.0.0.4', now);
+    // Still being checked, and already counted: nothing else gets a guess meanwhile.
+    expect(isThrottled('preparer@example.test', null, now)).toBe(true);
+    fifth.end('RELEASED');
+    expect(isThrottled('preparer@example.test', null, now)).toBe(false);
+    expect(isThrottled('other@example.test', '10.0.0.4', now)).toBe(false);
+    const sixth = beginSignIn('preparer@example.test', null, now);
+    sixth.end('SUCCEEDED');
+    sixth.end('FAILED');
+    expect(isThrottled('preparer@example.test', null, now)).toBe(false);
+    expect(beginSignIn('preparer@example.test', null, now)).toMatchObject({ ok: true });
+  });
+
+  it('allows one attempt in flight per email, and refuses a locked one', () => {
+    resetThrottle();
+    const now = Date.now();
+    const first = beginSignIn('Approver@example.test', null, now);
+    const second = beginSignIn('approver@example.test', null, now);
+    expect(second).toMatchObject({ ok: false, reason: 'IN_FLIGHT' });
+    second.end('SUCCEEDED');
+    expect(beginSignIn('approver@example.test', null, now)).toMatchObject({ ok: false, reason: 'IN_FLIGHT' });
+    first.end('FAILED');
+    for (let i = 0; i < 4; i++) beginSignIn('approver@example.test', null, now).end('FAILED');
+    expect(beginSignIn('approver@example.test', null, now)).toMatchObject({ ok: false, reason: 'LOCKED' });
+  });
+
+  it('holds all sign-ins together to a few at a time and a number a minute, before any password is checked', () => {
+    resetThrottle();
+    const now = Date.now();
+    const open = Array.from({ length: MAX_CONCURRENT_SIGN_INS }, (_, i) => beginSignIn(`user${i}@example.test`, null, now));
+    expect(open.every((a) => a.ok)).toBe(true);
+    expect(beginSignIn('one-more@example.test', null, now)).toMatchObject({ ok: false, reason: 'BUSY' });
+    for (const attempt of open) attempt.end('FAILED');
+    for (let i = MAX_CONCURRENT_SIGN_INS; i < SIGN_INS_PER_MINUTE; i++) beginSignIn(`user${i}@example.test`, `10.1.${i}.1`, now).end('FAILED');
+    expect(beginSignIn('one-more@example.test', null, now)).toMatchObject({ ok: false, reason: 'BUSY' });
+    expect(beginSignIn('one-more@example.test', '10.2.0.1', now + 59_999)).toMatchObject({ ok: false, reason: 'BUSY' });
+    expect(beginSignIn('one-more@example.test', null, now + 60_000)).toMatchObject({ ok: true });
+  });
+
+  it('forgets expired failures once it tracks many, so random emails cannot grow it without bound', () => {
+    resetThrottle();
+    const now = Date.now();
+    // Five windows of 15,000 new emails each: no more than twice one window's worth is ever kept.
+    for (let window = 0; window < 5; window++) {
+      for (let i = 0; i < 15_000; i++) recordFailure(`user${window}-${i}@example.test`, null, now + window * 15 * 60 * 1000);
+      expect(trackedFailureKeys()).toBeLessThanOrEqual(2 * 15_000 + 1);
+    }
   });
 });

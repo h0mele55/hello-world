@@ -26,8 +26,8 @@ export function createLimiter({ limit, windowMs }: { limit: number; windowMs: nu
  * The lookup page reads the chain on the server for every request, so it is
  * limited: 60 a minute per client address (#51), and 600 a minute in all,
  * which bounds the RPC traffic even when the address cannot be trusted.
- * The address comes from X-Forwarded-For only behind a proxy that overwrites
- * it (TRUST_PROXY_HEADERS=1), as for the login throttle.
+ * The address comes from X-Forwarded-For only behind a trusted proxy
+ * (TRUST_PROXY_HEADERS=1), as for the login throttle: see clientAddressOf.
  */
 export const LOOKUP_PER_ADDRESS = 60;
 export const LOOKUP_TOTAL = 600;
@@ -42,9 +42,18 @@ export function takeLookup(address: string | null, now = Date.now()) {
   return total.take('*', now);
 }
 
-export function clientAddressOf(headers: Headers, env: Readonly<Record<string, string | undefined>> = process.env): string | null {
+/**
+ * The client address, for the lookup and sign-in limits alike: only behind a
+ * trusted proxy (TRUST_PROXY_HEADERS=1), and only the rightmost
+ * X-Forwarded-For entry (#150), the address that proxy saw. A proxy that
+ * appends to the header keeps whatever the client sent before it, so any
+ * earlier entry is the client's to choose.
+ */
+export function clientAddressOf(headers: Headers | Record<string, unknown> | undefined, env: Readonly<Record<string, string | undefined>> = process.env): string | null {
   if (env.TRUST_PROXY_HEADERS !== '1') return null;
-  return headers.get('x-forwarded-for')?.split(',')[0]?.trim() || null;
+  const forwarded = headers instanceof Headers ? headers.get('x-forwarded-for') : headers?.['x-forwarded-for'];
+  if (typeof forwarded !== 'string') return null;
+  return forwarded.split(',').at(-1)?.trim() || null;
 }
 
 /** Writes through the API: 60 a minute per signed-in user (#58). */

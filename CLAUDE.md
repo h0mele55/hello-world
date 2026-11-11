@@ -477,7 +477,15 @@ to one inflect-compliance commit.
 - **Rate limits** (`src/lib/login-throttle.ts`, `src/lib/rate-limit.ts`):
   sign-in 10 attempts a minute per address, lockout after 5 failures per email
   or 10 per address in 15 minutes; writes 60 a minute per user (429 with
-  `Retry-After`). The address is read only with `TRUST_PROXY_HEADERS=1`.
+  `Retry-After`). The address is read only with `TRUST_PROXY_HEADERS=1`, and
+  only the rightmost `X-Forwarded-For` entry, by `clientAddressOf` alone.
+- **A sign-in attempt is a failure until it succeeds** (#150): `authorize`
+  calls `beginSignIn` before any `await`, which counts the failure and marks
+  the email in flight (one attempt per email is checked at a time); the
+  attempt ends SUCCEEDED, RELEASED (`MFA_CODE_REQUIRED`) or, by default in
+  `finally`, FAILED. All sign-ins together are held to 4 at a time and 60 a
+  minute, refused (BUSY) before any bcrypt compare. Never move the check after
+  an `await`: attempts sent together would all pass it.
 - **E2E**: the seeded approver and admin have two-step sign-in on with
   `SEED_APPROVER_TOTP_SECRET` and `SEED_ADMIN_TOTP_SECRET`, and
   `tests/e2e/helpers.ts` computes their codes;

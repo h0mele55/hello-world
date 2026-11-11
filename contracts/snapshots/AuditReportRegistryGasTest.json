@@ -1,9 +1,9 @@
 {
-  "anchor_distribution_copy": "226616",
-  "anchor_v1": "190037",
-  "anchor_v2": "196152",
+  "anchor_distribution_copy": "226704",
+  "anchor_v1": "190109",
+  "anchor_v2": "196224",
   "cancel_revocation": "26395",
   "record_audit_head": "95212",
-  "record_reanchor_root": "116791",
+  "record_reanchor_root": "117018",
   "revoke": "62356"
 }

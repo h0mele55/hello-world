@@ -1,6 +1,11 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity 0.8.30;
 
+/// @notice Arbitrum's system precompile, at address 100 on every Arbitrum chain.
+interface ArbSys {
+    function arbBlockNumber() external view returns (uint256);
+}
+
 /// @title AuditReportRegistry
 /// @notice Records SHA-256 commitments to audit reports, chains each reissued
 /// version to its predecessor, and answers "is this file registered, and what
@@ -11,8 +16,9 @@ pragma solidity 0.8.30;
 /// type or report text is ever stored (CLAUDE.md rule 1).
 ///
 /// The contract is immutable: no proxy, no delegatecall, no payable function
-/// and no external call. Ownership manages the issuer allowlist and may cancel
-/// a revocation before it takes effect.
+/// and no external call but one read: on Arbitrum, the L2 block number from
+/// the ArbSys precompile (#138). Ownership manages the issuer allowlist and may
+/// cancel a revocation before it takes effect.
 ///
 /// Revocation is delayed (#95). An issuer key asks; the revocation takes effect
 /// `revocationDelay` seconds later, and until then only the owner can cancel
@@ -110,6 +116,14 @@ contract AuditReportRegistry {
     /// @notice The longest delay a deployment may set: past it, a firm could
     /// not withdraw a wrong report in any useful time.
     uint32 public constant MAX_REVOCATION_DELAY = 30 days;
+
+    /// On Arbitrum, `block.number` is (roughly) the L1 block number, while
+    /// receipts, logs and eth_getBlock use the L2 block (#138). Keyed on the
+    /// chain id rather than set at deployment, so every network runs the same
+    /// bytecode (DEPLOYMENT_STALE checks it).
+    uint256 private constant ARBITRUM_ONE = 42161;
+    uint256 private constant ARBITRUM_SEPOLIA = 421614;
+    ArbSys private constant ARB_SYS = ArbSys(address(100));
 
     address public owner;
     address public pendingOwner;
@@ -271,8 +285,7 @@ contract AuditReportRegistry {
             opinionCommitment: opinionCommitment,
             parentId: parentId,
             issuer: msg.sender,
-            // forge-lint: disable-next-line(unsafe-typecast)
-            blockNumber: uint40(block.number),
+            blockNumber: _blockNumber(),
             version: version,
             kind: Kind.ORIGINAL
         });
@@ -309,8 +322,7 @@ contract AuditReportRegistry {
             opinionCommitment: original.opinionCommitment,
             parentId: originalId,
             issuer: msg.sender,
-            // forge-lint: disable-next-line(unsafe-typecast)
-            blockNumber: uint40(block.number),
+            blockNumber: _blockNumber(),
             version: original.version,
             kind: Kind.DISTRIBUTION_COPY
         });
@@ -427,8 +439,7 @@ contract AuditReportRegistry {
                 sourceChainId: sourceChainId,
                 count: count,
                 sourceBlock: sourceBlock,
-                // forge-lint: disable-next-line(unsafe-typecast)
-                recordedBlock: uint40(block.number),
+                recordedBlock: _blockNumber(),
                 voided: false
             })
         );
@@ -539,6 +550,15 @@ contract AuditReportRegistry {
         Issuer memory issuer = issuers[account];
         if (!issuer.active) revert NotIssuer();
         return issuer.orgId;
+    }
+
+    /// The block a record names: the one its receipt and its Anchored log carry.
+    function _blockNumber() private view returns (uint40) {
+        uint256 number = block.chainid == ARBITRUM_ONE || block.chainid == ARBITRUM_SEPOLIA
+            ? ARB_SYS.arbBlockNumber()
+            : block.number;
+        // forge-lint: disable-next-line(unsafe-typecast)
+        return uint40(number);
     }
 
     function _requireUnusedDoc(bytes32 docHash) private view {

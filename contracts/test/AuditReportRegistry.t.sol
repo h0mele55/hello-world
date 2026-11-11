@@ -2,7 +2,7 @@
 pragma solidity 0.8.30;
 
 import {Test} from "forge-std/Test.sol";
-import {AuditReportRegistry} from "../src/AuditReportRegistry.sol";
+import {AuditReportRegistry, ArbSys} from "../src/AuditReportRegistry.sol";
 
 contract AuditReportRegistryTest is Test {
     AuditReportRegistry internal registry;
@@ -713,6 +713,61 @@ contract AuditReportRegistryTest is Test {
         vm.prank(stranger);
         (bool ok,) = address(registry).call{value: 1 wei}("");
         assertFalse(ok, "no receive or fallback: ether is refused");
+    }
+
+    // ── Arbitrum's block numbers (#138) ──
+
+    // On Arbitrum, `block.number` is (roughly) the L1 block; receipts, logs and
+    // eth_getBlock use the L2 block, which only the ArbSys precompile gives.
+    // Forge answers ArbSys itself on an Arbitrum chain id, with `block.number`,
+    // and that shadows code etched at address 100; so the L2 block is mocked.
+    address internal constant ARB_SYS = address(100);
+    uint256 internal constant L1_BLOCK = 26_394_677;
+    uint256 internal constant L2_BLOCK = 523_399_367;
+
+    function _atL1BlockWithArbSys(uint256 chainId) internal {
+        vm.chainId(chainId);
+        vm.roll(L1_BLOCK);
+        vm.mockCall(
+            ARB_SYS, abi.encodeWithSelector(ArbSys.arbBlockNumber.selector), abi.encode(L2_BLOCK)
+        );
+    }
+
+    function _recordsTheL2Block(uint256 chainId) internal {
+        _atL1BlockWithArbSys(chainId);
+        bytes32 v1 = _v1();
+        assertEq(registry.getRecord(v1).blockNumber, L2_BLOCK, "an original names the L2 block");
+        vm.prank(issuer);
+        bytes32 copy = registry.anchorDistributionCopy(v1, _doc(100));
+        assertEq(registry.getRecord(copy).blockNumber, L2_BLOCK, "a copy names the L2 block");
+        vm.prank(owner);
+        registry.recordReanchorRoot(keccak256("root"), 11155111, SEPOLIA_REGISTRY, 9_876_543, 17);
+        assertEq(_roots()[0].recordedBlock, L2_BLOCK, "a re-anchor root names the L2 block");
+    }
+
+    function test_arbitrumOne_recordsTheL2BlockFromArbSys() public {
+        _recordsTheL2Block(42161);
+    }
+
+    function test_arbitrumSepolia_recordsTheL2BlockFromArbSys() public {
+        _recordsTheL2Block(421614);
+    }
+
+    /// Every other chain (Ethereum, Sepolia, Base, OP Mainnet, Anvil) runs the
+    /// same bytecode and records `block.number`, never asking ArbSys.
+    function testFuzz_otherChains_recordBlockNumber_andNeverAskArbSys(uint64 chainId) public {
+        vm.assume(chainId != 42161 && chainId != 421614);
+        _atL1BlockWithArbSys(chainId);
+        vm.expectCall(ARB_SYS, abi.encodeWithSelector(ArbSys.arbBlockNumber.selector), 0);
+        bytes32 v1 = _v1();
+        assertEq(registry.getRecord(v1).blockNumber, L1_BLOCK);
+        vm.prank(issuer);
+        assertEq(
+            registry.getRecord(registry.anchorDistributionCopy(v1, _doc(100))).blockNumber, L1_BLOCK
+        );
+        vm.prank(owner);
+        registry.recordReanchorRoot(keccak256("root"), 11155111, SEPOLIA_REGISTRY, 9_876_543, 17);
+        assertEq(_roots()[0].recordedBlock, L1_BLOCK);
     }
 
     // ── fuzz ──

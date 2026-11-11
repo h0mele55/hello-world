@@ -497,7 +497,19 @@ to one inflect-compliance commit.
 - **Rate limits** (`src/lib/login-throttle.ts`, `src/lib/rate-limit.ts`):
   sign-in 10 attempts a minute per address, lockout after 5 failures per email
   or 10 per address in 15 minutes; writes 60 a minute per user (429 with
-  `Retry-After`). The address is read only with `TRUST_PROXY_HEADERS=1`.
+  `Retry-After`). The address is read only with `TRUST_PROXY_HEADERS=1`, and
+  only the rightmost `X-Forwarded-For` entry, by `clientAddressOf` alone.
+- **A sign-in attempt is a failure until it succeeds** (#150): `authorize`
+  calls `beginSignIn` before any other `await`. It takes the per-address
+  limit (ADDRESS_LIMIT) and the 120-a-minute cap at once, then puts the
+  attempt in its email's line: attempts for one email are checked one at a
+  time, in order, each held to the lockout the one before left and counted as
+  a failure from its turn. A second attempt is not refused for arriving early
+  (a double click, two tabs, two e2e workers); only past two waiting is one
+  refused unchecked (IN_FLIGHT). At most 4 are checked at once (BUSY). The
+  attempt ends SUCCEEDED, RELEASED (`MFA_CODE_REQUIRED`) or, by default in
+  `finally`, FAILED. Never check the lockout outside the line: attempts sent
+  together would all pass it.
 - **E2E**: the seeded approver and admin have two-step sign-in on with
   `SEED_APPROVER_TOTP_SECRET` and `SEED_ADMIN_TOTP_SECRET`, and
   `tests/e2e/helpers.ts` computes their codes;
@@ -601,6 +613,15 @@ to one inflect-compliance commit.
   timestamp (`provenCheckpoint`: of this head, reaching a block both explorers
   agree on, else `CHECKPOINT_UNPROVEN`), and as of its block: it never says a
   file was not registered, since it may have come after (`CHECKPOINT_NOT_COVERED`).
+- **A checkpoint is believed only because the issuer published it (#151).**
+  Bitcoin says when a checkpoint existed, never who made it: anyone can build
+  one over any records and timestamp it. So `provenCheckpoint` first requires
+  its head's SHA-256 to be one the verifier trusts (`trustedCheckpoints`), baked
+  into the CLI by `build:verifier` from `CHECKPOINTS` (the exported
+  `checkpoint.json` files) or given with `--trust-checkpoint`. Never take the
+  trusted digest from the checkpoint file itself. An exact match through a
+  checkpoint is `AUTHENTIC_AS_OF_CHECKPOINT`, never `AUTHENTIC_LATEST`: a later
+  version or a withdrawal is not in it.
 
 ## The electronic seal (#70)
 

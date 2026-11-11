@@ -438,6 +438,10 @@
         "title": "Authentic, superseded",
         "body": "This file is byte for byte the file the issuer anchored, but the issuer has since anchored version {latest} of this report. Rely on the latest version."
       },
+      "AUTHENTIC_AS_OF_CHECKPOINT": {
+        "title": "Authentic, as of the checkpoint",
+        "body": "This file is byte for byte the file the issuer anchored, and it was the latest version when the registry was checkpointed, at the block named below. A newer version or a withdrawal since then would show only in the registry, which could not be read now."
+      },
       "REVOKED": {
         "title": "Revoked",
         "body": "This file was anchored by the issuer and later revoked. Do not rely on it."

@@ -35,7 +35,15 @@ The export writes:
 | `head`, `head.ots` | the head's bytes and its OpenTimestamps proof, for the reference client |
 
 Attach the directory, zipped, to a release of the repository named
-`checkpoint-<YYYY-MM>`, and keep a copy with the firm's records. Nothing in it
+`checkpoint-<YYYY-MM>`, and keep a copy with the firm's records. State the
+SHA-256 of `head` in the release notes: that is what a verifier trusts (below).
+Then rebuild the verifier with every published checkpoint listed in
+`CHECKPOINTS` (comma-separated paths to their `checkpoint.json`), so the CLI
+believes exactly those (#151):
+
+```bash
+CHECKPOINTS=checkpoints/2026-10/checkpoint.json,checkpoints/2026-11/checkpoint.json npm run build:verifier
+``` Nothing in it
 is confidential: the records hold commitments and pseudonymous ids only, which
 the chain already shows (rule 1).
 
@@ -54,11 +62,17 @@ checkpoint (or one record's proof):
 node bin/verify-report.mjs report.pdf --checkpoint checkpoint.json
 ```
 
-It uses the checkpoint only when the registry cannot be reached, and only
-through its Bitcoin timestamp: the proof must be of this checkpoint's head and
+It believes only a checkpoint the issuer published (#151): its head's SHA-256
+must be one the build baked in from `CHECKPOINTS`, or one given with
+`--trust-checkpoint <sha256>`, read from the issuer's own release notes and
+never from the checkpoint file. A Bitcoin timestamp proves when a checkpoint
+existed, not who made it, so anyone could otherwise forge one. It uses the
+checkpoint only when the registry cannot be reached, and only through its
+Bitcoin timestamp: the proof must be of this checkpoint's head and
 reach a Bitcoin block both explorers agree on. Anything short of that is
 `CHECKPOINT_UNPROVEN`. The verdict is the one the registry gave at the
-checkpoint's block, and `reanchored` names the month, the block and the
+checkpoint's block, and an exact match is `AUTHENTIC_AS_OF_CHECKPOINT`, never
+"latest", and `reanchored` names the month, the block and the
 Bitcoin block. A checkpoint cannot say a file was never anchored, since it may
 have been anchored after it: a file or record it does not hold is
 `CHECKPOINT_NOT_COVERED`, never "not registered". A revocation or a new version

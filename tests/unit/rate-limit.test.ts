@@ -22,11 +22,22 @@ describe('the lookup rate limit', () => {
     expect(takeLookup(null, t).ok).toBe(false);
   });
 
-  it('trusts X-Forwarded-For only behind a proxy that overwrites it', () => {
+  it('trusts X-Forwarded-For only behind a trusted proxy, and only the entry that proxy added', () => {
+    // A proxy that appends what it saw: the client wrote everything before the last entry.
     const headers = new Headers({ 'x-forwarded-for': '203.0.113.7, 10.0.0.1' });
     expect(clientAddressOf(headers, {})).toBeNull();
-    expect(clientAddressOf(headers, { TRUST_PROXY_HEADERS: '1' })).toBe('203.0.113.7');
+    expect(clientAddressOf(headers, { TRUST_PROXY_HEADERS: '1' })).toBe('10.0.0.1');
+    expect(clientAddressOf(new Headers({ 'x-forwarded-for': '198.51.100.9' }), { TRUST_PROXY_HEADERS: '1' })).toBe('198.51.100.9');
+    expect(clientAddressOf(new Headers({ 'x-forwarded-for': '198.51.100.9, ' }), { TRUST_PROXY_HEADERS: '1' })).toBeNull();
     expect(clientAddressOf(new Headers(), { TRUST_PROXY_HEADERS: '1' })).toBeNull();
+  });
+
+  it('reads the same address from the plain header object sign-in is given', () => {
+    const env = { TRUST_PROXY_HEADERS: '1' };
+    expect(clientAddressOf({ 'x-forwarded-for': '203.0.113.7, 10.0.0.1' }, env)).toBe('10.0.0.1');
+    expect(clientAddressOf({ 'x-forwarded-for': ['203.0.113.7'] }, env)).toBeNull();
+    expect(clientAddressOf(undefined, env)).toBeNull();
+    expect(clientAddressOf({ 'x-forwarded-for': '10.0.0.1' }, {})).toBeNull();
   });
 });
 

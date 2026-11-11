@@ -535,14 +535,24 @@ export function explorerCheck(): CheckpointBitcoinCheck {
   return (proof) => bitcoinTimeOf(proof, sources, cache);
 }
 
+/** The digest a checkpoint's Bitcoin timestamp is of: the SHA-256 of its head. Null for a set that is not a checkpoint. */
+export function checkpointDigestOf(set: CheckedSet): Hex | null {
+  return set.checkpoint ? checkpointDigest({ source: set.source, period: set.checkpoint.period, count: set.count, root: set.root }) : null;
+}
+
 /**
- * The Bitcoin block a checkpoint is timestamped in: its OpenTimestamps proof
- * must be of the SHA-256 of its head, and its path must reach a block both
+ * The Bitcoin block a checkpoint is timestamped in. Bitcoin says only when a
+ * checkpoint existed, never who made it, and anyone can timestamp a head they
+ * wrote (#151), so a checkpoint must first be one this verifier was built to
+ * trust: its digest among `trusted`, the heads the firm exported. Then its
+ * OpenTimestamps proof must be of that digest and reach a block both
  * explorers agree on. Anything short of that is CHECKPOINT_UNPROVEN, with why.
  */
-export async function provenCheckpoint(set: CheckedSet, check: CheckpointBitcoinCheck = explorerCheck()): Promise<BitcoinTime> {
+export async function provenCheckpoint(set: CheckedSet, check: CheckpointBitcoinCheck = explorerCheck(), trusted: readonly string[] = []): Promise<BitcoinTime> {
   const unproven = (detail: string) => new CannotVerify('CHECKPOINT_UNPROVEN', detail);
-  if (!set.checkpoint) throw unproven('not a checkpoint');
+  const digest = checkpointDigestOf(set);
+  if (!set.checkpoint || !digest) throw unproven('not a checkpoint');
+  if (!trusted.some((t) => t.toLowerCase() === digest.toLowerCase())) throw unproven('not a checkpoint this verifier trusts: its head is not one the issuer published');
   if (!set.checkpoint.ots) throw unproven('the checkpoint carries no Bitcoin timestamp yet');
   let proof: Proof;
   try {
@@ -551,7 +561,6 @@ export async function provenCheckpoint(set: CheckedSet, check: CheckpointBitcoin
     if (error instanceof OtsError) throw unproven(`the timestamp cannot be read: ${error.code}`);
     throw error;
   }
-  const digest = checkpointDigest({ source: set.source, period: set.checkpoint.period, count: set.count, root: set.root });
   if (bytesToHex(proof.digest) !== digest) throw unproven('the timestamp is of something else than this checkpoint');
   let reached: BitcoinTime | null;
   try {
@@ -614,6 +623,8 @@ export async function verifyWithReanchors(input: {
   loadSets?: () => Promise<readonly CheckedSet[]>;
   clients?: readonly PublicClient[];
   bitcoinCheck?: CheckpointBitcoinCheck;
+  /** The checkpoint digests this verifier trusts (#151); with none, every checkpoint is refused. */
+  trustedCheckpoints?: readonly string[];
 }): Promise<{ verdict: Verdict; reanchored: Reanchored | null }> {
   const primary = await verifyFile(input);
   const docHash = docHashOf(input.bytes);
@@ -631,14 +642,15 @@ export async function verifyWithReanchors(input: {
       config: input.config,
       readPdf: input.readPdf,
       openView: async () => {
-        bitcoin = await provenCheckpoint(set, input.bitcoinCheck);
+        bitcoin = await provenCheckpoint(set, input.bitcoinCheck, input.trustedCheckpoints);
         return archivedView(set);
       },
     });
     const reached = bitcoin as BitcoinTime | null;
     if (verdict.kind === 'CANNOT_VERIFY' || !reached) return { verdict, reanchored: null };
     return {
-      verdict,
+      // The latest as of the checkpoint's block, not now: a later version or a withdrawal cannot be seen without the registry (rule 7).
+      verdict: verdict.kind === 'AUTHENTIC_LATEST' ? { ...verdict, kind: 'AUTHENTIC_AS_OF_CHECKPOINT' } : verdict,
       reanchored: { kind: 'checkpoint', period: set.checkpoint.period, root: set.root, sourceChainId: set.source.chainId, sourceRegistry: set.source.registry, sourceBlock: set.source.block, count: set.count, bitcoin: reached, issuers: set.issuers },
     };
   }

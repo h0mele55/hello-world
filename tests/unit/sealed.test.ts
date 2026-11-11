@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { decrypt, encrypt, open, openJson, seal, SealError, sealJson } from '@/lib/sealed';
-import { isThrottled, recordFailure, recordSuccess, resetThrottle, takeSignInAttempt } from '@/lib/login-throttle';
+import { beginSignIn, isThrottled, MAX_CONCURRENT_SIGN_INS, MAX_WAITING_PER_EMAIL, recordFailure, recordSuccess, resetThrottle, SIGN_INS_PER_MINUTE, takeSignInAttempt, trackedFailureKeys } from '@/lib/login-throttle';
 
 const key = { key: new Uint8Array(randomBytes(32)), version: 1 };
 const text = new TextEncoder().encode('In our opinion, the financial statements present fairly.');
@@ -75,5 +75,98 @@ describe('login throttle', () => {
     expect(takeSignInAttempt('10.0.0.3', now + 10)).toBe(true);
     expect(takeSignInAttempt(null, now + 10)).toBe(true);
     expect(takeSignInAttempt('10.0.0.2', now + 60_001)).toBe(true);
+  });
+
+  it('counts an attempt as a failure from the moment its turn comes, until it succeeds or is released', async () => {
+    resetThrottle();
+    const now = Date.now();
+    for (let i = 0; i < 4; i++) {
+      const attempt = await beginSignIn('preparer@example.test', null, now);
+      expect(attempt.ok).toBe(true);
+      attempt.end('FAILED');
+    }
+    const fifth = await beginSignIn('preparer@example.test', '10.0.0.4', now);
+    // Still being checked, and already counted: nothing after it gets a guess meanwhile.
+    expect(isThrottled('preparer@example.test', null, now)).toBe(true);
+    fifth.end('RELEASED');
+    expect(isThrottled('preparer@example.test', null, now)).toBe(false);
+    expect(isThrottled('other@example.test', '10.0.0.4', now)).toBe(false);
+    const sixth = await beginSignIn('preparer@example.test', null, now);
+    sixth.end('SUCCEEDED');
+    sixth.end('FAILED');
+    expect(isThrottled('preparer@example.test', null, now)).toBe(false);
+    expect(await beginSignIn('preparer@example.test', null, now)).toMatchObject({ ok: true });
+  });
+
+  it('checks one attempt per email at a time: the next waits its turn and is held to the lockout the one before left', async () => {
+    resetThrottle();
+    const now = Date.now();
+    for (let i = 0; i < 4; i++) (await beginSignIn('approver@example.test', null, now)).end('FAILED');
+    const first = await beginSignIn('Approver@example.test', null, now);
+    let second: Awaited<ReturnType<typeof beginSignIn>> | null = null;
+    const waiting = beginSignIn('approver@example.test', null, now).then((a) => (second = a));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    // It waits while the first is being checked, rather than being refused for arriving early.
+    expect(second).toBeNull();
+    first.end('FAILED');
+    await waiting;
+    expect(second).toMatchObject({ ok: false, reason: 'LOCKED' });
+    second!.end('FAILED');
+    // A success before it frees the one waiting behind it.
+    resetThrottle();
+    const signedIn = await beginSignIn('approver@example.test', null, now);
+    const next = beginSignIn('approver@example.test', null, now);
+    signedIn.end('SUCCEEDED');
+    expect(await next).toMatchObject({ ok: true });
+  });
+
+  it('refuses unchecked an attempt for an email with more already waiting than may', async () => {
+    resetThrottle();
+    const now = Date.now();
+    const first = await beginSignIn('admin@example.test', null, now);
+    const waiting = Array.from({ length: MAX_WAITING_PER_EMAIL }, () => beginSignIn('admin@example.test', null, now));
+    const refused = await beginSignIn('ADMIN@example.test', null, now);
+    expect(refused).toMatchObject({ ok: false, reason: 'IN_FLIGHT' });
+    refused.end('FAILED');
+    // Another email is not held up.
+    const other = await beginSignIn('preparer@example.test', null, now);
+    expect(other.ok).toBe(true);
+    other.end('FAILED');
+    first.end('FAILED');
+    for (const next of waiting) (await next).end('FAILED');
+    // The refused one was never checked and counts as nothing: three failures, so two more lock the account.
+    for (let i = 0; i < 2; i++) (await beginSignIn('admin@example.test', null, now)).end('FAILED');
+    expect(await beginSignIn('admin@example.test', null, now)).toMatchObject({ ok: false, reason: 'LOCKED' });
+  });
+
+  it('holds all sign-ins together to a few at a time and a number a minute, before any password is checked', async () => {
+    resetThrottle();
+    const now = Date.now();
+    const open = await Promise.all(Array.from({ length: MAX_CONCURRENT_SIGN_INS }, (_, i) => beginSignIn(`user${i}@example.test`, null, now)));
+    expect(open.every((a) => a.ok)).toBe(true);
+    expect(await beginSignIn('one-more@example.test', null, now)).toMatchObject({ ok: false, reason: 'BUSY' });
+    for (const attempt of open) attempt.end('FAILED');
+    for (let i = MAX_CONCURRENT_SIGN_INS + 1; i < SIGN_INS_PER_MINUTE; i++) (await beginSignIn(`user${i}@example.test`, `10.1.${i}.1`, now)).end('FAILED');
+    expect(await beginSignIn('one-more@example.test', null, now)).toMatchObject({ ok: false, reason: 'BUSY' });
+    expect(await beginSignIn('one-more@example.test', '10.2.0.1', now + 59_999)).toMatchObject({ ok: false, reason: 'BUSY' });
+    expect(await beginSignIn('one-more@example.test', null, now + 60_000)).toMatchObject({ ok: true });
+  });
+
+  it('checks the address limit before the overall one, so one address cannot spend it', async () => {
+    resetThrottle();
+    const now = Date.now();
+    for (let i = 0; i < SIGN_INS_PER_MINUTE; i++) (await beginSignIn(`user${i}@example.test`, '203.0.113.9', now)).end('FAILED');
+    expect(await beginSignIn('one-more@example.test', '203.0.113.9', now)).toMatchObject({ ok: false, reason: 'ADDRESS_LIMIT' });
+    expect(await beginSignIn('colleague@example.test', '198.51.100.4', now)).toMatchObject({ ok: true });
+  });
+
+  it('forgets expired failures once it tracks many, so random emails cannot grow it without bound', () => {
+    resetThrottle();
+    const now = Date.now();
+    // Five windows of 15,000 new emails each: no more than twice one window's worth is ever kept.
+    for (let window = 0; window < 5; window++) {
+      for (let i = 0; i < 15_000; i++) recordFailure(`user${window}-${i}@example.test`, null, now + window * 15 * 60 * 1000);
+      expect(trackedFailureKeys()).toBeLessThanOrEqual(2 * 15_000 + 1);
+    }
   });
 });

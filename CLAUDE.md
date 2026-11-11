@@ -299,10 +299,16 @@ to one inflect-compliance commit.
 - **Unknown is INDETERMINATE, and INDETERMINATE is never resent.** It is
   settled only by reading the chain: receipts for every hash, the node's
   pool, the issuer's finalized nonce, the record for the document. While one
-  is unsettled no new LIVE write starts for that issuer key. When it cannot be
+  is unsettled no new LIVE write starts for that issuer key, and neither while
+  an INTENT row holds a journalled hash, whatever its lease (`issuerBlocked`,
+  #139): its nonce is reserved and its fate unknown. When it cannot be
   settled (its transaction unknown, its nonce unused), an approver runs
   `scripts/settle-write.ts`, which uses the nonce with a no-op transfer; the
   worker then reads the outcome.
+- **Replacement is bounded** (#139): at most `maxReplacements` (6), never
+  above `WORKER_MAX_FEE_GWEI`, and a refused replacement's hash stays in
+  `replacedTxHashes`, since its bytes reached a node. `firstBroadcastAt` is
+  set by the first send and never by `replace`; `FINALITY_LAG` reads it.
 - **A row holds its nonce only while its transaction may land or once its own
   transaction used it**; otherwise clear the nonce. A partial unique index
   allows one row per (chain, issuer, nonce).

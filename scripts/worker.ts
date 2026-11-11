@@ -9,6 +9,7 @@
  *   FILE_ENCRYPTION_KEY, FILE_ENCRYPTION_KEY_VERSION, FILE_STORAGE_DIR
  *                       the same values as the app's: the worker reads originals and stores copies
  *   APP_PUBLIC_URL      the app's public origin; stamps and certificates point at <origin>/verify
+ *   WORKER_MAX_FEE_GWEI optional; no replacement offers a fee cap above this (#139)
  *   STANDALONE_VERIFIER_URL  optional; the published single-file verifier (#85), which
  *                       certificates name as the way to check without the app
  *   <NETWORK>_RPC_URL_2 a second endpoint, from another provider: a row is settled only on
@@ -21,6 +22,7 @@
  * for its supervisor to restart.
  */
 import path from 'node:path';
+import { parseUnits } from 'viem';
 import { runWorkerPass } from '../src/lib/anchoring/worker';
 import { createFileStore } from '../src/lib/file-store';
 import { standaloneVerifierUrlOf } from '../src/lib/verify-setup';
@@ -58,13 +60,17 @@ async function main() {
 
   const intervalMs = Number(process.env.WORKER_INTERVAL_MS || 15_000);
   if (!Number.isInteger(intervalMs) || intervalMs < 1_000) fail('WORKER_INTERVAL_MS must be a whole number of milliseconds, at least 1000');
+  // No replacement offers a fee cap above this (#139); unset for none.
+  const maxFeeGwei = process.env.WORKER_MAX_FEE_GWEI;
+  if (maxFeeGwei !== undefined && maxFeeGwei !== '' && !/^\d+(\.\d{1,9})?$/.test(maxFeeGwei)) fail('WORKER_MAX_FEE_GWEI must be a number of gwei');
+  const options = maxFeeGwei ? { maxFeePerGasWei: parseUnits(maxFeeGwei, 9) } : {};
   console.log(JSON.stringify({ level: 'info', message: 'worker started', network, issuer: account.address, registry: deployment.address, sealsCopies: seal !== undefined }));
   let failedPasses = 0;
   try {
     do {
       let report;
       try {
-        report = await runWorkerPass({ prisma, lockClient, publicClient, checkClient, account, deployment, files, verifyBaseUrl, standaloneVerifierUrl, seal });
+        report = await runWorkerPass({ prisma, lockClient, publicClient, checkClient, account, deployment, files, verifyBaseUrl, standaloneVerifierUrl, seal, options });
         failedPasses = 0;
       } catch (error) {
         // An endpoint or the database out for a moment must not stop anchoring:

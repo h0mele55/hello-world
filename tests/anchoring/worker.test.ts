@@ -510,6 +510,55 @@ describe('a worker that dies, and writes whose outcome is unknown', () => {
     expect(await copyWriteOf(versionId)).toMatchObject({ nonce: 1 });
   });
 
+  it('starts no new LIVE write while one that journalled its hash is still held, in the same pass or the next (#139)', async () => {
+    await goLive();
+    const { chainWriteId: lost } = await approveVersion(approver, await confirmedVersion((await engagement()).id, 'en-unmodified.pdf'), target);
+    const { chainWriteId: next } = await approveVersion(approver, await confirmedVersion((await engagement()).id, 'en-qualified.pdf'), target);
+    // The first is journalled at nonce 0 and its process "dies" before the bytes leave; its lease still runs.
+    await pass({ faults: { beforeSend: async (id) => (id === lost ? Promise.reject(new Error('killed')) : undefined) } });
+    expect(await writeOf(lost)).toMatchObject({ status: 'INTENT', nonce: 0 });
+    // Before #139 the second was broadcast at nonce 1, behind a nonce that might never be used.
+    expect(await writeOf(next)).toMatchObject({ status: 'INTENT', error: 'ISSUER_BLOCKED', txHash: null, nonce: null });
+    await pass();
+    expect(await writeOf(next)).toMatchObject({ status: 'INTENT', error: 'ISSUER_BLOCKED', txHash: null });
+    expect(await nonceOf('pending')).toBe(0);
+  });
+
+  it('keeps a refused replacement’s hash, never moves the first broadcast, and stops replacing past the fee ceiling or the limit (#139)', async () => {
+    await goLive();
+    const versionId = await confirmedVersion((await engagement()).id, 'en-unmodified.pdf');
+    const { chainWriteId } = await approveVersion(approver, versionId, target);
+    await testClient.setAutomine(false);
+    await pass();
+    const original = await writeOf(chainWriteId);
+    expect(original.firstBroadcastAt).toEqual(original.broadcastAt);
+
+    // The node refuses the replacement (the key cannot pay for it): the original stays live, the refused hash stays journalled.
+    await testClient.setBalance({ address: issuer.address, value: 1000n });
+    advance(10 * 60_000);
+    expect((await pass()).steps[0]).toMatchObject({ to: 'BROADCAST', note: expect.stringMatching(/^replacement refused/) });
+    const refused = await writeOf(chainWriteId);
+    expect(refused).toMatchObject({ txHash: original.txHash, maxFeePerGas: original.maxFeePerGas, firstBroadcastAt: original.firstBroadcastAt });
+    expect(refused.replacedTxHashes).toHaveLength(1);
+    expect(refused.replacedTxHashes[0]).not.toBe(original.txHash);
+    await testClient.setBalance({ address: issuer.address, value: parseEther('1') });
+
+    // No replacement offers more than the ceiling.
+    advance(10 * 60_000);
+    const capped = await pass({ options: { maxFeePerGasWei: BigInt(original.maxFeePerGas!) } });
+    expect(capped.steps[0]).toMatchObject({ to: 'BROADCAST', note: expect.stringMatching(/^not replaced: the fee cap/) });
+    expect(await writeOf(chainWriteId)).toMatchObject({ error: 'FEE_CEILING_REACHED', txHash: original.txHash });
+    // And none past the limit: the refused attempt counts.
+    const limited = await pass({ options: { maxReplacements: 1 } });
+    expect(limited.steps[0]).toMatchObject({ to: 'BROADCAST', note: 'not replaced: 1 replacements already' });
+    expect(await writeOf(chainWriteId)).toMatchObject({ error: 'REPLACEMENTS_EXHAUSTED', txHash: original.txHash, firstBroadcastAt: original.firstBroadcastAt });
+
+    await mine(4);
+    await testClient.setAutomine(true);
+    await pass();
+    expect(await writeOf(chainWriteId)).toMatchObject({ status: 'FINAL', txHash: original.txHash });
+  });
+
   it('lets one worker at a time work an issuer key', async () => {
     const other = new pg.Client({ connectionString: process.env.DATABASE_URL });
     await other.connect();

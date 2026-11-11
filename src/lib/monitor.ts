@@ -81,12 +81,29 @@ export async function collectAlerts(prisma: PrismaClient, now = new Date(), t = 
     alerts.push({ code: 'WRITE_INDETERMINATE', orgId: w.orgId, detail: { chainWriteId: w.id, kind: w.kind, reason: w.error, chainId: w.chainId, issuer: w.issuer, runbook: 'docs/runbooks/stuck-writes.md' } });
   }
 
+  // Measured from the first send: a replacement moves broadcastAt, and a write replaced every few minutes would never lag (#139).
   const lagging = await prisma.chainWrite.findMany({
-    where: { status: 'BROADCAST', broadcastAt: { lt: since(t.finalityLagMs) } },
-    select: { id: true, orgId: true, kind: true, txHash: true, broadcastAt: true },
+    where: {
+      status: 'BROADCAST',
+      OR: [{ firstBroadcastAt: { lt: since(t.finalityLagMs) } }, { firstBroadcastAt: null, broadcastAt: { lt: since(t.finalityLagMs) } }],
+    },
+    select: { id: true, orgId: true, kind: true, txHash: true, broadcastAt: true, firstBroadcastAt: true, replacedTxHashes: true, error: true },
     take: 50,
   });
-  for (const w of lagging) alerts.push({ code: 'FINALITY_LAG', orgId: w.orgId, detail: { chainWriteId: w.id, kind: w.kind, txHash: w.txHash, broadcastAt: iso(w.broadcastAt) } });
+  for (const w of lagging) {
+    alerts.push({
+      code: 'FINALITY_LAG',
+      orgId: w.orgId,
+      detail: {
+        chainWriteId: w.id,
+        kind: w.kind,
+        txHash: w.txHash,
+        broadcastAt: iso(w.firstBroadcastAt ?? w.broadcastAt),
+        replacements: w.replacedTxHashes.length,
+        reason: w.error,
+      },
+    });
+  }
 
   // A copy waiting on its seal (#70): the worker tries again every pass, so an hour is a provider that is down.
   const unsealed = await prisma.chainWrite.findMany({

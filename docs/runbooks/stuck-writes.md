@@ -17,12 +17,23 @@ WHERE status IN ('INTENT', 'BROADCAST', 'INDETERMINATE') ORDER BY "createdAt";
 A row is BROADCAST until its block is finalized, which on Sepolia takes about
 13 minutes after it is mined. One whose transaction has not been mined after
 10 minutes is replaced at the same nonce with higher fees, automatically. Both
-are normal. Check:
+are normal. Replacement is bounded (#139): after 6 replacements
+(`REPLACEMENTS_EXHAUSTED`), or when the next fee cap would pass
+`WORKER_MAX_FEE_GWEI` (`FEE_CEILING_REACHED`), the row stops being replaced
+and waits. A refused replacement counts, and its hash stays in the journal.
+The monitor's `FINALITY_LAG` is measured from the first send, so it fires an
+hour after that whatever the replacements did, and names their number.
+Check:
 
 - The worker is running and its passes say `"ran": true`. If it is not
   running, see [rpc-outage.md](rpc-outage.md).
 - The issuer key has funds. Below 0.02 ETH every console page shows a banner;
   fund the key, and the next pass carries on.
+- For `REPLACEMENTS_EXHAUSTED` or `FEE_CEILING_REACHED`: find out why the
+  transaction is not mined (a gap at an earlier nonce, an endpoint that does
+  not propagate, a fee market above the ceiling). Raise `WORKER_MAX_FEE_GWEI`
+  only on purpose; restarting the worker with a new value lets replacement go
+  on.
 
 ## INDETERMINATE
 

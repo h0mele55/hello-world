@@ -830,7 +830,8 @@
       "TRUNCATED": "events that an earlier check saw are gone",
       "REWRITTEN": "an event that an earlier check saw has been replaced",
       "ANCHORED_HEAD_MISSING": "a head of this log written on chain is no longer in it: the log was rewritten or cut since",
-      "CHAIN_UNREADABLE": "the chain could not be read, so the log could not be held to its heads there"
+      "CHAIN_UNREADABLE": "the chain could not be read, so the log could not be held to its heads there",
+      "FIRM_MISMATCH": "the issuer key that writes this log’s heads is registered to another firm on chain, so its heads are not this log’s: the firm’s name in the database must be the one in the deployment record"
     },
     "events": "Events, newest first",
     "empty": "No events yet",

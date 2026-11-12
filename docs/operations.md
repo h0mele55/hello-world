@@ -30,7 +30,10 @@ before then (`docs/runbooks/stolen-issuer-key.md`).
 
 The worker reads two RPC endpoints from different providers,
 `<NETWORK>_RPC_URL` and `<NETWORK>_RPC_URL_2`, and settles a row only on what
-both read (#92); it refuses to start without the second.
+both read (#92); it refuses to start without the second. The registry watch
+reads both too (#141), so a provider that drops events cannot hide a
+revocation from it: while they disagree it exits 2 and reads the range again
+next run.
 
 Run the worker, the mailer and the OpenTimestamps job under a supervisor that restarts them (for
 example a systemd unit with `Restart=always`). Each tries a failed pass again
@@ -282,7 +285,11 @@ both endpoints at one finalized block, and every head the registry's owner
 has not voided must still be the hash of one of its events
 (`ANCHORED_HEAD_MISSING` otherwise, naming the heads;
 `docs/runbooks/audit-head-missing.md`). A chain it cannot read is
-`CHAIN_UNREADABLE`, never a pass. When the log has moved on since the last
+`CHAIN_UNREADABLE`, never a pass. The heads are those of the firm the issuer
+key is registered to on chain (#141): the firm's name in the database must be
+the deployment record's `issuer.orgName`, or its check fails `FIRM_MISMATCH`;
+another firm in the database is checked on the database alone, with a warning
+line each night. When the log has moved on since the last
 head, it queues the new head in the journal, and the worker writes it like
 any other write. It therefore reads `ANCHOR_NETWORK`, `ISSUER_ADDRESS`, the
 deployment record and both `<NETWORK>_RPC_URL` and `<NETWORK>_RPC_URL_2`, and

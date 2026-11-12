@@ -385,7 +385,10 @@ to one inflect-compliance commit.
   (rule 3): a new path that sends a registry write without a journal row will
   be reported as a stolen key. Findings (`UnjournaledWrite`) and the checkpoint
   are written in one transaction per range; only an ADMIN marks a finding
-  reviewed (`reviewUnjournaledWrite`).
+  reviewed (`reviewUnjournaledWrite`). Every read is made on both endpoints
+  at an agreed finalized block (#141): one endpoint that lags or drops events
+  must never move the checkpoint past a stolen key's revocation, so a
+  disagreement stops the run (`RPC_DISAGREE`) and the checkpoint stays.
 - **The owner's acts go through `scripts/owner-call.ts`**, which checks the
   chain and the registry, simulates, and prints the transaction for the owner
   (the deployer key, later a Safe) to execute. It sends only an issuer change
@@ -719,7 +722,12 @@ to one inflect-compliance commit.
   head in the registry that is not voided must still be the hash of an event
   (`ANCHORED_HEAD_MISSING`), read on both endpoints through
   `registryHeadWitness` (`src/lib/anchoring/audit-head.ts`); an unreadable
-  chain is `CHAIN_UNREADABLE`, never a pass. Do not weaken this to the latest
+  chain is `CHAIN_UNREADABLE`, never a pass. The heads read are those filed
+  under the firm the writing key is registered to on chain, never under the
+  database firm's name (#141): a firm whose name is not the key's fails
+  `FIRM_MISMATCH`, any other firm in the database is checked on the database
+  alone and has no head queued (`chainBound: false`), and two firms with the
+  key's name are refused (`FIRM_AMBIGUOUS`). Do not weaken this to the latest
   head only: the database owner can queue rows, so could have the worker write
   a rewritten log's head. A broken check puts a banner on every console page
   and stays reported; a check older than 36 hours shows as stopped.
@@ -727,7 +735,9 @@ to one inflect-compliance commit.
   `src/lib/anchoring/reconcile.ts`): every version's record, copy and
   revocation read on both endpoints at one agreed finalized block, and every
   record the firm's keys wrote. It only reads, and names each difference
-  (`ANCHORED_AFTER_BACKUP`, `UNKNOWN_RECORD`, `RECORD_DIFFERS`, …); after a
+  (`ANCHORED_AFTER_BACKUP`, `UNKNOWN_RECORD`, `RECORD_DIFFERS`,
+  `REVOCATION_DIFFERS` for a scheduled revocation the chain holds with
+  another reason or time, #141, …); after a
   restore it is step 5 of `docs/runbooks/restore.md`. A new state the chain
   can hold for a version needs its own code here, or a restore will not see it.
 - **Backups** are `scripts/backup.sh` (`pg_dump` custom format, the store as

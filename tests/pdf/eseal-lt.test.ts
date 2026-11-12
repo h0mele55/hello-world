@@ -14,8 +14,8 @@ import { stampPdf } from '@/lib/stamp';
 import type { StampFields } from '@/lib/stamp-fields';
 import { dssUpdate, vriKeyOf } from '@/lib/verify-core/dss';
 import { parseCertificate } from '@/lib/verify-core/pki';
-import { crlStatus, ocspStatus, type ValidationData } from '@/lib/verify-core/revocation';
-import { sealStatusFor } from '@/lib/verify-core/seal';
+import { crlStatus, derOf, ocspStatus, type ValidationData } from '@/lib/verify-core/revocation';
+import { checkValidationData, sealStatusFor, type CmsCheck } from '@/lib/verify-core/seal';
 import { startFakeStatusResponder, type FakeStatusResponder } from '../helpers/fake-status-responder';
 import { createTestPki, type StatusBehaviour, type TestPki } from '../helpers/test-pki';
 
@@ -44,6 +44,7 @@ const FIELDS: StampFields = {
   norm: 1,
 };
 const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'eseal-lt-'));
 const tool = (name: string) => spawnSync('which', [name]).status === 0;
 const codeOf = (promise: Promise<unknown>) =>
@@ -263,6 +264,42 @@ describe('a status that does not hold is refused, by name', () => {
     // The root's CRL is not the intermediate-issued seal's issuer's.
     expect(await crlStatus((await pki.status.crl('root'))!, seal, issuer, at(), new Date())).toBeNull();
   });
+
+  it('a CRL counts only for the certificates its scope covers (#144)', async () => {
+    const point = 'http://127.0.0.1:9/crl/intermediate.crl';
+    // The seal's certificate is an end entity, named in the CRL's own distribution point.
+    expect(await crl({ crlScope: { onlyUserCerts: true } })).toBe('NO_ERROR');
+    expect(await crl({ crlScope: { distributionPoint: point } })).toBe('NO_ERROR');
+    // A list of revoked CA certificates (an ARL), of attribute certificates, or of another partition says nothing about it.
+    expect(await crl({ crlScope: { onlyCACerts: true } })).toBe('REVOCATION_REFUSED');
+    expect(await crl({ crlScope: { onlyAttributeCerts: true } })).toBe('REVOCATION_REFUSED');
+    expect(await crl({ crlScope: { distributionPoint: 'http://127.0.0.1:9/crl/partition-2.crl' } })).toBe('REVOCATION_REFUSED');
+    // The intermediate, a CA, by the root's CRL: only-CA covers it, only-users does not.
+    expect(await crl({ crlScope: { onlyCACerts: true } }, issuer, 'root')).toBe('NO_ERROR');
+    expect(await crl({ crlScope: { onlyUserCerts: true } }, issuer, 'root')).toBe('REVOCATION_REFUSED');
+  });
+
+  it('checks statuses along the path the seal was validated on, never a re-issued certificate beside it (#144)', async () => {
+    const reissued = await createTestPki({ statusUrls: { ocsp: 'http://127.0.0.1:9/ocsp', crl: 'http://127.0.0.1:9/crl' }, intermediate: true });
+    const [leaf, first, top] = reissued.sealChain.map(parseCertificate);
+    const stamper = parseCertificate(reissued.tsaDer);
+    // The same CA re-issued, its certificate expired; the one the seal was validated with is then revoked.
+    const second = parseCertificate(await reissued.reissueIntermediate({ notBefore: new Date(Date.now() - 3 * DAY), notAfter: new Date(Date.now() - 2 * DAY) }));
+    reissued.status.revoke('intermediate');
+    const data = { certs: [derOf(second)], ocsps: [], crls: [(await reissued.status.crl('intermediate'))!, (await reissued.status.crl('root'))!] };
+    // Carried ahead of the first: a status path built from whatever is carried would go through it, and find it good.
+    const checked: CmsCheck = {
+      signer: leaf,
+      certificates: [leaf, second, first, top],
+      signerPath: [first, top],
+      stamper,
+      stamperCertificates: [stamper, second, first],
+      stamperPath: [first, top],
+      sealedAt: new Date(),
+      timestampSerial: '1',
+    };
+    expect(await codeOf(checkValidationData(checked, data, [reissued.rootDer]))).toBe('CERTIFICATE_REVOKED');
+  }, 60_000);
 
   it('a revoked certificate is CERTIFICATE_REVOKED, by OCSP and by CRL', async () => {
     const revoked = await createTestPki({ statusUrls: { ocsp: 'http://127.0.0.1:9/ocsp', crl: 'http://127.0.0.1:9/crl' }, intermediate: true });

@@ -103,6 +103,12 @@ export interface StatusBehaviour {
   certStatus?: 'good' | 'unknown';
   /** An OCSPResponseStatus other than 0, answered with no response at all. */
   responseStatus?: number;
+  /**
+   * What the CRL says it covers, as an issuing distribution point (#144): only
+   * CA or only end-entity certificates, only attribute certificates, or one
+   * distribution point's partition, named by its URL.
+   */
+  crlScope?: { onlyCACerts?: true; onlyUserCerts?: true; onlyAttributeCerts?: true; distributionPoint?: string };
 }
 
 export interface TestStatusAuthority {
@@ -121,6 +127,12 @@ export interface TestPki {
   tsaDer: Uint8Array;
   /** The intermediate CA's certificate, when there is one. */
   intermediateDer: Uint8Array | null;
+  /**
+   * Another certificate for the intermediate CA: the same name and key, its
+   * own serial, signed by the root, as a CA's re-issued or cross-signed
+   * certificate is (#144). Its status is not tied to the first one's.
+   */
+  reissueIntermediate(input?: { notBefore?: Date; notAfter?: Date }): Promise<Uint8Array>;
   status: TestStatusAuthority;
   signer: SealSigner;
   timestamper: Timestamper & {
@@ -218,6 +230,10 @@ export async function createTestPki(
     sealChain: [derOf(seal), ...chainAbove.map(derOf)],
     tsaDer: derOf(tsa),
     intermediateDer: intermediate ? derOf(intermediate) : null,
+    async reissueIntermediate(input = {}) {
+      if (!intermediate || !intermediateKeys) throw new Error('this PKI has no intermediate');
+      return derOf(await issue({ cn: 'Audit Anchor Test Issuing CA', keys: intermediateKeys, issuer: { cert: root, keys: rootKeys }, ca: true, crlUrl: urls && `${urls.crl}/root.crl`, ...input }));
+    },
     status: statusAuthority(cas, { seal, tsa, intermediate }),
     signer,
     timestamper,
@@ -303,6 +319,18 @@ function statusAuthority(cas: { cert: pkijs.Certificate; keys: KeyPair; name: st
       const listed = Object.values(certs).filter((c): c is pkijs.Certificate => !!c && c.issuer.isEqual(ca.cert.subject) && revoked.has(serialHex(c)));
       if (listed.length) {
         crl.revokedCertificates = listed.map((c) => new pkijs.RevokedCertificate({ userCertificate: c.serialNumber, revocationDate: new pkijs.Time({ type: 0, value: revoked.get(serialHex(c))! }) }));
+      }
+      if (b.crlScope) {
+        const s = b.crlScope;
+        const idp = new pkijs.IssuingDistributionPoint({
+          ...(s.distributionPoint ? { distributionPoint: [new pkijs.GeneralName({ type: 6, value: s.distributionPoint })] } : {}),
+          ...(s.onlyUserCerts ? { onlyContainsUserCerts: true } : {}),
+          ...(s.onlyCACerts ? { onlyContainsCACerts: true } : {}),
+          ...(s.onlyAttributeCerts ? { onlyContainsAttributeCerts: true } : {}),
+        });
+        crl.crlExtensions = new pkijs.Extensions({
+          extensions: [new pkijs.Extension({ extnID: '2.5.29.28', critical: true, extnValue: idp.toSchema().toBER(false), parsedValue: idp })],
+        });
       }
       await crl.sign(signer.keys.privateKey, 'SHA-256');
       return new Uint8Array(crl.toSchema(true).toBER(false));

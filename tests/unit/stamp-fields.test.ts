@@ -45,6 +45,17 @@ describe('reading a stamp', () => {
     expect(readStamp(`<rdf:Description rdf:about="" xmlns:z="${STAMP_NAMESPACE}" ${attrs}/>`, {})).toMatchObject({ status: 'FOUND', fields: FIELDS });
   });
 
+  it('reads only the elements in the description that binds the stamp’s namespace, whatever else uses the prefix (#144)', () => {
+    // The original's own XMP binds the prefix to another namespace, with names that happen to match, ahead of the stamp.
+    const theirs = `<rdf:Description rdf:about="" xmlns:auditanchor="urn:example:another-tool"><auditanchor:chainId>1</auditanchor:chainId><auditanchor:recordId>theirs</auditanchor:recordId></rdf:Description>`;
+    const packet = xmpOf(FIELDS).replace('<rdf:Description', `${theirs}<rdf:Description`);
+    expect(readStamp(packet, infoOf(FIELDS))).toEqual({ status: 'FOUND', fields: FIELDS, inXmp: true, inInfo: true });
+    // As attributes too.
+    const attrs = Object.entries(FIELDS).map(([k, v]) => `auditanchor:${k}="${v}"`).join(' ');
+    const asAttributes = `<rdf:RDF><rdf:Description rdf:about="" xmlns:auditanchor="urn:example:another-tool" auditanchor:chainId="1"/><rdf:Description rdf:about="" xmlns:auditanchor="${STAMP_NAMESPACE}" ${attrs}/></rdf:RDF>`;
+    expect(readStamp(asAttributes, {})).toMatchObject({ status: 'FOUND', fields: FIELDS });
+  });
+
   it('refuses a stamp whose sources disagree or whose values are not well formed', () => {
     expect(readStamp(xmpOf(FIELDS), infoOf({ ...FIELDS, recordId: `0x${'ff'.repeat(32)}` }))).toEqual({ status: 'MALFORMED', reason: 'XMP_INFO_DISAGREE' });
     expect(readStamp(xmpOf({ ...FIELDS, contract: FIELDS.contract.toLowerCase() }), {})).toEqual({ status: 'MALFORMED', reason: 'XMP_INVALID' });

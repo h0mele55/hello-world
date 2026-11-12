@@ -67,16 +67,34 @@ const escapeRegExp = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\
  * Reads the stamp fields from an XMP packet, under whatever prefix the packet
  * binds to the namespace, as elements or as attributes. Null when the
  * namespace is absent.
+ *
+ * Only inside the rdf:Description that binds the namespace (#144): an
+ * original's own XMP may bind the same prefix to something else, and its
+ * elements come first.
  */
 function readXmp(xmp: string | null): Record<string, string> | null {
   if (!xmp || !xmp.includes(STAMP_NAMESPACE)) return null;
-  const binding = new RegExp(`xmlns:([A-Za-z_][\\w.-]*)=["']${escapeRegExp(STAMP_NAMESPACE)}["']`).exec(xmp);
-  if (!binding) return {};
-  const prefix = escapeRegExp(binding[1]);
+  const ns = escapeRegExp(STAMP_NAMESPACE);
+  const opening = new RegExp(`<rdf:Description\\b[^>]*?\\sxmlns:([A-Za-z_][\\w.-]*)=["']${ns}["'][^>]*>`).exec(xmp);
+  let prefixName: string;
+  let scope: string;
+  if (opening) {
+    prefixName = opening[1];
+    const selfClosing = opening[0].endsWith('/>');
+    const end = selfClosing ? -1 : xmp.indexOf('</rdf:Description>', opening.index);
+    scope = selfClosing || end < 0 ? opening[0] : xmp.slice(opening.index, end);
+  } else {
+    // Bound somewhere other than a description (another writer's layout): the packet is the scope.
+    const binding = new RegExp(`xmlns:([A-Za-z_][\\w.-]*)=["']${ns}["']`).exec(xmp);
+    if (!binding) return {};
+    prefixName = binding[1];
+    scope = xmp;
+  }
+  const prefix = escapeRegExp(prefixName);
   const found: Record<string, string> = {};
   for (const name of STAMP_FIELD_NAMES) {
-    const element = new RegExp(`<${prefix}:${name}>([^<]*)</${prefix}:${name}>`).exec(xmp);
-    const attribute = new RegExp(`\\s${prefix}:${name}=["']([^"'<]*)["']`).exec(xmp);
+    const element = new RegExp(`<${prefix}:${name}>([^<]*)</${prefix}:${name}>`).exec(scope);
+    const attribute = new RegExp(`\\s${prefix}:${name}=["']([^"'<]*)["']`).exec(scope);
     const value = element?.[1] ?? attribute?.[1];
     if (value !== undefined) found[name] = unescapeXml(value.trim());
   }

@@ -174,13 +174,37 @@ export async function crlStatus(der: Uint8Array, cert: pkijs.Certificate, issuer
   const extensions = crl.crlExtensions?.extensions ?? [];
   if (extensions.some((e) => e.extnID === DELTA_CRL_INDICATOR)) throw refused('a delta CRL alone cannot show a certificate good');
   const scope = extensions.find((e) => e.extnID === ISSUING_DISTRIBUTION_POINT)?.parsedValue as pkijs.IssuingDistributionPoint | undefined;
-  if (scope && (scope.onlySomeReasons !== undefined || scope.indirectCRL)) throw refused('the CRL covers only some revocations');
+  if (scope) scopeCovers(scope, cert);
   current(crl.thisUpdate.value, crl.nextUpdate?.value, at, now, 'the CRL');
   const serial = serialOf(cert);
   if ((crl.revokedCertificates ?? []).some((r) => sameBytes(view(r.userCertificate.valueBlock.valueHexView), serial))) {
     throw new SealError('CERTIFICATE_REVOKED', `${subjectOf(cert)} is revoked`);
   }
   return 'GOOD';
+}
+
+/** Whether a certificate is a CA's: its basic constraints say cA. */
+const isCa = (cert: pkijs.Certificate) => (extension(cert, '2.5.29.19')?.parsedValue as pkijs.BasicConstraints | undefined)?.cA === true;
+
+/**
+ * Refuses a CRL whose issuing distribution point leaves `cert` out (#144):
+ * one that covers only some reasons or other issuers' certificates; only CA
+ * certificates for an end entity, or only end entities for a CA; only
+ * attribute certificates; or a distribution point's partition that is not one
+ * the certificate names. A list that does not cover a certificate cannot show
+ * it good, however the certificate is missing from it.
+ */
+function scopeCovers(scope: pkijs.IssuingDistributionPoint, cert: pkijs.Certificate): void {
+  if (scope.onlySomeReasons !== undefined || scope.indirectCRL) throw refused('the CRL covers only some revocations');
+  if (scope.onlyContainsAttributeCerts) throw refused('the CRL covers only attribute certificates');
+  const ca = isCa(cert);
+  if (scope.onlyContainsCACerts && !ca) throw refused('the CRL covers only CA certificates');
+  if (scope.onlyContainsUserCerts && ca) throw refused('the CRL covers only end-entity certificates');
+  if (scope.distributionPoint !== undefined) {
+    const named = Array.isArray(scope.distributionPoint) ? urisOf(scope.distributionPoint) : [];
+    const own = revocationSources(cert).crl;
+    if (named.length === 0 || !named.some((uri) => own.includes(uri))) throw refused('the CRL is another distribution point’s');
+  }
 }
 
 /**

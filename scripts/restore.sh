@@ -24,7 +24,10 @@ if [ -d "$RESTORE_FILE_STORAGE_DIR" ] && [ -n "$(ls -A "$RESTORE_FILE_STORAGE_DI
   exit 1
 fi
 
-pg_restore --no-owner --no-privileges --exit-on-error --dbname="$url" "$src/db.dump"
+# The client tools of the server's own major version (#184).
+. "$(dirname "$0")/pg-tools.sh"
+pg_tools_for "$url"
+"$PG_BIN/pg_restore" --no-owner --no-privileges --exit-on-error --dbname="$url" "$src/db.dump"
 mkdir -p "$RESTORE_FILE_STORAGE_DIR"
 chmod 700 "$RESTORE_FILE_STORAGE_DIR"
 tar -C "$RESTORE_FILE_STORAGE_DIR" -xf "$src/files.tar"

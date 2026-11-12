@@ -10,6 +10,7 @@ import { manifestHashOf, parseManifest } from '@/lib/manifest';
 import { normaliseText } from '@/lib/opinion/normalise';
 import { open } from '@/lib/sealed';
 import { readStoredFile } from '@/lib/storage';
+import { sweepOrphanFiles } from '@/lib/file-sweep';
 import { confirmOpinion, createEngagement, discardDraft, getVersion, IntakeError, readVersionFile, uploadVersion, type NewEngagement } from '@/lib/reports/intake';
 import { REPORTS } from '../fixtures/pdf/reports';
 import { BUNDLE_OPINIONS, twoReportsPdf } from '../helpers/minimal-pdf';
@@ -278,9 +279,17 @@ describe('discarding a draft', () => {
     const uploaded = await uploadVersion(preparer, { engagementId: engagement.id, reasonCode: 'INITIAL', bytes: fixture('en-unmodified.pdf') });
     await discardDraft(preparer, uploaded.id);
     expect(await prisma.reportVersion.count()).toBe(0);
-    expect(fs.readdirSync(process.env.FILE_STORAGE_DIR!)).toEqual([]);
+    // The file outlives its row (#158): a backup whose dump still names it must find it in the store.
+    const dir = process.env.FILE_STORAGE_DIR!;
+    const orphans = fs.readdirSync(dir);
+    expect(orphans).toHaveLength(1);
 
     const again = await uploadVersion(preparer, { engagementId: engagement.id, reasonCode: 'INITIAL', bytes: fixture('en-unmodified.pdf') });
+    const kept = (await prisma.storedFile.findFirstOrThrow()).path;
+    // The sweep removes only a file no row names, and only once it is older than the grace period.
+    expect(await sweepOrphanFiles({ prisma, dir, olderThanMs: 48 * 3_600_000 })).toEqual({ removed: 0, kept: 1 });
+    expect(await sweepOrphanFiles({ prisma, dir, olderThanMs: 0 })).toEqual({ removed: 1, kept: 0 });
+    expect(fs.readdirSync(dir)).toEqual([kept]);
     await confirmOpinion(preparer, { versionId: again.id, opinionType: 'UNMODIFIED', text: 'x', reportDate: '2026-03-20' });
     await expectIntakeError(discardDraft(preparer, again.id), 'NOT_DRAFT');
   });

@@ -615,6 +615,11 @@ to one inflect-compliance commit.
   PREPARER or ADMIN keeps the list (`manageRecipients`), one live entry per
   lower-cased address (a partial unique index). Removing someone keeps the
   row and cancels what was not yet sent to them.
+- **A delivered notice is recorded as SENT whatever happened meanwhile**
+  (#158). A recipient removed during the send cancelled it, so the mailer
+  then moves it from CANCELLED to SENT, with `cancelledMeanwhile` in
+  `notification.sent`. The log never says "cancelled" for a mail that went
+  out.
 - **Notices are an outbox.** When a version 2 or later becomes COMPLETE, the
   worker queues one `Notification` per live recipient in the same transaction
   (`queueSupersededNotices`, `src/lib/notifications/queue.ts`); when a

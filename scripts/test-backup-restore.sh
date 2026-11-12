@@ -40,6 +40,17 @@ fi
 RESTORE_DATABASE_URL="$restore_url" RESTORE_FILE_STORAGE_DIR="$work/files" scripts/restore.sh "$backup"
 RESTORE_DATABASE_URL="$restore_url" RESTORE_FILE_STORAGE_DIR="$work/files" npx tsx scripts/verify-restore.ts --expect-identical
 
+# A row whose file the restored store lacks is named, not passed (#158).
+first=$(ls "$work/files" | head -1)
+if [ -n "$first" ]; then
+  mv "$work/files/$first" "$work/held-aside"
+  if RESTORE_DATABASE_URL="$restore_url" RESTORE_FILE_STORAGE_DIR="$work/files" npx tsx scripts/verify-restore.ts --expect-identical >"$work/missing.log" 2>&1; then
+    echo "FAIL: a restore missing a file was verified" >&2; exit 1
+  fi
+  grep -q "FILE_MISSING" "$work/missing.log" || { echo "FAIL: the missing file was not named" >&2; cat "$work/missing.log" >&2; exit 1; }
+  mv "$work/held-aside" "$work/files/$first"
+fi
+
 if RESTORE_DATABASE_URL="$restore_url" RESTORE_FILE_STORAGE_DIR="$work/other" scripts/restore.sh "$backup" >/dev/null 2>&1; then
   echo "FAIL: a restore wrote over a database that was not empty" >&2; exit 1
 fi

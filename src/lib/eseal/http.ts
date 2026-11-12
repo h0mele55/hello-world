@@ -50,11 +50,17 @@ export async function post(call: ProviderCall): Promise<ProviderAnswer> {
       method: call.method ?? 'POST',
       headers: call.headers,
       body: call.body === undefined || typeof call.body === 'string' ? call.body : new Uint8Array(call.body),
-      redirect: 'error',
+      // Not followed: a provider is reached at the URL configured for it. 'error' would make a redirect look
+      // like no answer, and the copy would wait on it for ever (#144); 'manual' lets it be refused, for a person.
+      redirect: 'manual',
       signal: AbortSignal.timeout(call.timeoutMs),
     });
   } catch {
     throw new SealError(`${call.side}_UNAVAILABLE`, `${call.url.origin} did not answer`);
+  }
+  // An opaque redirect (a browser's 'manual') has status 0; Node's carries the 3xx itself.
+  if (response.type === 'opaqueredirect' || (response.status >= 300 && response.status < 400)) {
+    throw new SealError(`${call.side}_REFUSED`, `${call.url.origin} answered with a redirect, which is not followed`);
   }
   const body = await readCapped(response, call);
   if (response.status === 429 || response.status >= 500) throw new SealError(`${call.side}_UNAVAILABLE`, `${call.url.origin} answered ${response.status}`);

@@ -70,9 +70,12 @@ export interface CmsCheck {
   signer: pkijs.Certificate;
   /** The certificates the signature carries. */
   certificates: pkijs.Certificate[];
+  /** The certificates above the signer on the path its chain was validated on, up to the trust anchor (#144). */
+  signerPath: pkijs.Certificate[];
   /** The timestamping authority's certificate, and the certificates its token carries. */
   stamper: pkijs.Certificate;
   stamperCertificates: pkijs.Certificate[];
+  stamperPath: pkijs.Certificate[];
   /** The time the timestamping authority vouches for. */
   sealedAt: Date;
   timestampSerial: string;
@@ -132,13 +135,23 @@ export async function checkDetached(der: Uint8Array, content: Uint8Array, trustA
   if (!tst.tsa) throw new SealError('BAD_TIMESTAMP', 'the timestamp names no timestamping authority');
   // The seal certificate must have chained to an anchor, and been valid, when the timestamp says it signed;
   // a wrong time cannot help, since the timestamp's own check below must pass too.
-  await verifyChain(signedData, content, anchors, tst.genTime, 'the seal certificate', 'UNTRUSTED');
+  const sealChain = await verifyChain(signedData, content, anchors, tst.genTime, 'the seal certificate', 'UNTRUSTED');
   // pkijs checks a TSTInfo's imprint against the bytes it is handed: the signature value.
-  const stamper = await verifyChain(tst.signedData, signatureValue, anchors, tst.genTime, 'the timestamp', 'BAD_TIMESTAMP');
+  const stamped = await verifyChain(tst.signedData, signatureValue, anchors, tst.genTime, 'the timestamp', 'BAD_TIMESTAMP');
+  const stamper = stamped.signer;
   if (!hasTimeStampingUsage(stamper)) throw new SealError('BAD_TIMESTAMP', 'the timestamp was not signed by a timestamping authority');
 
   const carried = (data: pkijs.SignedData) => (data.certificates ?? []).filter((c): c is pkijs.Certificate => c instanceof pkijs.Certificate);
-  return { signer, certificates: carried(signedData), stamper, stamperCertificates: carried(tst.signedData), sealedAt: tst.genTime, timestampSerial: tst.serial };
+  return {
+    signer,
+    certificates: carried(signedData),
+    signerPath: sealChain.path,
+    stamper,
+    stamperCertificates: carried(tst.signedData),
+    stamperPath: stamped.path,
+    sealedAt: tst.genTime,
+    timestampSerial: tst.serial,
+  };
 }
 
 /**
@@ -148,13 +161,13 @@ export async function checkDetached(der: Uint8Array, content: Uint8Array, trustA
  */
 export async function checkValidationData(checked: CmsCheck, data: ValidationData, trustAnchors: readonly Uint8Array[], now = new Date()): Promise<void> {
   const anchors = trustAnchors.map(parseCertificate);
-  const pool = [...checked.certificates, ...checked.stamperCertificates, ...data.certs.map(parseCertificate)];
-  for (const leaf of [checked.signer, checked.stamper]) {
-    for (const { cert, issuer } of await chainToAnchor(leaf, pool, anchors)) await statusOf(cert, issuer, data, checked.sealedAt, now);
+  // Along the very path each chain was validated on (#144): a re-issued or cross-signed certificate carried beside it is never the one whose status counts.
+  for (const [leaf, path] of [[checked.signer, checked.signerPath], [checked.stamper, checked.stamperPath]] as const) {
+    for (const { cert, issuer } of await chainToAnchor(leaf, path, anchors)) await statusOf(cert, issuer, data, checked.sealedAt, now);
   }
 }
 
-/** The signer's signature, and its certificate chain to a trust anchor at `at`; returns the signer's certificate. */
+/** The signer's signature, and its certificate chain to a trust anchor at `at`; returns the signer's certificate and the path above it. */
 async function verifyChain(signedData: pkijs.SignedData, content: Uint8Array, anchors: pkijs.Certificate[], at: Date, what: string, code: 'UNTRUSTED' | 'BAD_TIMESTAMP') {
   if (anchors.length === 0) throw new SealError('UNTRUSTED', 'no trust anchors were given');
   const result = await signedData
@@ -163,7 +176,7 @@ async function verifyChain(signedData: pkijs.SignedData, content: Uint8Array, an
   if (result.signatureVerified !== true || result.signerCertificateVerified !== true || !result.signerCertificate) {
     throw new SealError(code, `${what} does not verify, or does not chain to a trusted root at ${at.toISOString()}`);
   }
-  return result.signerCertificate;
+  return { signer: result.signerCertificate, path: result.certificatePath ?? [] };
 }
 
 // ── The seal in the PDF ──

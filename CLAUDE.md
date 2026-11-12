@@ -401,7 +401,9 @@ to one inflect-compliance commit.
   version (`anchorOnly`) is never stamped; it gets a certificate
   (`src/lib/certificate.ts`). Stamping and certificates are deterministic.
 - **Stamps are read with `readStamp`** (`src/lib/stamp-fields.ts`, no Node
-  imports, so the browser verifier can share it). A stamp is a claim; only the
+  imports, so the browser verifier can share it), from the rdf:Description
+  that binds the stamp's namespace only: an original may bind the same prefix
+  to another namespace (#144). A stamp is a claim; only the
   chain says whether the record it names is this file.
 - **The worker runs from the app's directory** (the PDF parser is found from
   there) and needs `FILE_*` and `APP_PUBLIC_URL` besides its chain settings.
@@ -738,7 +740,9 @@ to one inflect-compliance commit.
   (`tsa.ts`, with a fresh nonce, and the token's bytes kept as written). Both
   go through `post` (`http.ts`): HTTPS only (plain HTTP only to loopback, for
   the tests), a timeout and a size cap; no answer, 429 or 5xx is
-  UNAVAILABLE, anything else wrong is REFUSED. A credential that needs a
+  UNAVAILABLE, anything else wrong is REFUSED, a redirect included: it is
+  never followed, and refusing it reaches a person where waiting would not
+  (#144). A credential that needs a
   person for each signature (an OAuth code, a one-time password) is refused.
   Only `scripts/seal-env.ts` reads `CSC_CLIENT_SECRET`, `CSC_PIN` and
   `TSA_PASSWORD` (`tests/unit/key-boundary.test.ts`).
@@ -749,7 +753,11 @@ to one inflect-compliance commit.
   to an anchor and was valid at the timestamp's time, and the timestamp is
   over this signature, signed by a certificate with the timestamping usage
   that also chains to an anchor. For a long-term seal every status it carries
-  is checked again, and it reports `longTerm`. Every failure is a named
+  is checked again, along the very path each chain was validated on
+  (`signerPath`, `stamperPath`; never a re-issued or cross-signed certificate
+  carried beside it, #144), and a CRL counts only for a certificate its scope
+  covers (CA or end-entity only, attribute certificates, another distribution
+  point's partition); it reports `longTerm`. Every failure is a named
   `SealError`.
 - **Tests use a throwaway PKI** (`tests/helpers/test-pki.ts`), made fresh in
   memory, and a stand-in provider on loopback (`tests/helpers/fake-seal-provider.ts`)

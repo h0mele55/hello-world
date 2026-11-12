@@ -129,12 +129,12 @@ export async function validationDataFor(sealed: Uint8Array, trustAnchors: readon
   if (seal.dss) throw new SealError('PDF_REFUSED', 'the file already carries validation data');
   const checked = await checkDetached(seal.cms, seal.content, trustAnchors);
   const anchors = trustAnchors.map(parseCertificate);
-  const pool = [...checked.certificates, ...checked.stamperCertificates];
   const data: ValidationData = { certs: [], ocsps: [], crls: [] };
   const done: Uint8Array[] = [];
   const crls = new Map<string, Promise<Uint8Array>>();
-  for (const leaf of [checked.signer, checked.stamper]) {
-    for (const { cert, issuer } of await chainToAnchor(leaf, pool, anchors)) {
+  // The statuses of the path each chain was validated on, which every reader checks again (#144).
+  for (const [leaf, path] of [[checked.signer, checked.signerPath], [checked.stamper, checked.stamperPath]] as const) {
+    for (const { cert, issuer } of await chainToAnchor(leaf, path, anchors)) {
       addUnique(data.certs, derOf(cert));
       addUnique(data.certs, derOf(issuer));
       // A CA both chains share has its status fetched once.

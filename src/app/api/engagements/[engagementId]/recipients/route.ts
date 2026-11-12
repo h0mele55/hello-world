@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { errorResponse, handler } from '@/lib/http';
+import { errorResponse, handler, readJson } from '@/lib/http';
 import { EMAIL_LOCALES } from '@/lib/notifications/email';
 import { addRecipient } from '@/lib/reports/recipients';
 
@@ -11,7 +11,7 @@ const Body = z.strictObject({
 });
 
 export const POST = handler<{ params: Promise<{ engagementId: string }> }>(async (req, user, ctx) => {
-  const body = Body.safeParse(await req.json().catch(() => null));
+  const body = Body.safeParse(await readJson(req));
   if (!body.success) return errorResponse('INVALID_INPUT');
   const result = await addRecipient(user, { engagementId: (await ctx.params).engagementId, ...body.data });
   return NextResponse.json(result, { status: 201 });

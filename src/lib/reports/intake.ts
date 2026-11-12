@@ -29,6 +29,8 @@ export type IntakeErrorCode =
   | 'PDF_REFUSED'
   | 'DOC_ALREADY_UPLOADED'
   | 'ENGAGEMENT_EXISTS'
+  /** Unique across every firm, held by another one: refused without saying so (#146). */
+  | 'CONFLICT'
   | 'DRAFT_PENDING'
   | 'VERSION_CONFLICT'
   | 'NOT_DRAFT'
@@ -81,28 +83,33 @@ export async function createEngagement(user: SessionUser, input: NewEngagement) 
   }
   const familyId = familyIdOf(serverEnv().ISSUER_FAMILY_SECRET, key);
 
+  try {
+    return await createEngagementRow(user, clientName, country, key, familyId);
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+    // A family id is unique across every firm: only this firm's own engagement is named (#146).
+    const own = await db().engagement.findFirst({ where: { familyId, client: { orgId: user.orgId } }, select: { id: true } });
+    throw new IntakeError(own ? 'ENGAGEMENT_EXISTS' : 'CONFLICT');
+  }
+}
+
+async function createEngagementRow(user: SessionUser, clientName: string, country: string, key: ReturnType<typeof canonicalFamilyKey>, familyId: string) {
   return db().$transaction(async (tx) => {
     // INSERT … ON CONFLICT DO NOTHING, then read: unlike a find-then-create
     // upsert, two requests creating the same new client cannot both insert.
     const clientKey = { orgId: user.orgId, country, registrationNumber: key.registrationNumber };
     await tx.client.createMany({ data: [{ ...clientKey, name: clientName }], skipDuplicates: true });
     const client = await tx.client.findUniqueOrThrow({ where: { orgId_country_registrationNumber: clientKey } });
-    let engagement;
-    try {
-      engagement = await tx.engagement.create({
-        data: {
-          clientId: client.id,
-          engagementRef: key.engagementRef,
-          periodEnd: new Date(`${key.periodEnd}T00:00:00Z`),
-          reportType: key.reportType,
-          familyId,
-          createdById: user.id,
-        },
-      });
-    } catch (error) {
-      if (isUniqueViolation(error)) throw new IntakeError('ENGAGEMENT_EXISTS');
-      throw error;
-    }
+    const engagement = await tx.engagement.create({
+      data: {
+        clientId: client.id,
+        engagementRef: key.engagementRef,
+        periodEnd: new Date(`${key.periodEnd}T00:00:00Z`),
+        reportType: key.reportType,
+        familyId,
+        createdById: user.id,
+      },
+    });
     await appendAuditEvent(tx, {
       orgId: user.orgId,
       actorId: user.id,
@@ -186,8 +193,9 @@ export async function uploadVersion(user: SessionUser, input: { engagementId: st
     if (isUniqueViolation(error)) {
       // The driver adapter does not say which constraint fired, so ask: the
       // same file already stored, or another upload took this version number.
-      const duplicate = await db().reportVersion.findUnique({ where: { docHash }, select: { id: true } });
-      throw new IntakeError(duplicate ? 'DOC_ALREADY_UPLOADED' : 'VERSION_CONFLICT');
+      // A file is unique across every firm: only this firm's own copy is named (#146).
+      const duplicate = await db().reportVersion.findUnique({ where: { docHash }, select: { engagement: { select: { client: { select: { orgId: true } } } } } });
+      throw new IntakeError(!duplicate ? 'VERSION_CONFLICT' : duplicate.engagement.client.orgId === user.orgId ? 'DOC_ALREADY_UPLOADED' : 'CONFLICT');
     }
     throw error;
   }

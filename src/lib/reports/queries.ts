@@ -25,8 +25,17 @@ function view(e: Row) {
 
 export type EngagementView = ReturnType<typeof view>;
 
-/** The user's firm's engagements, newest first, with their versions. */
-export async function listEngagements(user: SessionUser): Promise<EngagementView[]> {
-  const rows = await db().engagement.findMany({ where: { client: { orgId: user.orgId } }, include, orderBy: { createdAt: 'desc' }, take: 200 });
-  return rows.map(view);
+/** How many engagements /reports lists; past them it says so (#146). */
+export const ENGAGEMENT_LIST_CAP = 200;
+
+/** The user's firm's engagements, newest first, with their versions, and whether more were left out. */
+export async function listEngagements(user: SessionUser): Promise<{ engagements: EngagementView[]; truncated: boolean }> {
+  const rows = await db().engagement.findMany({
+    where: { client: { orgId: user.orgId } },
+    include,
+    orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+    // One past the cap, so a cut list is a fact the page holds, not a guess.
+    take: ENGAGEMENT_LIST_CAP + 1,
+  });
+  return { engagements: rows.slice(0, ENGAGEMENT_LIST_CAP).map(view), truncated: rows.length > ENGAGEMENT_LIST_CAP };
 }

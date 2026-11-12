@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { errorResponse, handler } from '@/lib/http';
+import { errorResponse, handler, readJson } from '@/lib/http';
 import { confirmOpinion } from '@/lib/reports/intake';
 
 const Body = z.strictObject({
@@ -14,7 +14,7 @@ const Body = z.strictObject({
 });
 
 export const POST = handler<{ params: Promise<{ versionId: string }> }>(async (req, user, ctx) => {
-  const body = Body.safeParse(await req.json().catch(() => null));
+  const body = Body.safeParse(await readJson(req));
   if (!body.success) return errorResponse('INVALID_INPUT');
   const { opinionType, text, reportDate, candidate } = body.data;
   const result = await confirmOpinion(user, { versionId: (await ctx.params).versionId, opinionType, text, reportDate, candidate });

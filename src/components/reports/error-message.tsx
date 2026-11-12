@@ -3,7 +3,7 @@
 import { useTranslations } from 'next-intl';
 import type { ApiError } from './api-error';
 
-const KNOWN_ERRORS = new Set([
+export const KNOWN_ERRORS = new Set([
   'UNAUTHENTICATED',
   'FORBIDDEN',
   'CROSS_ORIGIN',
@@ -36,6 +36,12 @@ const KNOWN_ERRORS = new Set([
   'NOT_REQUESTED',
   'COPY_IN_FLIGHT',
   'ALREADY_REVIEWED',
+  'CONFLICT',
+  'MFA_REQUIRED',
+  'RATE_LIMITED',
+  'ALREADY_ENABLED',
+  'NO_SETUP_IN_PROGRESS',
+  'CODE_INVALID',
   'INTERNAL',
 ]);
 const KNOWN_REFUSALS = new Set(['NOT_A_PDF', 'TRUNCATED', 'TOO_LARGE', 'TOO_MANY_PAGES', 'TOO_MUCH_TEXT', 'ENCRYPTED', 'UNPARSEABLE', 'TIMEOUT', 'RESOURCE_LIMIT', 'PARSER_CRASHED']);

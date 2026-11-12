@@ -41,6 +41,7 @@ export type AuditAction =
   | 'anchor.failed'
   | 'anchor.copy_requeued'
   | 'anchor.nonce_released'
+  | 'anchor.mismatch_released'
   | 'version.stamped'
   | 'version.certified'
   | 'mfa.enabled'
@@ -73,7 +74,8 @@ export type AuditAction =
   | 'audit_head.indeterminate'
   | 'audit_head.final'
   | 'audit_head.failed'
-  | 'audit_head.nonce_released';
+  | 'audit_head.nonce_released'
+  | 'audit_head.mismatch_released';
 
 export interface AuditEventInput {
   orgId: string;

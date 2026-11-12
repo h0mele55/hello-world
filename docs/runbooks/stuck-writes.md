@@ -74,6 +74,39 @@ and the version waits for approval again. It refuses, by name, anything else:
 | `OPERATOR_NOT_APPROVER` | `--operator` is not an approver of the firm. |
 | `SEND_REJECTED`, `SEND_UNKNOWN` | The transfer was refused, or its outcome is unknown: the worker reads it next pass. |
 
+`--operator` names the approver who decided; it is not a sign-in. The audit
+log records it as named at the command line (`namedOperatorId`), not as the
+event's actor. Access to the issuer key and the database is what limits who
+can run this.
+
+### `RECORD_MISMATCH`
+
+The write's transaction is final and succeeded, but the record it made is not
+the one the journal says it sent (another parent, block, issuer or document;
+for an audit-log head, no event naming the head). The worker holds it, and
+the issuer key with it, on every pass (`held for a person: the record does not
+match the write`), because what it means is a person's call. Find out why:
+
+- Read the transaction and the record in the explorer and compare them with
+  the row (`parentId`, `recordId`, `blockNumber`, `auditHead`).
+- A record written by a stolen key, or a deployment that is not the build's,
+  is a different incident: see [stolen-issuer-key.md](stolen-issuer-key.md).
+- A chain whose block numbers the registry reads wrongly was #138.
+
+Once you know, an approver releases it. This needs only `DATABASE_URL` and
+sends nothing:
+
+```sh
+npx tsx scripts/settle-write.ts <chainWriteId> --operator <approver email> --release-mismatch
+```
+
+The worker then reads the receipt and the record again on both endpoints at
+an agreed finalized block. If they now match, the write is FINAL as usual. If
+they still do not, it is FAILED with `RECORD_MISMATCH_RESOLVED`, keeping its
+nonce and hash (its transaction used them), and the key is free: an anchor or
+a revocation waits for approval again. It refuses `NOT_RECORD_MISMATCH` for any
+other row, and `OPERATOR_NOT_APPROVER` for anyone but an approver of the firm.
+
 ## FAILED
 
 A FAILED row stays failed, with its reason in `error` and on the version page:

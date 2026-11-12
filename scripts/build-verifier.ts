@@ -16,8 +16,9 @@
  * REANCHOR_ARCHIVES, when set, lists the re-anchor archives or proofs of the
  * registries this one replaced (#65); both outputs carry them, so a file
  * anchored on a retired chain verifies with no server and that chain gone
- * (#126). Each must hold together and have its root on this registry, or the
- * build is refused.
+ * (#126). Each must hold together and name this registry as the one its root
+ * is recorded on, or the build is refused; whether the root is recorded there,
+ * and not voided, is read on chain by the verifier each time it uses one.
  *
  * CHECKPOINTS, when set, lists the monthly checkpoints the issuer exported and
  * published (#122, `npm run checkpoint -- --export`). The CLI is built to

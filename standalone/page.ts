@@ -257,7 +257,11 @@ function renderStatic() {
   renderVerdict();
 }
 
+/** Counts checks started, so one that ends after a later one began shows nothing (#143). */
+let started = 0;
+
 async function check(file: File) {
+  const run = ++started;
   last = null;
   renderVerdict();
   $('status').textContent = t('checking', { name: file.name });
@@ -276,6 +280,8 @@ async function check(file: File) {
   } catch {
     verdict = { kind: 'CANNOT_VERIFY', reason: 'UNEXPECTED' };
   }
+  // A file dropped while this one was checked has replaced it: its verdict is the one shown.
+  if (run !== started) return;
   $('status').textContent = '';
   const copy = 'matched' in verdict && verdict.matched.kind === 'DISTRIBUTION_COPY';
   const current: Checked = { name: file.name, verdict, reanchored, stamp: 'matched' in verdict && setup.appUrl ? 'CHECKING' : undefined, seal: copy ? 'CHECKING' : undefined };

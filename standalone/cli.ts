@@ -4,7 +4,7 @@ import { parseArgs } from 'node:util';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { bitcoinTimestampFor, CannotVerify, checkReanchorSet, defaultExplorers, issuerProofFetcher, openRegistryView, readDocument, verifyWithReanchors, type CheckedSet, type PdfjsLike } from '@/lib/verify-core';
 import { certificatesFromPem, sealStatusFor } from '@/lib/verify-core/seal';
-import { rootsOf, setupFromDeployment, StandaloneSetupSchema, verdictJson, type StandaloneSetup } from './config';
+import { rootsOf, rpcUrlsRefusal, setupFromDeployment, type StandaloneSetup, StandaloneSetupSchema, verdictJson } from './config';
 
 /**
  * verify-report: the verifier as a command, with the same verify-core the
@@ -55,11 +55,16 @@ function setupOf(values: { deployment?: string; rpc?: string[]; 'app-url'?: stri
   const appUrl = values['app-url']?.replace(/\/+$/, '');
   if (values.deployment || values.rpc) {
     if (!values.deployment || values.rpc?.length !== 2) usage('--deployment and two --rpc endpoints go together');
+    let setup: StandaloneSetup;
     try {
-      return setupFromDeployment(JSON.parse(fs.readFileSync(values.deployment, 'utf8')), [values.rpc[0], values.rpc[1]], appUrl ?? null);
+      setup = setupFromDeployment(JSON.parse(fs.readFileSync(values.deployment, 'utf8')), [values.rpc[0], values.rpc[1]], appUrl ?? null);
     } catch {
       usage(`${values.deployment} is not a readable deployment record, or an --rpc or --app-url value is not a URL`);
     }
+    // The same rule as /verify (#143): off a local chain, two https endpoints on different hosts.
+    const refusal = rpcUrlsRefusal(setup.chainId, setup.rpcUrls);
+    if (refusal) usage(refusal);
+    return setup;
   }
   if (!__VERIFIER_SETUP__) usage('this build carries no registry settings; give --deployment and two --rpc endpoints');
   try {

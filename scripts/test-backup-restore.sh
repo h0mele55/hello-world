@@ -28,6 +28,16 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 psql "$source_url" -qc "DROP DATABASE IF EXISTS \"$restore_db\"" -c "CREATE DATABASE \"$restore_db\""
 
+# Client tools of another major version on PATH (#184): the server's own are used
+# when installed, and without them the backup is refused, naming what to install.
+mkdir -p "$work/other-client"
+printf '#!/bin/sh\necho "pg_dump (PostgreSQL) 99.0"\n' > "$work/other-client/pg_dump"
+chmod +x "$work/other-client/pg_dump"
+if PATH="$work/other-client:$PATH" PG_LIB_DIR="$work/nowhere" BACKUP_DIR="$work/refused" scripts/backup.sh >/dev/null 2>"$work/refused.log"; then
+  echo "FAIL: a backup ran with client tools of another major version" >&2; exit 1
+fi
+grep -q 'install postgresql-client-' "$work/refused.log" || { echo "FAIL: the refusal does not name the client to install" >&2; cat "$work/refused.log" >&2; exit 1; }
+
 backup=$(BACKUP_DIR="$work/backups" scripts/backup.sh)
 echo "backed up to $backup"
 

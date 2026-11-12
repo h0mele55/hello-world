@@ -37,6 +37,7 @@ import path from 'node:path';
 import { build } from 'esbuild';
 import { EXPLORER_ORIGINS } from '../src/lib/ots/explorers';
 import { checkpointDigestOf, checkReanchorSet } from '../src/lib/verify-core/reanchor';
+import { certificatesFromPem } from '../src/lib/verify-core/seal';
 import { reanchorArchivesOf, verifierSetupFromEnv } from '../src/lib/verify-setup';
 import type { StandaloneSetup } from '../standalone/config';
 
@@ -101,6 +102,15 @@ async function main() {
     process.exit(1);
   }
   const result = verifierSetupFromEnv();
+  if (!result.ok && result.reason === 'SEAL_ROOTS_INVALID') refuse('SEAL_TRUST_ANCHORS is set, but its file cannot be read or holds no certificate.');
+  // Every block parsed as a certificate, not only shaped like one (#157): a published file that can check no seal is never built.
+  if (result.ok && process.env.SEAL_TRUST_ANCHORS) {
+    try {
+      certificatesFromPem(fs.readFileSync(process.env.SEAL_TRUST_ANCHORS, 'utf8'));
+    } catch (error) {
+      refuse(`SEAL_TRUST_ANCHORS holds a block that is not a certificate: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   const network = result.ok ? result.setup.network : null;
   const setup: StandaloneSetup | null = result.ok
     ? {

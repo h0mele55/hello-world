@@ -435,7 +435,8 @@
       "DEPLOYMENT_UNAVAILABLE": "The registry's deployment record is missing or does not match this build.",
       "RPC_URLS_MISSING": "VERIFY_RPC_URL_1 and VERIFY_RPC_URL_2 must both be set.",
       "RPC_URLS_INVALID": "The verifier's RPC endpoints must be https URLs without credentials.",
-      "RPC_URLS_NOT_INDEPENDENT": "The verifier's two RPC endpoints must be on different hosts."
+      "RPC_URLS_NOT_INDEPENDENT": "The verifier's two RPC endpoints must be on different hosts.",
+      "SEAL_ROOTS_INVALID": "SEAL_TRUST_ANCHORS is set, but its file cannot be read or holds no valid certificate."
     },
     "verdict": {
       "AUTHENTIC_LATEST": {

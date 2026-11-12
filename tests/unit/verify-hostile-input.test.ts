@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { normaliseText } from '@/lib/opinion/normalise';
 import { readDocument, type PdfjsLike } from '@/lib/verify-core/document';
@@ -98,5 +100,27 @@ describe('the CLI’s endpoints (#143)', () => {
     }
     expect(thrown).toBeInstanceOf(CannotVerify);
     expect((thrown as Error).message).toMatch(/not base64/);
+  });
+});
+
+describe('the CLI’s baked re-anchor archives (#157)', () => {
+  const baked = { chainId: 11155111, registry: '0x87ba96d1d48e280429a8ead1059334c34507c31f' as const };
+  it('are used whenever the registry in use is the one they were baked for, however it was given', async () => {
+    const { bakedSetsApply } = await import('../../standalone/config');
+    // The baked settings themselves, or the same deployment given with the user's own endpoints.
+    expect(bakedSetsApply(baked, baked, 2)).toBe(true);
+    expect(bakedSetsApply(baked, { chainId: baked.chainId, registry: '0x87BA96D1D48E280429A8EAD1059334C34507C31F' }, 2)).toBe(true);
+    // Another registry's roots are not recorded there: the sets would only be refused.
+    expect(bakedSetsApply(baked, { chainId: baked.chainId, registry: `0x${'1'.repeat(40)}` }, 2)).toBe(false);
+    expect(bakedSetsApply(baked, { chainId: 1, registry: baked.registry }, 2)).toBe(false);
+    // Nothing baked, or no baked registry: nothing to use.
+    expect(bakedSetsApply(baked, baked, 0)).toBe(false);
+    expect(bakedSetsApply(null, baked, 2)).toBe(false);
+  });
+
+  it('is how the CLI decides it, not by whether --deployment was given', () => {
+    const cli = fs.readFileSync(path.join(import.meta.dirname, '..', '..', 'standalone', 'cli.ts'), 'utf8');
+    expect(cli).toContain('bakedSetsApply(__VERIFIER_SETUP__, setup, __REANCHOR_SETS__.length)');
+    expect(cli).not.toMatch(/!parsed\.values\.deployment && __REANCHOR_SETS__/);
   });
 });

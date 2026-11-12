@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { requestRevocation } from '@/lib/anchoring/revocation';
-import { errorResponse, handler } from '@/lib/http';
+import { errorResponse, handler, readJson } from '@/lib/http';
 import { REVOCATION_REASONS } from '@/lib/revocation-reasons';
 
 const Body = z.strictObject({
@@ -12,7 +12,7 @@ const Body = z.strictObject({
 });
 
 export const POST = handler<{ params: Promise<{ versionId: string }> }>(async (req, user, ctx) => {
-  const body = Body.safeParse(await req.json().catch(() => null));
+  const body = Body.safeParse(await readJson(req));
   if (!body.success) return errorResponse('INVALID_INPUT');
   const result = await requestRevocation(user, { versionId: (await ctx.params).versionId, ...body.data });
   return NextResponse.json(result, { status: 201 });

@@ -292,8 +292,17 @@ to one inflect-compliance commit.
   page in parallel, so a layout's check does not protect the page. Route
   handlers wrap in `handler()` (`src/lib/http.ts`), which also refuses a
   cross-origin write and turns an `IntakeError` into a status and a code.
+  A route reads JSON with `readJson(req)` (64 KiB at most, however it is
+  sent), never `req.json()`, and serves a PDF with `pdfResponse` (an
+  attachment, sandboxed, nosniff, no-store), never by hand; every code a
+  route can answer has words in `errors.*` in both languages
+  (`tests/unit/http.test.ts` holds all three, #146).
 - **Use cases scope every query to the caller's firm** (`orgId`) and check the
-  role. A record from another firm is `NOT_FOUND`, never `FORBIDDEN`.
+  role. A record from another firm is `NOT_FOUND`, never `FORBIDDEN`. A
+  value unique across every firm (a file's `docHash`, an engagement's
+  `familyId`) is named as a duplicate only within the firm; another firm's is
+  a generic `CONFLICT` (#146). A list that loads at most N rows reads N + 1
+  and says when it was cut.
 - **Confidential data is sealed, never stored in clear**: use `seal`/`open`
   from `src/lib/sealed.ts` with a context naming the row and field, and
   `storeFile`/`readStoredFile` for PDFs. Never log a file, an opinion or a

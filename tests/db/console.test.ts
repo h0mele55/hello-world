@@ -11,6 +11,7 @@ import { appendAuditEvent } from '@/lib/audit';
 import { anchorsPerMonth, lookupsPerDay, writesByStatus } from '@/lib/console/dashboard';
 import { CLIENT_LIST_CAP, getClient, getEngagementTimeline, listClients } from '@/lib/console/queries';
 import { recordLookup } from '@/lib/lookups';
+import { ENGAGEMENT_LIST_CAP, listEngagements } from '@/lib/reports/queries';
 import { confirmOpinion, createEngagement, uploadVersion, type NewEngagement } from '@/lib/reports/intake';
 
 /**
@@ -99,6 +100,28 @@ describe('the client list', () => {
     expect(truncated).toBe(true);
     expect(clients).toHaveLength(CLIENT_LIST_CAP);
     expect(clients.at(-1)!.name).toBe(`Client ${String(CLIENT_LIST_CAP - 1).padStart(4, '0')}`);
+  });
+
+  it('says when the engagement list is cut at its cap, newest first (#146)', async () => {
+    const client = await prisma.client.create({ data: { orgId, name: 'Example Manufacturing AD', registrationNumber: '123456789', country: 'BG' } });
+    await prisma.engagement.createMany({
+      data: Array.from({ length: ENGAGEMENT_LIST_CAP + 1 }, (_, i) => ({
+        clientId: client.id,
+        engagementRef: `ENG-${String(i).padStart(4, '0')}`,
+        periodEnd: new Date('2025-12-31T00:00:00Z'),
+        reportType: 'STANDALONE' as const,
+        familyId: `0x${i.toString(16).padStart(64, '0')}`,
+        createdById: preparer.id,
+        createdAt: new Date(Date.UTC(2026, 0, 1) + i * 60_000),
+      })),
+    });
+    const { engagements, truncated } = await listEngagements(preparer);
+    expect(truncated).toBe(true);
+    expect(engagements).toHaveLength(ENGAGEMENT_LIST_CAP);
+    expect(engagements[0].engagementRef).toBe(`ENG-${String(ENGAGEMENT_LIST_CAP).padStart(4, '0')}`);
+    // One fewer, and nothing was left out.
+    await prisma.engagement.deleteMany({ where: { engagementRef: 'ENG-0000' } });
+    expect((await listEngagements(preparer)).truncated).toBe(false);
   });
 
   it('reads another firm’s client as absent, and lists a client’s engagements with their latest version', async () => {

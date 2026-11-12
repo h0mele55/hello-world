@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { p256 } from '@noble/curves/nist';
+import { p256 } from '@noble/curves/nist.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { cscSigner, ecdsaDer, providerEcdsaDer, type CscConfig } from '@/lib/eseal/csc';
 import { post, providerUrl } from '@/lib/eseal/http';
@@ -85,21 +85,21 @@ describe('sealing through a CSC v2 service and an RFC 3161 authority', () => {
       const sealed = await seal(csc(ecProvider), tsa(ecProvider));
       await checkSeal(sealed, [ec.rootDer], stamped);
     }
-    const signature = p256.sign(new Uint8Array(32).fill(9), p256.utils.randomPrivateKey());
-    expect(Buffer.from(ecdsaDer(signature.toCompactRawBytes())).equals(Buffer.from(signature.toDERRawBytes()))).toBe(true);
+    const signature = p256.Signature.fromBytes(p256.sign(new Uint8Array(32).fill(9), p256.utils.randomSecretKey(), { prehash: false }), 'compact');
+    expect(Buffer.from(ecdsaDer(signature.toBytes('compact'))).equals(Buffer.from(signature.toBytes('der')))).toBe(true);
   });
 
   it('reads r ‖ s as r ‖ s even when r begins with 0x30, the first byte of DER (#181)', () => {
-    const key = p256.utils.randomPrivateKey();
+    const key = p256.utils.randomSecretKey();
     const digest = (i: number) => new Uint8Array(32).map((_, j) => (j < 4 ? (i >>> (8 * j)) & 0xff : 7));
     let thirties = 0;
     for (let i = 0; i < 20_000 && thirties < 5; i++) {
-      const signature = p256.sign(digest(i), key);
-      const der = signature.toDERRawBytes();
+      const signature = p256.Signature.fromBytes(p256.sign(digest(i), key, { prehash: false }), 'compact');
+      const der = signature.toBytes('der');
       // Either encoding comes out as the one DER.
       expect(Buffer.from(providerEcdsaDer(der)).equals(Buffer.from(der))).toBe(true);
-      expect(Buffer.from(providerEcdsaDer(signature.toCompactRawBytes())).equals(Buffer.from(der)), `signature ${i}`).toBe(true);
-      if (signature.toCompactRawBytes()[0] === 0x30) thirties += 1;
+      expect(Buffer.from(providerEcdsaDer(signature.toBytes('compact'))).equals(Buffer.from(der)), `signature ${i}`).toBe(true);
+      if (signature.toBytes('compact')[0] === 0x30) thirties += 1;
     }
     expect(thirties).toBe(5);
     // Neither DER nor an even-length r ‖ s: refused, never passed on.

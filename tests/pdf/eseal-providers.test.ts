@@ -1,9 +1,10 @@
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import { p256 } from '@noble/curves/nist';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { cscSigner, ecdsaDer, type CscConfig } from '@/lib/eseal/csc';
-import { providerUrl } from '@/lib/eseal/http';
+import { post, providerUrl } from '@/lib/eseal/http';
 import { checkSeal, sealPdf } from '@/lib/eseal/pades';
 import { rfc3161Timestamper } from '@/lib/eseal/tsa';
 import { SealError, type SealSigner, type Timestamper } from '@/lib/eseal/types';
@@ -124,6 +125,19 @@ describe('sealing through a CSC v2 service and an RFC 3161 authority', () => {
       expect(await codeOf(seal(csc(provider), tsa(provider)))).toBe(code);
     }
     provider.behaviour = { authMode: 'implicit' };
+  });
+
+  it('refuses, for a person, a provider that redirects, rather than waits on it for ever (#144)', async () => {
+    const server = http.createServer((_, res) => res.writeHead(302, { location: 'https://elsewhere.example/tsa' }).end());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const url = new URL(`http://127.0.0.1:${(server.address() as { port: number }).port}/tsa`);
+    try {
+      for (const side of ['SIGNER', 'TIMESTAMP', 'REVOCATION'] as const) {
+        expect(await codeOf(post({ url, headers: {}, side, timeoutMs: 5_000, maxBytes: 1_000, fetch }))).toBe(`${side}_REFUSED`);
+      }
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it('asks the authority for a policy, and holds the token to it', async () => {

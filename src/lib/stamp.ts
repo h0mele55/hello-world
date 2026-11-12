@@ -1,5 +1,6 @@
-import { decodePDFRawStream, EncryptedPDFError, PDFDict, PDFDocument, PDFName, PDFRawStream, PDFString } from '@cantoo/pdf-lib';
 import { docHashOf } from './commitments';
+import { editPdf } from './pdf/edit';
+import type { IsolationLimits } from './pdf/isolated';
 import { parsePdf } from './pdf/parse';
 import { infoKeyOf, INFO_KEY_PREFIX, readStamp, STAMP_FIELD_NAMES, STAMP_NAMESPACE, STAMP_PREFIX, stampValues, type StampFields } from './stamp-fields';
 
@@ -13,11 +14,15 @@ import { infoKeyOf, INFO_KEY_PREFIX, readStamp, STAMP_FIELD_NAMES, STAMP_NAMESPA
  * Stamping is deterministic: the same original and fields give the same
  * bytes, so a retry produces the same copy (the registry allows one copy per
  * original). A signed or edit-protected file is never stamped (#74).
+ *
+ * pdf-lib reads the original in an isolated child (src/lib/pdf/edit.ts,
+ * #154), never in the worker: a file that inflates past the child's memory
+ * or time is RESOURCE_LIMIT, for a person to look at.
  */
 
 export class StampError extends Error {
   constructor(
-    readonly code: 'ENCRYPTED' | 'ALREADY_STAMPED' | 'NOT_INCREMENTAL' | 'UNREADABLE',
+    readonly code: 'ENCRYPTED' | 'ALREADY_STAMPED' | 'NOT_INCREMENTAL' | 'UNREADABLE' | 'RESOURCE_LIMIT',
     message: string,
   ) {
     super(message);
@@ -42,55 +47,31 @@ function freshPacket(description: string): string {
   );
 }
 
-/** The document's current XMP packet as text, or null when absent or unreadable. */
-function existingXmp(doc: PDFDocument): string | null {
-  try {
-    const stream = doc.catalog.lookup(PDFName.of('Metadata'));
-    if (!(stream instanceof PDFRawStream)) return null;
-    return new TextDecoder('utf-8', { fatal: true }).decode(decodePDFRawStream(stream).decode());
-  } catch {
-    return null;
-  }
-}
+const STAMP_ERRORS: Record<string, string> = {
+  ENCRYPTED: 'an encrypted PDF is anchored as it is, never stamped',
+  ALREADY_STAMPED: 'the PDF already carries an anchor stamp',
+  UNREADABLE: 'the PDF could not be opened for stamping',
+  RESOURCE_LIMIT: 'the PDF needs more memory or time to open than a report should',
+  NOT_INCREMENTAL: 'the stamped file does not begin with the original',
+};
 
-/** The trailer's Info dictionary, created when the document has none. */
-function infoDictOf(doc: PDFDocument): PDFDict {
-  const existing = doc.context.lookup(doc.context.trailerInfo.Info);
-  if (existing instanceof PDFDict) return existing;
-  const created = doc.context.obj({});
-  doc.context.trailerInfo.Info = doc.context.register(created);
-  return created;
-}
-
-export async function stampPdf(original: Uint8Array, fields: StampFields): Promise<Uint8Array> {
+export async function stampPdf(original: Uint8Array, fields: StampFields, limits: Partial<IsolationLimits> = {}): Promise<Uint8Array> {
   const values = stampValues(fields);
-  let doc: PDFDocument;
-  try {
-    doc = await PDFDocument.load(original, { forIncrementalUpdate: true, updateMetadata: false });
-  } catch (error) {
-    if (error instanceof EncryptedPDFError) throw new StampError('ENCRYPTED', 'an encrypted PDF is anchored as it is, never stamped');
-    throw new StampError('UNREADABLE', 'the PDF could not be opened for stamping');
-  }
-  if (doc.isEncrypted) throw new StampError('ENCRYPTED', 'an encrypted PDF is anchored as it is, never stamped');
-
-  const xmp = existingXmp(doc);
-  const info = infoDictOf(doc);
-  const alreadyStamped = (xmp?.includes(STAMP_NAMESPACE) ?? false) || info.keys().some((key) => key.decodeText().startsWith(INFO_KEY_PREFIX));
-  if (alreadyStamped) throw new StampError('ALREADY_STAMPED', 'the PDF already carries an anchor stamp');
-
-  // Keep the document's own XMP when it can be extended in one place;
-  // otherwise write a fresh packet (the old one stays in the original bytes).
   const description = descriptionOf(values);
-  const merged = xmp && xmp.split('</rdf:RDF>').length === 2 ? xmp.replace('</rdf:RDF>', `${description}</rdf:RDF>`) : freshPacket(description);
-  const metadata = doc.context.stream(new TextEncoder().encode(merged), { Type: 'Metadata', Subtype: 'XML' });
-  doc.catalog.set(PDFName.of('Metadata'), doc.context.register(metadata));
-  for (const [name, value] of values) info.set(PDFName.of(infoKeyOf(name as keyof StampFields)), PDFString.of(value));
-
-  const stamped = await doc.commit();
-  if (stamped.length <= original.length || !Buffer.from(stamped.subarray(0, original.length)).equals(Buffer.from(original))) {
-    throw new StampError('NOT_INCREMENTAL', 'the stamped file does not begin with the original');
-  }
-  return stamped;
+  const edited = await editPdf(
+    original,
+    {
+      kind: 'stamp',
+      namespace: STAMP_NAMESPACE,
+      infoKeyPrefix: INFO_KEY_PREFIX,
+      description,
+      freshPacket: freshPacket(description),
+      info: values.map(([name, value]) => [infoKeyOf(name as keyof StampFields), value]),
+    },
+    limits,
+  );
+  if (!edited.ok) throw new StampError(edited.code, STAMP_ERRORS[edited.code]);
+  return edited.bytes;
 }
 
 export type StampCheck = { ok: true; docHash: `0x${string}` } | { ok: false; reason: string };

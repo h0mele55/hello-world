@@ -250,8 +250,17 @@ to one inflect-compliance commit.
 ## PDFs, the opinion and the commitments
 
 - **Never parse an untrusted PDF in the server process.** Call
-  `parsePdf` (`src/lib/pdf/parse.ts`), which forks `parse-child.mjs` with a
-  heap cap and a timeout and returns a parsed PDF or a named refusal.
+  `parsePdf` (`src/lib/pdf/parse.ts`), which runs `parse-child.mjs`, and
+  `editPdf` (`src/lib/pdf/edit.ts`), which runs `edit-child.mjs`, for every
+  pdf-lib load of a stored PDF (stamping, the seal's signature field). Both go
+  through `runIsolated` (`src/lib/pdf/isolated.ts`, #154), the only place the
+  server forks: a heap cap, a cap on the child's whole memory (pdf-lib inflates
+  every object stream, referenced or not, and the heap cap does not count
+  ArrayBuffers), a timeout, an empty environment (no key, credential or
+  database URL), and at most `ISOLATED_CONCURRENCY` children at once. Each
+  returns a result or a named refusal. Signing stays in the worker, over the
+  digest. `tests/pdf/isolation.test.ts` refuses a `fork(` or a
+  `PDFDocument.load(` anywhere else.
 - **What a commitment means is versioned.** `normaliseText`, `joinLines`,
   `dropRunningLines` and the commitment encodings are normaliser v1 and
   manifest schema 1. A change that moves any value in

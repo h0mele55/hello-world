@@ -1,4 +1,5 @@
-import { PDFArray, PDFDocument, PDFHexString, PDFName, PDFNumber, PDFString } from '@cantoo/pdf-lib';
+import { editPdf } from '../pdf/edit';
+import type { IsolationLimits } from '../pdf/isolated';
 import { sha256, signDetached } from './cms';
 import { SealError, type SealSigner, type Timestamper } from './types';
 
@@ -12,6 +13,10 @@ import { SealError, type SealSigner, type Timestamper } from './types';
  *
  * Sealing is not deterministic (the time is the timestamping authority's), so
  * a sealed copy is made once and kept; a retry anchors the kept file.
+ *
+ * pdf-lib writes the signature field in an isolated child (src/lib/pdf/edit.ts,
+ * #154); the worker only fills in the byte range and the signature over the
+ * digest.
  */
 
 /** Space reserved for the CMS signature: a chain of three and a timestamp fit with room to spare. */
@@ -32,53 +37,22 @@ export interface SealOptions {
   signingTime: Date;
   /** Shown by PDF readers as the reason for the signature. */
   reason: string;
+  /** The isolated child's limits, for tests. */
+  limits?: Partial<IsolationLimits>;
 }
 
 export async function sealPdf(stamped: Uint8Array, options: SealOptions): Promise<Uint8Array> {
-  let doc: PDFDocument;
-  try {
-    doc = await PDFDocument.load(stamped, { forIncrementalUpdate: true, updateMetadata: false });
-  } catch {
-    throw new SealError('PDF_REFUSED', 'the PDF could not be opened for sealing');
-  }
-  if (doc.isEncrypted) throw new SealError('PDF_REFUSED', 'an encrypted PDF is never sealed');
   if (ascii(stamped).includes('/ByteRange')) throw new SealError('PDF_REFUSED', 'the PDF already carries a signature');
-
-  const ctx = doc.context;
-  const byteRange = PDFArray.withContext(ctx);
-  for (const n of [0, PLACEHOLDER, PLACEHOLDER, PLACEHOLDER]) byteRange.push(PDFNumber.of(n));
-  const signature = ctx.obj({
-    Type: 'Sig',
-    Filter: 'Adobe.PPKLite',
-    SubFilter: 'ETSI.CAdES.detached',
-    ByteRange: byteRange,
-    Contents: PDFHexString.of('0'.repeat(SEAL_CONTENTS_BYTES * 2)),
-    M: PDFString.of(pdfDate(options.signingTime)),
-    Reason: PDFHexString.fromText(options.reason),
-  });
-  const signatureRef = ctx.register(signature);
-  const page = doc.getPage(0);
-  // An invisible signature field: the seal changes nothing a reader sees on the pages.
-  const widget = ctx.obj({
-    Type: 'Annot',
-    Subtype: 'Widget',
-    FT: 'Sig',
-    T: PDFString.of(FIELD_NAME),
-    V: signatureRef,
-    Rect: [0, 0, 0, 0],
-    F: 132,
-    P: page.ref,
-  });
-  const widgetRef = ctx.register(widget);
-  page.node.addAnnot(widgetRef);
-  const form = doc.catalog.getOrCreateAcroForm();
-  form.addField(widgetRef);
-  form.dict.set(PDFName.of('SigFlags'), PDFNumber.of(3));
-
-  const prepared = new Uint8Array(await doc.commit());
-  if (prepared.length <= stamped.length || !Buffer.from(prepared.subarray(0, stamped.length)).equals(Buffer.from(stamped))) {
-    throw new SealError('PDF_REFUSED', 'the sealed file does not begin with the stamped file');
+  const edited = await editPdf(
+    stamped,
+    { kind: 'prepareSeal', placeholder: PLACEHOLDER, contentsBytes: SEAL_CONTENTS_BYTES, signingTime: pdfDate(options.signingTime), reason: options.reason, fieldName: FIELD_NAME },
+    options.limits,
+  );
+  if (!edited.ok) {
+    const why = edited.code === 'ENCRYPTED' ? 'an encrypted PDF is never sealed' : edited.code === 'RESOURCE_LIMIT' ? 'the PDF needs more memory or time to open than a report should' : 'the PDF could not be opened for sealing';
+    throw new SealError('PDF_REFUSED', why);
   }
+  const prepared = edited.bytes;
 
   // Find the placeholders in the update just written, and fix the byte range around the signature.
   const tail = ascii(prepared.subarray(stamped.length));

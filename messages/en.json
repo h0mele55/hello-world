@@ -77,7 +77,8 @@
     "auditBroken": "The audit log failed its nightly check at event #{seq}. Its history may have been changed: find out why before relying on it.",
     "auditBrokenNoEvent": "The audit log failed its nightly check: {reason}. Find out why before relying on it.",
     "unjournaled": "{count, plural, one {# write} other {# writes}} on chain by the firm’s issuer keys that the console did not make.",
-    "rpcDisagree": "The worker's two RPC endpoints have disagreed about the chain since {since} UTC. Anchors and revocations they disagree about wait until they agree: find out which endpoint is wrong (docs/runbooks/rpc-outage.md)."
+    "rpcDisagree": "The worker's two RPC endpoints have disagreed about the chain since {since} UTC. Anchors and revocations they disagree about wait until they agree: find out which endpoint is wrong (docs/runbooks/rpc-outage.md).",
+    "team": "Team"
   },
   "login": {
     "title": "Sign in",
@@ -899,5 +900,35 @@
       "FAILED": "Withdrawal of version {version}: could not be sent",
       "CANCELLED": "Withdrawal of version {version}: cancelled"
     }
+  },
+  "team": {
+    "title": "Team",
+    "intro": "The firm’s people. Resetting a second factor or disabling someone ends every session they hold at once; each act is in the audit log. You cannot do either to yourself: another admin must.",
+    "adminOnly": "Only an admin can manage the firm’s people.",
+    "you": "You",
+    "disabled": "Disabled",
+    "columns": {
+      "person": "Person",
+      "role": "Role",
+      "mfa": "Two-step sign-in",
+      "actions": "Actions"
+    },
+    "mfa": {
+      "NOT_REQUIRED": "Not needed for this role",
+      "ENABLED": "Set up",
+      "NOT_SET_UP": "Not set up yet"
+    },
+    "reset": "Reset two-step sign-in",
+    "disable": "Disable",
+    "enable": "Enable",
+    "resetTitle": "Reset {name}’s two-step sign-in?",
+    "resetBody": "Their authenticator and recovery codes stop working, and every session they hold ends. They set up two-step sign-in again the next time they sign in with their password. Do this only once you know it is them who lost access.",
+    "resetConfirm": "Reset",
+    "disableTitle": "Disable {name}?",
+    "disableBody": "Every session they hold ends now, and they cannot sign in until an admin enables them again.",
+    "disableConfirm": "Disable",
+    "enableTitle": "Enable {name}?",
+    "enableBody": "They can sign in again with their password (and their second factor, if their role needs one).",
+    "enableConfirm": "Enable"
   }
 }

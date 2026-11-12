@@ -257,6 +257,17 @@ to one inflect-compliance commit.
   manifest schema 1. A change that moves any value in
   `tests/pdf/golden.test.ts` is a new version (and a reader for the old one),
   never an edit; regenerating a fixture legitimately moves only its `docHash`.
+  `normaliseText` repeats its pass until nothing changes (#143): one pass is
+  not idempotent where an invisible character sits between a letter and its
+  accent, and every committed text was the second pass's output already.
+- **A page whose text cannot be laid out is refused, never laid out**
+  (`lines.mjs`, #143): text more than 20,000 points across, or at a position
+  that is not a number, throws `PageLayoutError`, which both readers turn into
+  `UNPARSEABLE`. The column finder works point by point, so a hostile file
+  could otherwise freeze the browser or overflow the stack. `readDocument`
+  turns anything pdf.js throws reading pages or metadata into `UNPARSEABLE`,
+  and the verdict turns a text it cannot commit to into
+  `ALTERED_OPINION_NOT_CHECKABLE`, never an exception.
 - **The locator answers FOUND only when it is sure.** Every doubt is a
   `NOT_FOUND` with a reason, and a person types the opinion instead. Do not
   loosen a heading rule to raise the hit rate without a corpus case that shows
@@ -478,9 +489,11 @@ to one inflect-compliance commit.
   it. Then the root must be on the verifier's own registry, not voided, for
   the same source, block and count, read on both endpoints at one finalized
   block. `archivedView` answers the verdict's reads from the set, and a proof
-  asked about a record it does not hold refuses (`REANCHOR_NOT_COVERED`)
-  rather than say "none". `verifyWithReanchors` tries a set only when the
-  verifier's own registry holds no record of the file. The CLI takes
+  asked about a record or a file it does not hold refuses
+  (`REANCHOR_NOT_COVERED`) rather than say "none": only a whole archive can
+  (#143). `verifyWithReanchors` tries a set only when the verifier's own
+  registry holds no record of the file, and tries every candidate set in turn
+  until one answers, so a voided root does not hide a set that stands. The CLI takes
   `--reanchor`. The archives in `REANCHOR_ARCHIVES` are fetched by `/verify`
   from `/reanchor/<n>` and baked into `verifier.html` and the CLI by
   `build:verifier` (#126); all three pass them as `loadSets`, which runs only

@@ -3,7 +3,7 @@ import type { RegistryRecord } from '../chain/records';
 import { locateOpinion } from '../opinion/locate';
 import { dropRunningLines } from '../opinion/normalise';
 import { readStamp } from '../stamp-fields';
-import { docHashOf, opinionCommitmentOf } from './commitment';
+import { CommitmentInputError, docHashOf, opinionCommitmentOf } from './commitment';
 import type { DocumentRead } from './document';
 import { CannotVerify, type CannotVerifyReason, type RegistryView, type VerifierConfig } from './registry-view';
 
@@ -137,7 +137,14 @@ async function decide(view: RegistryView, input: Parameters<typeof verifyFile>[0
   const located = locateOpinion(dropRunningLines(read.doc.pageLines));
   // A file holding several reports is not checked against one of them: which one was registered is the person's choice, not the file's (#77).
   if (located.status !== 'FOUND') return { kind: 'ALTERED_OPINION_NOT_CHECKABLE', ...resolved, reason: located.status === 'NOT_FOUND' ? located.reason : 'MULTIPLE_OPINION_HEADINGS' };
-  const commitment = opinionCommitmentOf({ salt: hexToBytes(claim.opinionSalt as Hex), type: located.type, text: located.text });
+  let commitment: Hex;
+  try {
+    commitment = opinionCommitmentOf({ salt: hexToBytes(claim.opinionSalt as Hex), type: located.type, text: located.text });
+  } catch (error) {
+    // What the file holds cannot be committed to (a salt of the wrong length, text no reading settles): not checkable, never an exception (#143).
+    if (error instanceof CommitmentInputError) return { kind: 'ALTERED_OPINION_NOT_CHECKABLE', ...resolved, reason: error.code };
+    throw error;
+  }
   return { kind: commitment === original.opinionCommitment ? 'ALTERED_OPINION_APPEARS_UNCHANGED' : 'ALTERED_OPINION_CHANGED', ...resolved };
 }
 

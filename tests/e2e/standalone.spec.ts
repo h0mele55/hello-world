@@ -52,3 +52,22 @@ test('the single-file verifier works from disk, connects only to its endpoints a
   await expect(page.getByRole('heading', { level: 1 })).toHaveText('Проверка на одиторски доклад');
   await expect(page.getByRole('heading', { level: 2 })).toHaveText('Не е регистриран');
 });
+
+test('shows the verdict of the file chosen last, however long the one before it takes (#143)', async ({ page }) => {
+  // Every read the first check makes is held for a few seconds; the second check's are not.
+  let second = false;
+  await page.route(`${new URL(RPC_URL).origin}/**`, async (route) => {
+    if (!second) await new Promise((resolve) => setTimeout(resolve, 4_000));
+    await route.continue();
+  });
+  await page.goto(pathToFileURL(HTML).href);
+  await page.getByTestId('verify-file').setInputFiles({ name: 'first.pdf', mimeType: 'application/pdf', buffer: uniquePdf('en-adverse.pdf', runTag()) });
+  await page.waitForTimeout(500);
+  second = true;
+  await page.getByTestId('verify-file').setInputFiles({ name: 'second.pdf', mimeType: 'application/pdf', buffer: uniquePdf('en-qualified.pdf', runTag()) });
+  await expect(page.getByTestId('verdict')).toContainText('second.pdf', { timeout: 30_000 });
+  // The first check ends afterwards, and leaves the second's verdict where it is.
+  await page.waitForTimeout(8_000);
+  await expect(page.getByTestId('verdict')).toContainText('second.pdf');
+  await expect(page.getByTestId('verdict')).not.toContainText('first.pdf');
+});

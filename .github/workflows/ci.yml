@@ -184,8 +184,15 @@ jobs:
         run: npm run test:e2e
       - name: Back up, restore into a fresh database, and check the copy (#59)
         run: |
-          command -v pg_dump >/dev/null || (sudo apt-get update && sudo apt-get install -y postgresql-client)
-          pg_dump --version
+          # The client of the service's major version: the image's own may be newer (#184).
+          # From the PostgreSQL project's apt repository, its key held to the fingerprint it publishes.
+          key=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc
+          sudo install -d "$(dirname "$key")"
+          sudo curl -fsSL -o "$key" https://www.postgresql.org/media/keys/ACCC4CF8.asc
+          gpg --show-keys --with-colons "$key" | grep -q '^fpr:::::::::B97B0AFCAA1A47F044F244A07FCC7D46ACCC4CF8:$'
+          echo "deb [signed-by=$key] https://apt.postgresql.org/pub/repos/apt $(. /etc/os-release && echo "$VERSION_CODENAME")-pgdg main" | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null
+          sudo apt-get update -q && sudo apt-get install -y --no-install-recommends postgresql-client-16
+          /usr/lib/postgresql/16/bin/pg_dump --version
           npm run test:backup
       - name: The nightly audit-chain check passes on what the tests wrote, and queues its head (#94)
         run: |

@@ -4,7 +4,7 @@ import { parseArgs } from 'node:util';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
 import { bitcoinTimestampFor, CannotVerify, checkReanchorSet, defaultExplorers, issuerProofFetcher, openRegistryView, readDocument, verifyWithReanchors, type CheckedSet, type PdfjsLike } from '@/lib/verify-core';
 import { certificatesFromPem, sealStatusFor } from '@/lib/verify-core/seal';
-import { rootsOf, rpcUrlsRefusal, setupFromDeployment, type StandaloneSetup, StandaloneSetupSchema, verdictJson } from './config';
+import { bakedSetsApply, rootsOf, rpcUrlsRefusal, setupFromDeployment, type StandaloneSetup, StandaloneSetupSchema, verdictJson } from './config';
 
 /**
  * verify-report: the verifier as a command, with the same verify-core the
@@ -26,8 +26,9 @@ import { rootsOf, rpcUrlsRefusal, setupFromDeployment, type StandaloneSetup, Sta
  * against a retired registry's archive or a record's proof, through its root
  * on this registry; `reanchored` then says which root, and is null otherwise.
  * The archives baked in by `npm run build:verifier` (REANCHOR_ARCHIVES, #126)
- * are used the same way, with the baked settings only: they are rooted on the
- * baked registry.
+ * are used the same way whenever the registry in use is the baked one, also
+ * when it is given with --deployment and other endpoints (#157): they are
+ * rooted on that registry.
  * With --checkpoint (#122), a file is checked, when this registry cannot be
  * reached, against its latest monthly checkpoint, through the checkpoint's
  * Bitcoin timestamp (read from the two block explorers), and as of its block;
@@ -111,7 +112,7 @@ async function main() {
   } catch {
     usage(`${file} cannot be read`);
   }
-  const baked = !parsed.values.deployment && __REANCHOR_SETS__.length > 0;
+  const baked = bakedSetsApply(__VERIFIER_SETUP__, setup, __REANCHOR_SETS__.length);
   const { verdict, reanchored } = await verifyWithReanchors({
     bytes,
     config: setup,

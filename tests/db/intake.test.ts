@@ -195,6 +195,18 @@ describe('confirmation (rule 6)', () => {
     expect(view).toMatchObject({ status: 'CONFIRMED', confirmedOpinion: corrected, opinionType: 'ADVERSE' });
   });
 
+  it.each([
+    ['as the locator found it', 'QUALIFIED', '', false],
+    ['with its text corrected', 'QUALIFIED', ' (corrected by hand)', true],
+    ['with its type corrected', 'ADVERSE', '', true],
+  ] as const)('records whether the person corrected the located opinion, so the stamp can say so: %s (#157)', async (_, opinionType, suffix, edited) => {
+    const uploaded = await draft();
+    await confirmOpinion(preparer, { versionId: uploaded.id, opinionType, text: `${normaliseText(report.opinion.join(' '))}${suffix}`, reportDate: '2026-03-20' });
+    expect((await prisma.reportVersion.findUniqueOrThrow({ where: { id: uploaded.id } })).opinionEdited).toBe(edited);
+    const event = await prisma.auditEvent.findFirstOrThrow({ where: { action: 'version.confirmed', subjectId: uploaded.id } });
+    expect(event.data).toMatchObject({ opinionEdited: edited });
+  });
+
   it('runs once, only for a preparer, and never for an empty text or a bad date', async () => {
     const uploaded = await draft();
     const confirmation = { versionId: uploaded.id, opinionType: 'QUALIFIED' as const, text: 'Some opinion.', reportDate: '2026-03-20' };

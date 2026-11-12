@@ -136,7 +136,15 @@ async function decide(view: RegistryView, input: Parameters<typeof verifyFile>[0
   // Recommit to the opinion as this file now reads, with the salt the file carries.
   const located = locateOpinion(dropRunningLines(read.doc.pageLines));
   // A file holding several reports is not checked against one of them: which one was registered is the person's choice, not the file's (#77).
+  // The preparer corrected the opinion the locator found (#157): what was committed is not the file's passage.
+  if (claim.stamp === 2 && claim.opinionEdited === 1) return { kind: 'ALTERED_OPINION_NOT_CHECKABLE', ...resolved, reason: 'OPINION_EDITED_AT_CONFIRMATION' };
   if (located.status !== 'FOUND') return { kind: 'ALTERED_OPINION_NOT_CHECKABLE', ...resolved, reason: located.status === 'NOT_FOUND' ? located.reason : 'MULTIPLE_OPINION_HEADINGS' };
+  if (located.type !== claim.opinionType) {
+    // A version-2 stamp says the type confirmed is the type the file showed: a different one is a changed file.
+    // A version-1 stamp cannot say whether the preparer corrected the type, so it cannot be checked.
+    if (claim.stamp === 2) return { kind: 'ALTERED_OPINION_CHANGED', ...resolved };
+    return { kind: 'ALTERED_OPINION_NOT_CHECKABLE', ...resolved, reason: 'OPINION_TYPE_DIFFERS' };
+  }
   let commitment: Hex;
   try {
     commitment = opinionCommitmentOf({ salt: hexToBytes(claim.opinionSalt as Hex), type: located.type, text: located.text });

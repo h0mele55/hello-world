@@ -2,7 +2,7 @@ import { docHashOf } from './commitments';
 import { editPdf } from './pdf/edit';
 import type { IsolationLimits } from './pdf/isolated';
 import { parsePdf } from './pdf/parse';
-import { infoKeyOf, INFO_KEY_PREFIX, readStamp, STAMP_FIELD_NAMES, STAMP_NAMESPACE, STAMP_PREFIX, stampValues, type StampFields } from './stamp-fields';
+import { fieldOf, infoKeyOf, INFO_KEY_PREFIX, readStamp, STAMP_FIELD_NAMES, STAMP_NAMESPACE, STAMP_PREFIX, stampValues, type StampFields } from './stamp-fields';
 
 /**
  * Stamping: writes a version's anchor into the PDF's XMP metadata and Info
@@ -66,7 +66,7 @@ export async function stampPdf(original: Uint8Array, fields: StampFields, limits
       infoKeyPrefix: INFO_KEY_PREFIX,
       description,
       freshPacket: freshPacket(description),
-      info: values.map(([name, value]) => [infoKeyOf(name as keyof StampFields), value]),
+      info: values.map(([name, value]) => [infoKeyOf(name), value]),
     },
     limits,
   );
@@ -97,6 +97,6 @@ export async function checkStampedCopy(original: Uint8Array, stamped: Uint8Array
   if (JSON.stringify(after.pdf.flags) !== JSON.stringify(flags)) return { ok: false, reason: 'FLAGS_CHANGED' };
   const reading = readStamp(after.pdf.xmp, after.pdf.info);
   if (reading.status !== 'FOUND' || !reading.inXmp || !reading.inInfo) return { ok: false, reason: `STAMP_${reading.status}` };
-  if (STAMP_FIELD_NAMES.some((name) => String(reading.fields[name]) !== String(expected[name]))) return { ok: false, reason: 'STAMP_MISMATCH' };
+  if (STAMP_FIELD_NAMES.some((name) => String(fieldOf(reading.fields, name)) !== String(fieldOf(expected, name)))) return { ok: false, reason: 'STAMP_MISMATCH' };
   return { ok: true, docHash: docHashOf(stamped) };
 }

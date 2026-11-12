@@ -50,10 +50,15 @@ export async function readDocument(pdfjs: PdfjsLike, bytes: Uint8Array, limits =
     }
     if (!Number.isInteger(doc.numPages) || doc.numPages < 1) return { ok: false, reason: 'UNPARSEABLE' };
     if (doc.numPages > limits.maxPages) return { ok: false, reason: 'TOO_MANY_PAGES' };
-    const { info, metadata } = await doc.getMetadata();
-    const read = await readPages(doc, limits.maxTextChars);
-    if (read.tooMuchText) return { ok: false, reason: 'TOO_MUCH_TEXT' };
-    return { ok: true, doc: { pageLines: read.pages.map((page) => page.lines.map((line) => line.text)), xmp: xmpOf(metadata, limits.maxXmpChars), info: infoOf(info) } };
+    // Whatever the file makes pdf.js or the line reader throw is a refusal by name, never an exception (#143).
+    try {
+      const { info, metadata } = await doc.getMetadata();
+      const read = await readPages(doc, limits.maxTextChars);
+      if (read.tooMuchText) return { ok: false, reason: 'TOO_MUCH_TEXT' };
+      return { ok: true, doc: { pageLines: read.pages.map((page) => page.lines.map((line) => line.text)), xmp: xmpOf(metadata, limits.maxXmpChars), info: infoOf(info) } };
+    } catch {
+      return { ok: false, reason: 'UNPARSEABLE' };
+    }
   } finally {
     await task.destroy();
   }

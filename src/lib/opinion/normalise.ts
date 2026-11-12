@@ -16,7 +16,7 @@ const INVISIBLE = /[\u00AD\u200B-\u200D\u2060\uFEFF]/g;
 // C0 and C1 controls except the whitespace ones, which collapse below.
 const CONTROL = /[\u0000-\u0008\u000E-\u001F\u007F-\u009F]/g;
 
-export function normaliseText(text: string): string {
+function normaliseOnce(text: string): string {
   return text
     // A lone surrogate would become U+FFFD when hashed as UTF-8, so two
     // different strings could commit alike; replace it here, visibly.
@@ -26,6 +26,23 @@ export function normaliseText(text: string): string {
     .replace(CONTROL, '')
     .replace(/\s+/gu, ' ')
     .trim();
+}
+
+/**
+ * One pass is not idempotent: NFKC runs before an invisible character between
+ * a letter and its accent is removed, so the accent composes only on the next
+ * pass (#143). So the pass is repeated until it changes nothing: for every
+ * text intake has committed (which it normalised twice) that is the same
+ * value, and for the rest it is the text a second reading gives too.
+ */
+export function normaliseText(text: string): string {
+  let current = normaliseOnce(text);
+  for (let pass = 0; pass < 4; pass++) {
+    const next = normaliseOnce(current);
+    if (next === current) return current;
+    current = next;
+  }
+  return current;
 }
 
 // A hyphen at a line end right after a non-space character: ASCII

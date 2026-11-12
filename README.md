@@ -4,12 +4,16 @@ A prototype that anchors audit-report PDFs on a public testnet, links each PDF
 to the block that recorded it, points every reissued version to the latest, and
 lets outside parties check a copy in their own browser without uploading it.
 
-**Status:** Phases 0–2 of 7 are done. A preparer signs in, uploads an audit
-report, confirms its opinion beside the rendered PDF, and gets the commitments
-that will be anchored. The registry contract and chain adapter are built and
-tested on a local Anvil chain, but not deployed to Sepolia yet, and the app
-does not anchor anything yet (Phase 3). Testnet anchors, once they exist, are
-prototype evidence, not legal evidence.
+**Status:** the prototype (Phases 0–4) and the issuer console (Phase 5) are
+done and tested on a local Anvil chain; Phase 6 (production hardening) is under
+way. A preparer uploads an audit report and confirms its opinion; another person
+approves; a worker anchors it, issues a stamped distribution copy (sealed with
+the firm's electronic seal where configured), and timestamps its manifest on
+Bitcoin; anyone can check a copy at `/verify` or with the single-file verifier,
+without uploading it. Production is Arbitrum One
+([`docs/decision-production-chain.md`](docs/decision-production-chain.md)); the
+Sepolia deployment waits on funded keys (#4). Testnet anchors are prototype
+evidence, not legal evidence.
 
 - Plan, phases and the prompt for each phase: [`docs/ROADMAP.md`](docs/ROADMAP.md)
 - Design decisions: [`docs/adr/`](docs/adr/)
@@ -25,7 +29,11 @@ npm run dev        # http://localhost:3000, and /kitchen-sink for the UI kit
 npm test           # unit tests
 npm run build && npm run test:e2e
 npm run test:integration   # chain adapter on Anvil; needs Foundry
+npm test -- --coverage     # with a coverage report in coverage/unit
 ```
+
+What runs besides the app (the worker, the mailer, the nightly checks) is in
+[`docs/operations.md`](docs/operations.md).
 
 `vendor/inflect-ui/` is a pinned copy of components from
 [inflect-compliance](https://github.com/rodnapamet/inflect-compliance), licensed

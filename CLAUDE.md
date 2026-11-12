@@ -473,7 +473,8 @@ to one inflect-compliance commit.
   `APP_PUBLIC_URL`, that origin and the two Bitcoin explorers. The CLI asks
   for the timestamp only with the issuer's origin (baked in, or `--app-url`).
 - **The published copy (#85).** `.github/workflows/verifier-pages.yml`
-  builds `verifier.html` for its `NETWORK` (Sepolia) and publishes it on
+  runs once CI has passed on a master commit (a `workflow_run`, #149) and
+  builds that commit's `verifier.html` for its `NETWORK` (Sepolia), publishing it on
   GitHub Pages and, once per SHA-256, on a release named by that hash. The
   site (`standalone/site.ts`) is made from the `dist/verifier.json` the build
   writes, whose hash must be the file's. It does nothing until

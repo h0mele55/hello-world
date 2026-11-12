@@ -167,7 +167,7 @@ describe('the seal, checked by other tools', () => {
     expect(out).toMatch(/Signer Certificate Common Name: Example Audit OOD \(test seal\)/);
   });
 
-  it.runIf(tool('openssl'))('openssl verifies the CMS signature and its chain to the root, over the byte ranges', () => {
+  it.runIf(tool('openssl') || process.env.CI)('openssl verifies the CMS signature and its chain to the root, over the byte ranges', () => {
     const run = spawnSync('openssl', ['cms', '-verify', '-binary', '-inform', 'DER', '-in', path.join(dir, 'seal.p7s'), '-content', path.join(dir, 'content.bin'), '-CAfile', path.join(dir, 'root.pem'), '-purpose', 'any', '-out', os.devNull], { encoding: 'utf8' });
     expect(run.stderr).toContain('Verification successful');
     expect(run.status).toBe(0);

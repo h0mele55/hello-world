@@ -14,5 +14,7 @@ export default defineConfig({
   },
   datasource: {
     url: process.env.DATABASE_URL ?? '',
+    // Only for checking the schema against the migrations (#149): an empty database Prisma may drop and recreate.
+    ...(process.env.SHADOW_DATABASE_URL ? { shadowDatabaseUrl: process.env.SHADOW_DATABASE_URL } : {}),
   },
 });

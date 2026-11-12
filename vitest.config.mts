@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+import { coverageFor } from './vitest.coverage.mts';
 
 export default defineConfig({
   resolve: {
@@ -11,5 +12,6 @@ export default defineConfig({
   test: {
     include: ['tests/unit/**/*.test.ts'],
     environment: 'node',
+    coverage: coverageFor('unit'),
   },
 });

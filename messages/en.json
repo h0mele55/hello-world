@@ -113,7 +113,8 @@
       "ANCHORED": "Anchored",
       "COMPLETE": "Complete",
       "REVOKED": "Revoked"
-    }
+    },
+    "truncated": "Only the {cap} newest engagements are listed. Find an older one through its client."
   },
   "engagement": {
     "newTitle": "New engagement",
@@ -187,7 +188,13 @@
     "COPY_IN_FLIGHT": "The stamped copy is still on its way to the chain. Approve the revocation once it is final.",
     "ALREADY_REVIEWED": "This write has already been marked as reviewed.",
     "RECIPIENT_EXISTS": "This address is already a recipient of this engagement.",
-    "RECIPIENT_LIMIT": "This engagement already has 50 recipients. Remove one to add another."
+    "RECIPIENT_LIMIT": "This engagement already has 50 recipients. Remove one to add another.",
+    "CONFLICT": "This cannot be saved. If it keeps happening, tell an admin.",
+    "MFA_REQUIRED": "Set up two-step sign-in first: your role needs it before it can do anything else.",
+    "RATE_LIMITED": "Too many changes in a minute. Wait a moment and try again.",
+    "ALREADY_ENABLED": "Two-step sign-in is already set up.",
+    "NO_SETUP_IN_PROGRESS": "Start setting up two-step sign-in again.",
+    "CODE_INVALID": "The code is wrong or has expired. Enter the current code from your authenticator app."
   },
   "viewer": {
     "failed": "The PDF could not be shown.",

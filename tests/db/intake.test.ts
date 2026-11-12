@@ -129,6 +129,17 @@ describe('upload', () => {
     expect(await prisma.storedFile.count()).toBe(0);
   });
 
+  it('tells another firm nothing about this one’s engagements or files (#146)', async () => {
+    const mine = await createEngagement(preparer, ENGAGEMENT);
+    await uploadVersion(preparer, { engagementId: mine.id, reasonCode: 'INITIAL', bytes: fixture('en-unmodified.pdf') });
+    // The same engagement, or the same file, in another firm: refused, without saying that this firm holds it.
+    await expectIntakeError(createEngagement(outsider, ENGAGEMENT), 'CONFLICT');
+    const theirs = await createEngagement(outsider, { ...ENGAGEMENT, engagementRef: 'ENG-ELSEWHERE' });
+    await expectIntakeError(uploadVersion(outsider, { engagementId: theirs.id, reasonCode: 'INITIAL', bytes: fixture('en-unmodified.pdf') }), 'CONFLICT');
+    // Within the firm, the precise answer stands.
+    await expectIntakeError(createEngagement(preparer, ENGAGEMENT), 'ENGAGEMENT_EXISTS');
+  });
+
   it('refuses the same file twice, a second draft, and a wrong reason code', async () => {
     const first = await createEngagement(preparer, ENGAGEMENT);
     const second = await createEngagement(preparer, { ...ENGAGEMENT, engagementRef: 'ENG-2026-015' });

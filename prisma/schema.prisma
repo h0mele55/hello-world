@@ -184,6 +184,12 @@ model User {
   totpPendingSecret Bytes?
   recoveryCodes     RecoveryCode[]
 
+  /// Carried in every session; bumped when the user's second factor is set up or reset, or the user is disabled,
+  /// so every session issued before stops working at its next request (#145).
+  sessionVersion Int       @default(0)
+  /// Set by an admin: the user cannot sign in, and every session of theirs is refused.
+  disabledAt     DateTime?
+
   @@index([orgId])
 }
 

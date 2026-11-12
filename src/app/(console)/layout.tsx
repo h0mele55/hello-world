@@ -6,7 +6,7 @@ import { getIssuerKeyStatus, resolveAnchorTarget } from '@/lib/anchoring/queries
 import { latestNightlyCheck } from '@/lib/console/audit-log';
 import { openUnjournaledCount } from '@/lib/console/registry-watch';
 import { requireUser } from '@/lib/page-auth';
-import { MFA_ROLES } from '@/lib/roles';
+import { MFA_ROLES, mayDo } from '@/lib/roles';
 import { PreferencesBar } from '@/components/preferences-bar';
 import { SignOutButton } from '@/components/sign-out-button';
 import { NavLink } from '@/components/console/nav-link';
@@ -50,6 +50,11 @@ export default async function ConsoleLayout({ children }: { children: ReactNode 
           <NavLink href="/reports/settings" testId="nav-settings">
             {t('nav.settings')}
           </NavLink>
+          {mayDo(user.role, 'manageUsers') ? (
+            <NavLink href="/team" testId="nav-team">
+              {t('nav.team')}
+            </NavLink>
+          ) : null}
           {MFA_ROLES.includes(user.role) ? (
             <NavLink href="/account/mfa" testId="nav-mfa">
               {t('nav.twoStep')}

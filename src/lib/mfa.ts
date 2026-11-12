@@ -89,6 +89,8 @@ export async function confirmMfaSetup(user: SessionUser, code: string): Promise<
         totpEnabledAt: new Date(),
         totpLastStep: step,
         totpPendingSecret: null,
+        // Every session from before the second factor ends: the next one signs in with it (#145).
+        sessionVersion: { increment: 1 },
       },
     });
     if (updated.count !== 1) throw new MfaError('ALREADY_ENABLED');

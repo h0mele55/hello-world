@@ -491,7 +491,8 @@ to one inflect-compliance commit.
   `APP_PUBLIC_URL`, that origin and the two Bitcoin explorers. The CLI asks
   for the timestamp only with the issuer's origin (baked in, or `--app-url`).
 - **The published copy (#85).** `.github/workflows/verifier-pages.yml`
-  builds `verifier.html` for its `NETWORK` (Sepolia) and publishes it on
+  runs once CI has passed on a master commit (a `workflow_run`, #149) and
+  builds that commit's `verifier.html` for its `NETWORK` (Sepolia), publishing it on
   GitHub Pages and, once per SHA-256, on a release named by that hash. The
   site (`standalone/site.ts`) is made from the `dist/verifier.json` the build
   writes, whose hash must be the file's. It does nothing until
@@ -622,7 +623,14 @@ to one inflect-compliance commit.
   owner may still cancel it. Do not send
   mail from a use case or the worker: only the mailer sends
   (`src/lib/notifications/mailer.ts`, run by `scripts/mailer.ts`), at least
-  once, under a lease, giving up after five attempts (FAILED).
+  once, under a lease. A failed send waits before the next attempt
+  (`retryWaitMs`: a minute, doubling to four hours, held in `leaseUntil`).
+  Only a permanent 5xx rejection spends attempts quickly
+  (`MAX_PERMANENT_ATTEMPTS`, about a quarter of an hour). A server that cannot
+  be reached, answers 4xx or refuses the firm's own sign-in gets
+  `MAX_TRANSIENT_ATTEMPTS` (about three days), so a short SMTP outage fails
+  nothing (#148). The monitor reports a notice still failing after six
+  attempts (`NOTICE_RETRYING`).
 - **The email carries no PDF, no opinion and no figure** (decision #8):
   names, the engagement's reference, the period end, the version number and
   two links, as plain text with no attachment (`supersededEmail`,
@@ -650,9 +658,19 @@ to one inflect-compliance commit.
 - **COMPLETE only on the Bitcoin check**: the path reaches the Merkle root of
   a header that both explorers (`BITCOIN_EXPLORERS`) return byte for byte,
   that hashes to the block each named and carries the proof of work Bitcoin's
-  do. An explorer out or two that disagree leave the proof PENDING with a
-  reason; a path to the wrong root is BROKEN and never touched again. Never
-  set COMPLETE or a block another way: CHECKs hold COMPLETE to its block.
+  do. Each Bitcoin attestation is checked on its own (`pathTo`): one whose
+  path misses the root is dropped with the pending claim its calendar's
+  answer fulfilled (`withoutAttestations`, `ots.answer_refused`), so one
+  wrong calendar never spoils another's answer and the proof kept holds as a
+  whole (#147). COMPLETE only when every attestation left holds; BROKEN only
+  when nothing is left that could, and never touched again. An explorer out
+  or two that disagree leave the proof PENDING with a reason. Never set
+  COMPLETE or a block another way: CHECKs hold COMPLETE to its block.
+- **Every answer from outside is read up to a cap** (`readCapped`,
+  `src/lib/ots/read-capped.ts`): a calendar's, an explorer's and the issuer's
+  proof, never with `res.text()` or `res.arrayBuffer()`. A calendar's answer
+  that would take the proof past `MAX_PROOF_BYTES` is not merged
+  (`PROOF_TOO_LARGE`): a proof that large could never be read again.
 - **The verifiers show it beside the verdict, never in it**
   (`bitcoinTimestampFor`, `src/lib/verify-core/bitcoin-timestamp.ts`): only
   for an exact match, from the matched record's manifest hash (a copy's record

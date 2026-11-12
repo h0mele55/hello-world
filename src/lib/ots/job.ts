@@ -3,7 +3,7 @@ import type { PrismaClient } from '@/generated/prisma/client';
 import { appendAuditEvent } from '@/lib/audit';
 import { BITCOIN_EXPLORERS, BitcoinError, bitcoinTimeOf, esploraSource, type BitcoinTime, type HeaderCache, type HeaderSource } from './bitcoin';
 import { MIN_CALENDARS, submitDigest, upgradeProof, type CalendarDeps } from './calendar';
-import { OtsError, parseProof, serializeProof, type Proof } from './format';
+import { attestationsOf, OtsError, parseProof, pathTo, serializeProof, withoutAttestations, type Proof } from './format';
 import { checkpointDigest } from '../verify-core/reanchor';
 
 /**
@@ -11,11 +11,14 @@ import { checkpointDigest } from '../verify-core/reanchor';
  * pass sends the manifest hash of every version whose anchor is final, and
  * the SHA-256 of every monthly checkpoint's head (#122), to the calendars and
  * keeps the proof once two took it; then asks the calendars
- * about each pending proof, and checks any Bitcoin attestation they added
- * against two explorers. COMPLETE only on that check; BROKEN only when the
- * proof leads to something the block does not hold. Anything else (a
- * calendar or an explorer out, the explorers disagreeing) leaves the proof
- * PENDING with a name for why, and the next pass tries again.
+ * about each pending proof, and checks each Bitcoin attestation they added,
+ * on its own, against two explorers. An attestation the block does not hold
+ * is dropped with the pending claim its calendar's answer was meant to
+ * fulfil (#147), so one wrong calendar cannot spoil the others' answers and
+ * the proof kept, and served, holds as a whole. COMPLETE only when every
+ * attestation left holds; BROKEN only when nothing is left that could. Anything
+ * else (a calendar or an explorer out, the explorers disagreeing) leaves the
+ * proof PENDING with a name for why, and the next pass tries again.
  *
  * It holds no key and writes no chain. It sends the calendars a hash of the
  * digest and a nonce, nothing else.
@@ -155,19 +158,37 @@ export async function runOtsPass(deps: OtsJobDeps): Promise<OtsReport> {
     }
 
     const upgrade = await upgradeProof(proof, deps.calendar);
-    const bytes = serializeProof(proof);
+    // As the calendars left it, for a person to look at if nothing in it holds.
+    const answered = serializeProof(proof);
     let reached: BitcoinTime | null = null;
     let reason: string | null = null;
-    try {
-      reached = await bitcoinTime(proof, cache);
-    } catch (error) {
-      if (!(error instanceof BitcoinError)) throw error;
-      if (error.code === 'NOT_IN_BLOCK') {
-        if (await markBroken(deps.prisma, unchanged, subject, 'NOT_IN_BLOCK', at, bytes)) report.broken.push(subject.id);
+    const refused = new Set<number>();
+    const attestations = attestationsOf(proof);
+    for (let i = 0; i < attestations.length; i++) {
+      if (attestations[i].attestation.kind !== 'bitcoin') continue;
+      try {
+        const time = await bitcoinTime(pathTo(proof, i), cache);
+        if (time && (!reached || time.height < reached.height)) reached = time;
+      } catch (error) {
+        if (!(error instanceof BitcoinError)) throw error;
+        if (error.code === 'NOT_IN_BLOCK') refused.add(i);
+        else reason ??= `BITCOIN_${error.code}`;
+      }
+    }
+    if (refused.size) {
+      proof = withoutAttestations(proof, refused);
+      if (attestationsOf(proof).length === 0) {
+        if (await markBroken(deps.prisma, unchanged, subject, 'NOT_IN_BLOCK', at, answered)) report.broken.push(subject.id);
         continue;
       }
-      reason = `BITCOIN_${error.code}`;
     }
+    const bytes = serializeProof(proof);
+    // An attestation not yet checked is not one that holds: the proof waits for it.
+    if (reason) reached = null;
+    const answerRefused = refused.size
+      ? (tx: Parameters<Parameters<PrismaClient['$transaction']>[0]>[0]) =>
+          appendAuditEvent(tx, { orgId: subject.orgId, actorId: null, action: 'ots.answer_refused', subjectType: subject.type, subjectId: subject.id, data: { otsProofId: row.id, refused: refused.size } }, at)
+      : null;
 
     if (reached) {
       const finished = await deps.prisma.$transaction(async (tx) => {
@@ -185,6 +206,7 @@ export async function runOtsPass(deps: OtsJobDeps): Promise<OtsReport> {
           },
         });
         if (done.count === 1) {
+          await answerRefused?.(tx);
           await appendAuditEvent(
             tx,
             { orgId: subject.orgId, actorId: null, action: 'ots.complete', subjectType: subject.type, subjectId: subject.id, data: { otsProofId: row.id, bitcoinHeight: reached.height, bitcoinBlockHash: reached.blockHash } },
@@ -197,8 +219,12 @@ export async function runOtsPass(deps: OtsJobDeps): Promise<OtsReport> {
       continue;
     }
 
+    if (!reason && refused.size) reason = 'CALENDAR_ANSWER_REFUSED';
     if (!reason && upgrade.failed.length && !upgrade.pending.length && !upgrade.changed) reason = 'CALENDARS_UNREACHABLE';
-    await deps.prisma.otsProof.updateMany({ where: unchanged, data: { proof: bytes, checkedAt: at, lastError: reason } });
+    await deps.prisma.$transaction(async (tx) => {
+      const done = await tx.otsProof.updateMany({ where: unchanged, data: { proof: bytes, checkedAt: at, lastError: reason } });
+      if (done.count === 1) await answerRefused?.(tx);
+    });
     report.pending.push({ versionId: subject.id, reason });
   }
   return report;

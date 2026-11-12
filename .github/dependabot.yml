@@ -15,3 +15,13 @@ updates:
     directory: /
     schedule:
       interval: weekly
+  # The images docker-compose.yml runs locally (Postgres, Mailpit), pinned by digest.
+  - package-ecosystem: docker-compose
+    directory: /
+    schedule:
+      interval: weekly
+  # forge-std, the contracts' test library.
+  - package-ecosystem: gitsubmodule
+    directory: /
+    schedule:
+      interval: weekly

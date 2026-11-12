@@ -21,7 +21,8 @@ const VERSION = 1;
 /** The format's own limits: a message or an operand longer than this is refused. */
 export const MAX_MESSAGE_LENGTH = 4096;
 const MAX_DEPTH = 256;
-const MAX_PROOF_BYTES = 1 << 16;
+/** The largest proof read, so the largest one this code may write (#147). */
+export const MAX_PROOF_BYTES = 1 << 16;
 const MAX_URI_LENGTH = 1000;
 
 const BITCOIN_TAG = '0x0588960d73d71901';
@@ -323,6 +324,51 @@ export function attestationsOf(proof: Proof): { attestation: Attestation; messag
   };
   walk(proof.timestamp, proof.digest);
   return out;
+}
+
+/**
+ * The proof with only the path to its `index`th attestation, counted as
+ * attestationsOf lists them: so each can be checked on its own (#147).
+ */
+export function pathTo(proof: Proof, index: number): Proof {
+  let n = 0;
+  const walk = (stamp: Timestamp): Timestamp | null => {
+    for (const attestation of stamp.attestations) if (n++ === index) return { attestations: [attestation], ops: [] };
+    for (const { op, next } of stamp.ops) {
+      const found = walk(next);
+      if (found) return { attestations: [], ops: [{ op, next: found }] };
+    }
+    return null;
+  };
+  const found = walk(proof.timestamp);
+  if (!found) throw new RangeError(`the proof has no attestation ${index}`);
+  return { digest: proof.digest, timestamp: found };
+}
+
+/**
+ * A copy of the proof without the attestations at `indices` (attestationsOf's
+ * order), each with the nearest pending attestation above it, whose claim its
+ * calendar's answer was meant to fulfil, and without the branches that leaves
+ * empty (#147). With nothing left, the timestamp is empty: such a proof cannot
+ * be written, and nothing in it can hold.
+ */
+export function withoutAttestations(proof: Proof, indices: ReadonlySet<number>): Proof {
+  let n = 0;
+  /** `owed`: a dropped attestation below still needs its pending claim dropped. */
+  const walk = (stamp: Timestamp): { kept: Timestamp | null; owed: boolean } => {
+    const own = stamp.attestations.map((attestation) => ({ attestation, drop: indices.has(n++) }));
+    const branches = stamp.ops.map(({ op, next }) => ({ op, result: walk(next) }));
+    let owed = own.some((a) => a.drop) || branches.some((b) => b.result.owed);
+    let attestations = own.filter((a) => !a.drop).map((a) => a.attestation);
+    if (owed && attestations.some((a) => a.kind === 'pending')) {
+      attestations = attestations.filter((a) => a.kind !== 'pending');
+      owed = false;
+    }
+    const ops = branches.flatMap(({ op, result }) => (result.kept ? [{ op, next: result.kept }] : []));
+    return { kept: attestations.length || ops.length ? { attestations, ops } : null, owed };
+  };
+  const { kept } = walk(proof.timestamp);
+  return { digest: proof.digest, timestamp: kept ?? { attestations: [], ops: [] } };
 }
 
 /**

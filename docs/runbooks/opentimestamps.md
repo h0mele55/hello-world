@@ -46,15 +46,18 @@ your own trusts no explorer at all.
 
 ## `OTS_BROKEN`: a proof does not lead to the block it names
 
-The job checked a Bitcoin attestation and the proof's path does not reach that
-block's Merkle root (`NOT_IN_BLOCK`), or the stored proof no longer parses
-(`PROOF_*`). The version shows no Bitcoin time. The anchor on chain is
+The job checked every Bitcoin attestation in the proof and none of their paths
+reaches its block's Merkle root, with no calendar left that could still answer
+(`NOT_IN_BLOCK`), or the stored proof no longer parses (`PROOF_*`). One wrong
+calendar alone does not do this: its answer is dropped (`ots.answer_refused`)
+and the other calendars' answers stand. The proof is kept as the calendars
+answered it. The version shows no Bitcoin time. The anchor on chain is
 unaffected.
 
 1. Download the proof from the version's page and run `ots verify` on it as
-   above. If the reference client agrees it is wrong, a calendar served a bad
-   path: the proof's pending attestations name the calendars it went to.
-   Report it to that calendar's operator.
+   above. If the reference client agrees it is wrong, the calendars served bad
+   paths: the proof's pending attestations name the calendars it went to.
+   Report it to their operators.
 2. If the reference client says it is fine, the job's check is wrong: open an
    issue with the proof attached (it holds no confidential data: the manifest
    hash is on chain, and the rest is a nonce and hashes).
@@ -62,3 +65,12 @@ unaffected.
    version's page keeps showing it.
 
 Never mark a proof COMPLETE by hand, and never delete the row.
+
+## `CALENDAR_ANSWER_REFUSED`: one calendar's answer did not hold
+
+A pending proof whose `lastError` is `CALENDAR_ANSWER_REFUSED` had a calendar
+answer with a path that does not reach the block it names. That answer and the
+calendar's pending claim were dropped (`ots.answer_refused` in the audit log);
+the proof waits for the other calendars, and completes on theirs. Nothing needs
+doing for that proof. If one calendar does it again and again, report it to its
+operator, and consider taking it out of `OTS_CALENDARS`.

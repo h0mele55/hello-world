@@ -115,9 +115,15 @@ only, holds no key and writes no chain. Each pass:
   They must also meet the header's own proof-of-work target, at least as hard
   as Bitcoin's in 2015. The message the proof leads to must be the block's
   Merkle root. Only then is the proof COMPLETE, with the block's height, hash
-  and time (`ots.complete`). A proof that leads elsewhere is BROKEN
-  (`ots.broken`). An explorer that cannot be read, or two that disagree, leave
-  the proof pending with a name for why, and the next pass tries again.
+  and time (`ots.complete`). Each Bitcoin attestation is checked on its own:
+  one that leads elsewhere is dropped, with its calendar's pending claim, and
+  the rest of the proof stands (`ots.answer_refused`; pending as
+  `CALENDAR_ANSWER_REFUSED` while no other attestation has completed it). A
+  proof is BROKEN (`ots.broken`) only when nothing is left in it that could
+  hold. An explorer that cannot be read, or two that disagree, leave the proof
+  pending with a name for why, and the next pass tries again. A calendar's
+  answer that would make the proof larger than a proof can be read is not
+  merged.
 
 The version's page shows where its proof stands and offers the `.ots` file,
 which the reference client (`ots verify`) checks without this app. Bitcoin's

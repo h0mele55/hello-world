@@ -1,5 +1,6 @@
 import { bytesToHex, sha256 } from 'viem';
-import { attestationsOf, mergeAt, OtsError, parseTimestamp, type Proof } from './format';
+import { attestationsOf, MAX_PROOF_BYTES, mergeAt, OtsError, parseTimestamp, serializeProof, type Proof } from './format';
+import { readCapped } from './read-capped';
 
 /**
  * Talking to OpenTimestamps calendars (#66). A calendar takes a digest,
@@ -36,32 +37,18 @@ export interface CalendarDeps {
 }
 
 /** A name for why a calendar did not help, never its body. */
-export type CalendarFailure = 'UNREACHABLE' | 'HTTP_ERROR' | 'TOO_LARGE' | 'BAD_ANSWER';
+export type CalendarFailure =
+  | 'UNREACHABLE'
+  | 'HTTP_ERROR'
+  | 'TOO_LARGE'
+  | 'BAD_ANSWER'
+  /** Merged, the answer would make the proof larger than a proof is read (#147). */
+  | 'PROOF_TOO_LARGE';
 
 async function bodyOf(res: Response): Promise<Uint8Array> {
-  const declared = Number(res.headers.get('content-length'));
-  if (declared > MAX_RESPONSE_BYTES) throw new OtsError('TOO_LARGE', 'the calendar answered too much');
-  const reader = res.body?.getReader();
-  if (!reader) return new Uint8Array(0);
-  const parts: Uint8Array[] = [];
-  let length = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    length += value.length;
-    if (length > MAX_RESPONSE_BYTES) {
-      await reader.cancel();
-      throw new OtsError('TOO_LARGE', 'the calendar answered too much');
-    }
-    parts.push(value);
-  }
-  const out = new Uint8Array(length);
-  let at = 0;
-  for (const part of parts) {
-    out.set(part, at);
-    at += part.length;
-  }
-  return out;
+  const body = await readCapped(res, MAX_RESPONSE_BYTES);
+  if (!body) throw new OtsError('TOO_LARGE', 'the calendar answered too much');
+  return body;
 }
 
 const failureOf = (error: unknown): CalendarFailure => (error instanceof OtsError ? (error.code === 'TOO_LARGE' ? 'TOO_LARGE' : 'BAD_ANSWER') : 'UNREACHABLE');
@@ -130,7 +117,10 @@ export interface Upgrade {
 /**
  * Asks each listed calendar named by a pending attestation in the proof
  * whether it has the path to Bitcoin yet, and merges what it has. The proof
- * is changed in place.
+ * is changed in place, one calendar's answer at a time: an answer that would
+ * take the proof past MAX_PROOF_BYTES is not merged (#147), since a proof
+ * that large could never be read again, here or by a verifier. Whether what
+ * a calendar answered holds is the Bitcoin check's question, not this one's.
  */
 export async function upgradeProof(proof: Proof, deps: CalendarDeps = {}): Promise<Upgrade> {
   const calendars = new Set<string>(deps.calendars ?? OTS_CALENDARS);
@@ -157,7 +147,16 @@ export async function upgradeProof(proof: Proof, deps: CalendarDeps = {}): Promi
         result.failed.push({ calendar: attestation.uri, reason: 'HTTP_ERROR' });
         continue;
       }
-      if (mergeAt(proof, message, parseTimestamp(await bodyOf(res), message))) result.changed = true;
+      const body = await bodyOf(res);
+      // Merged into a copy first: a merge that would be too large leaves the proof as it was.
+      const trial: Proof = { digest: proof.digest, timestamp: structuredClone(proof.timestamp) };
+      if (!mergeAt(trial, message, parseTimestamp(body, message))) continue;
+      if (serializeProof(trial).length > MAX_PROOF_BYTES) {
+        result.failed.push({ calendar: attestation.uri, reason: 'PROOF_TOO_LARGE' });
+        continue;
+      }
+      proof.timestamp = trial.timestamp;
+      result.changed = true;
     } catch (error) {
       result.failed.push({ calendar: attestation.uri, reason: failureOf(error) });
     }

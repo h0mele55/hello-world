@@ -75,7 +75,7 @@
     "next": "16.4.3",
     "next-auth": "4.24.15",
     "next-intl": "4.14.9",
-    "nodemailer": "10.2.1",
+    "nodemailer": "10.4.0",
     "otplib": "13.5.0",
     "pdfjs-dist": "6.4.299",
     "pg": "8.23.1",

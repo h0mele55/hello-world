@@ -19,7 +19,7 @@
  */
 import path from 'node:path';
 import { PrismaPg } from '@prisma/adapter-pg';
-import pg from 'pg';
+import { createLockSession, type LockSession } from '../src/lib/anchoring/lock-session';
 import { createPublicClient, getAddress, http, isHex, type LocalAccount, type PublicClient } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { ChainError } from '../src/lib/chain/errors';
@@ -45,8 +45,8 @@ export interface IssuerEnv {
   deployment: Deployment;
   publicClient: PublicClient;
   prisma: PrismaClient;
-  /** A dedicated session for the issuer's advisory lock. */
-  lockClient: pg.Client;
+  /** The dedicated session for the issuer's advisory lock, watched and reopened (#156). */
+  lockClient: LockSession;
   close(): Promise<void>;
 }
 
@@ -61,8 +61,9 @@ export async function issuerEnv(tool: string): Promise<IssuerEnv> {
   const publicClient = createPublicClient({ chain: NETWORKS[network], transport: http(rpcUrlFor(network)) }) as PublicClient;
   const databaseUrl = requireEnv(tool, 'DATABASE_URL');
   const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl, max: 4, connectionTimeoutMillis: 10_000 }) });
-  const lockClient = new pg.Client({ connectionString: databaseUrl });
-  await lockClient.connect();
+  const lockClient = createLockSession(databaseUrl);
+  // Opened now, so a database that cannot be reached is a refusal at start.
+  await lockClient.query('SELECT 1');
   return {
     network,
     account,

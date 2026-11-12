@@ -46,16 +46,20 @@ describe('the verifier setup', () => {
     expect(JSON.stringify(result)).not.toContain('/srv/');
   });
 
-  it('hands the page the seal’s published roots, and none for a file it cannot read (#120)', async () => {
+  it('hands the page the seal’s published roots, none when none are set, and refuses roots it cannot read (#120, #157)', async () => {
     const pki = await createTestPki();
     const pem = path.join(root, 'roots.pem');
     fs.writeFileSync(pem, pemOf(pki.rootDer) + pemOf(pki.tsaDer));
     const result = verifierSetupFromEnv({ ...sepolia, SEAL_TRUST_ANCHORS: pem }, root);
     expect(result.ok && result.setup.sealRoots).toEqual([Buffer.from(pki.rootDer).toString('base64'), Buffer.from(pki.tsaDer).toString('base64')]);
+    const unset = verifierSetupFromEnv(sepolia, root);
+    expect(unset.ok && unset.setup.sealRoots).toEqual([]);
+    // Set, but missing, holding no certificate, or with one bad block among good ones: never silently "no roots".
     fs.writeFileSync(path.join(root, 'broken.pem'), '-----BEGIN CERTIFICATE-----\nAAAA\n-----END CERTIFICATE-----\n');
-    for (const file of [path.join(root, 'broken.pem'), path.join(root, 'missing.pem')]) {
-      const unreadable = verifierSetupFromEnv({ ...sepolia, SEAL_TRUST_ANCHORS: file }, root);
-      expect(unreadable.ok && unreadable.setup.sealRoots).toEqual([]);
+    fs.writeFileSync(path.join(root, 'empty.pem'), 'no certificates here\n');
+    fs.writeFileSync(path.join(root, 'mixed.pem'), pemOf(pki.rootDer) + '-----BEGIN CERTIFICATE-----\n!!!!\n-----END CERTIFICATE-----\n');
+    for (const name of ['broken.pem', 'missing.pem', 'empty.pem', 'mixed.pem']) {
+      expect(reason({ ...sepolia, SEAL_TRUST_ANCHORS: path.join(root, name) }), name).toBe('SEAL_ROOTS_INVALID');
     }
   });
 

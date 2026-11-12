@@ -81,7 +81,7 @@ export async function finalise(registry: Registry) {
 /** The stamp the worker writes on an original's distribution copy. */
 export function stampFor(registry: Registry, original: Anchored): StampFields {
   return {
-    stamp: 1,
+    stamp: 2,
     chainId: registry.deployment.chainId,
     contract: getAddress(registry.deployment.address),
     recordId: original.recordId,
@@ -93,5 +93,7 @@ export function stampFor(registry: Registry, original: Anchored): StampFields {
     opinionType: original.opinionType,
     opinionSalt: SALT,
     norm: 1,
+    // As the worker writes it (#157): the opinion confirmed is the one the locator found.
+    opinionEdited: 0,
   };
 }

@@ -1,4 +1,4 @@
-import type { Client as PgClient } from 'pg';
+import type { LockClient } from './lock-session';
 import {
   decodeEventLog,
   encodeFunctionData,
@@ -109,9 +109,15 @@ export interface WorkerOptions {
   maxFeePerGasWei: bigint | null;
   /** At most this many versions awaiting a certificate, and as many scheduled revocations, are read a pass. */
   scanLimit: number;
+  /** The most blocks one log query spans: public endpoints refuse wider ones (#156). The network's LOG_RANGE_BLOCKS. */
+  logRangeBlocks: number;
+  /** How many such windows a search for a revocation's transaction reads back from the finalized block (#156). */
+  maxLogWindows: number;
 }
 
 export const DEFAULT_WORKER_OPTIONS: WorkerOptions = {
+  logRangeBlocks: 2_000,
+  maxLogWindows: 50,
   leaseMs: 120_000,
   replaceAfterMs: 10 * 60_000,
   feeBumpPercent: 20,
@@ -130,6 +136,8 @@ export interface WorkerFaults {
   afterBuild?(writeId: string): Promise<void>;
   beforeSend?(writeId: string): Promise<void>;
   afterSend?(writeId: string): Promise<void>;
+  /** After an anchor-only version's certificate is made and stored, before it is committed. */
+  beforeCertify?(versionId: string): Promise<void>;
 }
 
 export type WorkerLog = (level: 'info' | 'warn' | 'error', message: string, fields?: Record<string, unknown>) => void;
@@ -137,7 +145,8 @@ export type WorkerLog = (level: 'info' | 'warn' | 'error', message: string, fiel
 export interface WorkerDeps {
   prisma: PrismaClient;
   /** A dedicated session for the issuer's advisory lock; never a pooled connection. */
-  lockClient: PgClient;
+  /** The session holding the issuer's lock: a LockSession, or a plain client in tests. */
+  lockClient: LockClient;
   publicClient: PublicClient;
   /**
    * The second endpoint, from another provider (#92): every read that settles
@@ -171,7 +180,7 @@ export interface StepReport {
 
 export interface PassReport {
   ran: boolean;
-  reason?: 'ISSUER_LOCKED' | 'DEPLOYMENT_MISMATCH';
+  reason?: 'ISSUER_LOCKED' | 'DEPLOYMENT_MISMATCH' | 'LOCK_LOST';
   balanceWei?: bigint;
   lowBalance?: boolean;
   steps: StepReport[];
@@ -191,6 +200,7 @@ const writeInclude = {
   reportVersion: {
     include: {
       storedFile: true,
+      copyStoredFile: true,
       engagement: { include: { client: { include: { org: { select: { chainWriteMode: true } } } } } },
       // The approved revocation a REVOKE write carries out: its reason is what goes on chain.
       revocations: { where: { status: 'APPROVED' }, select: { id: true, reason: true }, take: 1 },
@@ -208,6 +218,8 @@ function versionOf(row: Row): Write {
 }
 
 interface Context {
+  /** Whether the session holding the issuer's lock has ended (#156). */
+  lockLost: () => boolean;
   prisma: PrismaClient;
   publicClient: PublicClient;
   reader: RegistryReader;
@@ -302,6 +314,7 @@ export async function runWorkerPass(deps: WorkerDeps): Promise<PassReport> {
     now: deps.now ?? (() => new Date()),
     options: { ...DEFAULT_WORKER_OPTIONS, ...deps.options },
     faults: deps.faults ?? {},
+    lockLost: () => deps.lockClient.lost === true,
     log: deps.log ?? defaultLog,
     files: deps.files,
     verifyUrl: `${deps.verifyBaseUrl.replace(/\/+$/, '')}/verify`,
@@ -338,6 +351,11 @@ export async function runWorkerPass(deps: WorkerDeps): Promise<PassReport> {
         ctx.log('info', 'step', { ...step });
       } catch (error) {
         report.errors.push({ writeId: id, error: errorName(error) });
+        if (error instanceof ChainError && error.code === 'LOCK_LOST') {
+          // The lock went with its session: another worker may hold it now. The pass ends here (#156).
+          ctx.log('error', 'the issuer lock was lost with its database session; ending the pass', { writeId: id });
+          return { ...report, reason: 'LOCK_LOST' };
+        }
         if (error instanceof ChainError && error.code === 'RPC_DISAGREE') {
           // Not a crash: the row is as it was, and the next pass compares again,
           // so the console's banner says whether the endpoints still disagree.
@@ -718,9 +736,15 @@ async function startCopy(ctx: Context, write: Write): Promise<StepReport> {
   // A copy stored unsealed, before sealing was turned on, is made again sealed
   // unless it is already on chain (#140): while sealing is on, no copy is anchored unsealed.
   const unsealed = copyDocHash !== null && ctx.seal !== null && version.copySealedAt === null && !(await ctx.reader.findByDocHash(copyDocHash as Hex));
-  if (!copyDocHash || unsealed) {
-    const stamped = await stampCopy(ctx, write, unsealed ? copyDocHash : null);
-    if (!stamped.ok && stamped.wait) return release(ctx, write, { error: stamped.reason }, 'waiting: the seal provider did not answer; tried again on the next pass');
+  // A stored copy not on chain yet is read back first (#156): after a crash the
+  // row may name a file the disk never got, and that is made again, not anchored.
+  const lost = copyDocHash !== null && !unsealed && !(await ctx.reader.findByDocHash(copyDocHash as Hex)) && !(await storedCopyReads(ctx, version, copyDocHash));
+  if (!copyDocHash || unsealed || lost) {
+    const stamped = await stampCopy(ctx, write, unsealed || lost ? { docHash: copyDocHash!, why: lost ? 'LOST' : 'UNSEALED' } : null);
+    if (!stamped.ok && stamped.wait) {
+      const why = stamped.reason === 'ORIGINAL_NOT_FINAL' ? 'an endpoint has not finalized the original yet' : 'the seal provider did not answer';
+      return release(ctx, write, { error: stamped.reason }, `waiting: ${why}; tried again on the next pass`);
+    }
     if (!stamped.ok) return fail(ctx, write, `STAMP_${stamped.reason}`);
     copyDocHash = stamped.docHash;
   }
@@ -804,16 +828,31 @@ function revocationRequested(record: RegistryRecord | null, write: Write): recor
  * by its RevocationRequested event with the same reason and time (a cancelled
  * request may have come before it); null until one is final.
  */
-async function requestTxOf(client: PublicClient, registry: Address, record: RegistryRecord, toBlock: bigint): Promise<{ txHash: Hash; blockNumber: bigint } | null> {
-  const events = await client.getContractEvents({
-    address: registry,
-    abi: registryAbi,
-    eventName: 'RevocationRequested',
-    args: { recordId: record.recordId },
-    fromBlock: BigInt(record.blockNumber),
-    toBlock,
-  });
-  const event = events.filter((e) => e.args.reasonCode === record.revokeReason && Number(e.args.effectiveAt) === record.revokeEffectiveAt).at(-1);
+/**
+ * The latest event `read` finds between `fromBlock` and `toBlock`, read back
+ * from `toBlock` one window at a time (#156): public endpoints refuse a log
+ * query over a long range, and a record anchored months before its
+ * revocation spans millions of blocks. The event sought is recent, so the
+ * first window or two finds it. Null when none of `windows` windows holds it.
+ */
+async function latestEvent<T>(options: WorkerOptions, fromBlock: bigint, toBlock: bigint, read: (from: bigint, to: bigint) => Promise<T[]>): Promise<T | null> {
+  const span = BigInt(options.logRangeBlocks);
+  let to = toBlock;
+  for (let window = 0; window < options.maxLogWindows && to >= fromBlock; window++) {
+    const from = to - span + 1n > fromBlock ? to - span + 1n : fromBlock;
+    const found = (await read(from, to)).at(-1);
+    if (found !== undefined) return found;
+    to = from - 1n;
+  }
+  return null;
+}
+
+async function requestTxOf(client: PublicClient, options: WorkerOptions, registry: Address, record: RegistryRecord, toBlock: bigint): Promise<{ txHash: Hash; blockNumber: bigint } | null> {
+  const event = await latestEvent(options, BigInt(record.blockNumber), toBlock, async (fromBlock, to) =>
+    (await client.getContractEvents({ address: registry, abi: registryAbi, eventName: 'RevocationRequested', args: { recordId: record.recordId }, fromBlock, toBlock: to })).filter(
+      (e) => e.args.reasonCode === record.revokeReason && Number(e.args.effectiveAt) === record.revokeEffectiveAt,
+    ),
+  );
   return event?.transactionHash && event.blockNumber !== null ? { txHash: event.transactionHash, blockNumber: event.blockNumber } : null;
 }
 
@@ -823,7 +862,7 @@ async function linkRevocation(ctx: Context, write: Write, record: RegistryRecord
   const finalized = await agreedFinalized(ctx);
   const agreed = await recordAt(ctx, record.recordId, finalized);
   const request = revocationRequested(agreed, write)
-    ? await agree(ctx, `the request to revoke ${record.recordId}`, (client) => requestTxOf(client, ctx.registry, agreed, finalized))
+    ? await agree(ctx, `the request to revoke ${record.recordId}`, (client) => requestTxOf(client, ctx.options, ctx.registry, agreed, finalized))
     : null;
   if (!agreed || !request) return release(ctx, write, { recordId: record.recordId }, 'already requested on chain; waiting for finality');
   return finalize(ctx, write, {
@@ -859,18 +898,18 @@ const hexOf = (bytes: Uint8Array) => `0x${Buffer.from(bytes).toString('hex')}` a
  * revocation pending or in effect, before anything is written about it: as
  * both endpoints read it at one finalized block (#92).
  */
-async function originalRecordOk(ctx: Context, version: { recordId: string | null; anchorBlock: bigint | null; docHash: string }): Promise<boolean> {
-  if (!version.recordId || version.anchorBlock === null) return false;
+/**
+ * The original's record, read at the agreed finalized block: as anchored, not
+ * final there yet, or different. "Not final yet" is an endpoint behind the
+ * other, which waits; only a different record fails (#156).
+ */
+async function originalRecordState(ctx: Context, version: { recordId: string | null; anchorBlock: bigint | null; docHash: string }): Promise<'OK' | 'NOT_FINAL' | 'MISMATCH'> {
+  if (!version.recordId || version.anchorBlock === null) return 'MISMATCH';
   const finalized = await agreedFinalized(ctx);
-  if (finalized < version.anchorBlock) return false;
+  if (finalized < version.anchorBlock) return 'NOT_FINAL';
   const record = await recordAt(ctx, version.recordId as Hex, finalized);
-  return (
-    record !== null &&
-    record.kind === 'ORIGINAL' &&
-    record.docHash === version.docHash &&
-    record.revokeReason === 0 &&
-    BigInt(record.blockNumber) === version.anchorBlock
-  );
+  const ok = record !== null && record.kind === 'ORIGINAL' && record.docHash === version.docHash && record.revokeReason === 0 && BigInt(record.blockNumber) === version.anchorBlock;
+  return ok ? 'OK' : 'MISMATCH';
 }
 
 /**
@@ -883,9 +922,22 @@ async function originalRecordOk(ctx: Context, version: { recordId: string | null
  * check passes. A seal provider that does not answer leaves the copy to wait
  * (`wait`); one that refuses fails it, for a person.
  */
-async function stampCopy(ctx: Context, write: Write, replacing: string | null = null): Promise<{ ok: true; docHash: string } | { ok: false; reason: string; wait?: true }> {
+/** Whether the stored copy reads back, decrypted and checked, as the file its row names. */
+async function storedCopyReads(ctx: Context, version: Write['reportVersion'], docHash: string): Promise<boolean> {
+  if (!version.copyStoredFile) return false;
+  try {
+    return docHashOf(await ctx.files.read(version.copyStoredFile)) === docHash;
+  } catch (error) {
+    ctx.log('warn', 'the stored copy does not read back; it is made again', { versionId: version.id, error: error instanceof Error ? (('code' in error && String(error.code)) || error.name) : typeof error });
+    return false;
+  }
+}
+
+async function stampCopy(ctx: Context, write: Write, replacing: { docHash: string; why: 'UNSEALED' | 'LOST' } | null = null): Promise<{ ok: true; docHash: string } | { ok: false; reason: string; wait?: true }> {
   const version = write.reportVersion;
-  if (!(await originalRecordOk(ctx, version))) return { ok: false, reason: 'ORIGINAL_RECORD_MISMATCH' };
+  const originalState = await originalRecordState(ctx, version);
+  if (originalState === 'NOT_FINAL') return { ok: false, reason: 'ORIGINAL_NOT_FINAL', wait: true };
+  if (originalState === 'MISMATCH') return { ok: false, reason: 'ORIGINAL_RECORD_MISMATCH' };
   if (!version.anchorTxHash) return { ok: false, reason: 'ORIGINAL_TX_UNKNOWN' };
   if (!version.opinionType || !version.opinionSalt) return { ok: false, reason: 'VERSION_INCOMPLETE' };
   const fields: StampFields = {
@@ -937,8 +989,10 @@ async function stampCopy(ctx: Context, write: Write, replacing: string | null = 
     await ctx.prisma.$transaction(async (tx) => {
       const file = await tx.storedFile.create({ data: stored, select: { id: true } });
       const { count } = await tx.reportVersion.updateMany({
-        // Replacing only the unsealed copy that was read, never one stored meanwhile.
-        where: replacing ? { id: version.id, status: 'ANCHORED', copyDocHash: replacing, copySealedAt: null } : { id: version.id, status: 'ANCHORED', copyDocHash: null },
+        // Replacing only the copy that was read (unsealed, or lost), never one stored meanwhile.
+        where: replacing
+          ? { id: version.id, status: 'ANCHORED', copyDocHash: replacing.docHash, ...(replacing.why === 'UNSEALED' ? { copySealedAt: null } : {}) }
+          : { id: version.id, status: 'ANCHORED', copyDocHash: null },
         data: { copyDocHash: docHash, copyStoredFileId: file.id, copySealedAt: seal?.sealedAt ?? null },
       });
       if (count !== 1) throw new ChainError('VERSION_NOT_ANCHORED', `version ${version.id} already has a copy or is not ANCHORED`);
@@ -956,7 +1010,7 @@ async function stampCopy(ctx: Context, write: Write, replacing: string | null = 
             copyDocHash: docHash,
             sealed: seal !== null,
             timestampSerial: seal?.timestampSerial ?? null,
-            ...(replacing ? { replacedUnsealedCopy: replacing } : {}),
+            ...(replacing ? { [replacing.why === 'UNSEALED' ? 'replacedUnsealedCopy' : 'replacedLostCopy']: replacing.docHash } : {}),
           },
         },
         ctx.now(),
@@ -1015,7 +1069,9 @@ async function certifyAnchorOnly(ctx: Context, report: PassReport) {
   for await (const version of versions) {
     let storedPath: string | null = null;
     try {
-      if (!(await originalRecordOk(ctx, version))) {
+      const originalState = await originalRecordState(ctx, version);
+      if (originalState === 'NOT_FINAL') continue;
+      if (originalState === 'MISMATCH') {
         ctx.log('error', 'not certifying: the record on chain does not match the version', { versionId: version.id });
         continue;
       }
@@ -1035,7 +1091,13 @@ async function certifyAnchorOnly(ctx: Context, report: PassReport) {
       });
       const stored = await ctx.files.store(certificate);
       storedPath = stored.path;
-      await ctx.prisma.$transaction(async (tx) => {
+      await ctx.faults.beforeCertify?.(version.id);
+      const certified = await ctx.prisma.$transaction(async (tx) => {
+        // The version row, as approveRevocation locks it, and its revocations read
+        // again under that lock (#156): one approved while the certificate was made wins.
+        await tx.$queryRaw`SELECT "id" FROM "ReportVersion" WHERE "id" = ${version.id} FOR NO KEY UPDATE`;
+        const open = await tx.revocation.count({ where: { reportVersionId: version.id, status: { in: ['APPROVED', 'SCHEDULED'] } } });
+        if (open > 0) return false;
         const file = await tx.storedFile.create({ data: stored, select: { id: true } });
         const { count } = await tx.reportVersion.updateMany({
           where: { id: version.id, status: 'ANCHORED', certificateStoredFileId: null },
@@ -1055,7 +1117,14 @@ async function certifyAnchorOnly(ctx: Context, report: PassReport) {
           },
           ctx.now(),
         );
+        return true;
       });
+      if (!certified) {
+        ctx.log('info', 'not certifying: the version is being withdrawn', { versionId: version.id });
+        await ctx.files.discard(stored.path);
+        storedPath = null;
+        continue;
+      }
       storedPath = null;
       report.certified.push(version.id);
     } catch (error) {
@@ -1112,7 +1181,8 @@ async function settleScheduledRevocations(ctx: Context, report: PassReport) {
       const ours = record.revokeReason === REVOCATION_CODES[revocation.reason] && record.revokeEffectiveAt === effectiveAt;
       if (ours && !record.revoked) continue;
       const outcome = ours ? 'REVOKED' : 'CANCELLED';
-      const cancelTx = ours ? null : await agree(ctx, `the cancellation of ${record.recordId}`, (client) => cancellingTxOf(client, ctx.registry, record, finalized));
+      // CANCELLED is decided by the record alone; its transaction, for the audit log, is looked up best-effort (#156).
+      const cancelTx = ours ? null : await cancellingTxOf(ctx, record, finalized);
       if (!ours && record.revokeReason !== 0) {
         // Ours was cancelled and another request, which this firm did not make through the console, stands in its place.
         ctx.log('error', 'the record carries a revocation the console did not ask for', {
@@ -1164,16 +1234,19 @@ async function settleScheduledRevocations(ctx: Context, report: PassReport) {
 }
 
 /** The final transaction in which the owner cancelled a record's revocation, if one is found. */
-async function cancellingTxOf(client: PublicClient, registry: Address, record: RegistryRecord, toBlock: bigint): Promise<Hash | null> {
-  const events = await client.getContractEvents({
-    address: registry,
-    abi: registryAbi,
-    eventName: 'RevocationCancelled',
-    args: { recordId: record.recordId },
-    fromBlock: BigInt(record.blockNumber),
-    toBlock,
-  });
-  return events.at(-1)?.transactionHash ?? null;
+/** The owner's cancelling transaction, if both endpoints find the same one within the windows read; else null, never a failure. */
+async function cancellingTxOf(ctx: Context, record: RegistryRecord, toBlock: bigint): Promise<Hash | null> {
+  try {
+    return await agree(ctx, `the cancellation of ${record.recordId}`, async (client) => {
+      const event = await latestEvent(ctx.options, BigInt(record.blockNumber), toBlock, (fromBlock, to) =>
+        client.getContractEvents({ address: ctx.registry, abi: registryAbi, eventName: 'RevocationCancelled', args: { recordId: record.recordId }, fromBlock, toBlock: to }),
+      );
+      return event?.transactionHash ?? null;
+    });
+  } catch (error) {
+    ctx.log('warn', 'the cancelling transaction could not be found; recorded without it', { recordId: record.recordId, error: errorName(error) });
+    return null;
+  }
 }
 
 /** Whether a record is the one this write makes: same kind, document, family, version and commitments. */
@@ -1234,7 +1307,14 @@ async function nextNonce(ctx: Context): Promise<number> {
 
 const isUniqueViolation = (error: unknown) => error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 
+/** Refuses to go on once the session holding the issuer's lock has ended (#156). */
+function assertLockHeld(ctx: Context) {
+  if (ctx.lockLost()) throw new ChainError('LOCK_LOST', 'the database session holding the issuer lock ended');
+}
+
 async function send(ctx: Context, serializedTransaction: Hex): Promise<SendOutcome> {
+  // Lost after the hash was journalled: a crash at this point, which reconciliation settles.
+  assertLockHeld(ctx);
   try {
     await ctx.publicClient.sendRawTransaction({ serializedTransaction });
     return { kind: 'SENT' };
@@ -1244,6 +1324,8 @@ async function send(ctx: Context, serializedTransaction: Hex): Promise<SendOutco
 }
 
 async function signAndSend(ctx: Context, write: Row): Promise<StepReport> {
+  // Before anything is signed or journalled: a lost lock leaves the row as it was.
+  assertLockHeld(ctx);
   const call = callOf(write);
   const [nonce, gasEstimate, fees] = await Promise.all([
     nextNonce(ctx),
@@ -1537,7 +1619,7 @@ async function settleConsumedNonce(ctx: Context, write: Write, at: bigint): Prom
   if (write.kind === 'REVOKE') {
     const record = write.recordId ? await recordAt(ctx, write.recordId as Hex, at) : null;
     if (revocationRequested(record, write)) {
-      const request = await agree(ctx, `the request to revoke ${record.recordId}`, (client) => requestTxOf(client, ctx.registry, record, at));
+      const request = await agree(ctx, `the request to revoke ${record.recordId}`, (client) => requestTxOf(client, ctx.options, ctx.registry, record, at));
       if (!request) return release(ctx, write, {}, 'requested on chain; waiting for finality');
       return finalize(ctx, write, {
         txHash: request.txHash,

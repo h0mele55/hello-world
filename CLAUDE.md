@@ -423,6 +423,25 @@ to one inflect-compliance commit.
   that binds the stamp's namespace only: an original may bind the same prefix
   to another namespace (#144). A stamp is a claim; only the
   chain says whether the record it names is this file.
+- **Durable before named, and read back before reused (#156).** `store()`
+  syncs the file and its directory before it returns, since the row naming it
+  commits next. A stored copy not yet on chain is read back and checked before
+  it is anchored; one that does not read back is made again from the original
+  (`replacedLostCopy`).
+- **The issuer lock lives in a watched session** (`createLockSession`,
+  `src/lib/anchoring/lock-session.ts`, #156): keepalives, and an `'error'`
+  listener that marks it `lost` rather than crash the worker. The worker checks
+  before signing and before sending, and ends the pass (`LOCK_LOST`) once the
+  session is gone, since Postgres released the lock with it. The next pass opens
+  a new session.
+- **Log queries are bounded** (#156): a revocation's request or cancellation is
+  searched for backwards from the finalized block, `logRangeBlocks` (the
+  network's `LOG_RANGE_BLOCKS`) at a time and at most `maxLogWindows` windows.
+  CANCELLED is decided from the record; its transaction is best-effort. An
+  original not final yet on an endpoint that lags (`ORIGINAL_NOT_FINAL`) waits;
+  only a different record fails a copy. A certificate is committed under the
+  version's row lock, which `approveRevocation` takes too, and never for a
+  version whose revocation was approved meanwhile.
 - **The worker runs from the app's directory** (the PDF parser is found from
   there) and needs `FILE_*` and `APP_PUBLIC_URL` besides its chain settings.
   A failed pass (an endpoint or the database out) is tried again after the

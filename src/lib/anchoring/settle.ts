@@ -1,4 +1,4 @@
-import type { Client as PgClient } from 'pg';
+import type { LockClient } from './lock-session';
 import { getAddress, keccak256, type Hash, type LocalAccount, type PublicClient } from 'viem';
 import type { PrismaClient } from '@/generated/prisma/client';
 import { appendAuditEvent } from '@/lib/audit';
@@ -43,7 +43,7 @@ export class ReleaseError extends Error {
 
 export interface ReleaseDeps {
   prisma: PrismaClient;
-  lockClient: PgClient;
+  lockClient: LockClient;
   publicClient: PublicClient;
   account: LocalAccount;
   deployment: Deployment;

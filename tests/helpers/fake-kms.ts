@@ -1,5 +1,5 @@
 import { generateKeyPairSync } from 'node:crypto';
-import { secp256k1 } from '@noble/curves/secp256k1';
+import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { crc32c, type KmsClient } from '@/lib/chain/kms-account';
 
 /**
@@ -34,7 +34,7 @@ export interface FakeKmsOptions {
 export function fakeKms(privateKey: Uint8Array, options: FakeKmsOptions = {}): KmsClient & { signed: number } {
   const point = Buffer.from(secp256k1.getPublicKey(privateKey, false)).toString('hex');
   const pem = options.tamper === 'curve' ? P256_PEM : `-----BEGIN PUBLIC KEY-----\n${Buffer.from(SPKI_PREFIX + point, 'hex').toString('base64')}\n-----END PUBLIC KEY-----\n`;
-  const otherKey = secp256k1.utils.randomPrivateKey();
+  const otherKey = secp256k1.utils.randomSecretKey();
   const fake = {
     signed: 0,
     async getPublicKey({ name }: { name: string }) {
@@ -51,9 +51,10 @@ export function fakeKms(privateKey: Uint8Array, options: FakeKmsOptions = {}): K
     },
     async asymmetricSign({ name, digest, digestCrc32c }: { name: string; digest: { sha256: Uint8Array }; digestCrc32c: { value: number } }) {
       fake.signed += 1;
-      const signature = secp256k1.sign(digest.sha256, options.tamper === 'otherKey' ? otherKey : privateKey);
-      const s = options.highS ? secp256k1.CURVE.n - signature.s : signature.s;
-      let der: Uint8Array = new secp256k1.Signature(signature.r, s).toDERRawBytes();
+      // KMS signs the digest it is handed: no second hash (prehash: false).
+      const signature = secp256k1.Signature.fromBytes(secp256k1.sign(digest.sha256, options.tamper === 'otherKey' ? otherKey : privateKey, { prehash: false }), 'compact');
+      const s = options.highS ? secp256k1.Point.CURVE().n - signature.s : signature.s;
+      let der: Uint8Array = new secp256k1.Signature(signature.r, s).toBytes('der');
       if (options.tamper === 'garbage') der = new Uint8Array([0x30, 0x03, 0x02, 0x01, 0x00]);
       const crc = crc32c(der);
       return [

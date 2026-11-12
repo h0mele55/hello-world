@@ -1,6 +1,6 @@
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { p256 } from '@noble/curves/nist';
+import { p256 } from '@noble/curves/nist.js';
 import * as asn1js from 'asn1js';
 import * as pkijs from 'pkijs';
 import type { TestPki } from './test-pki';
@@ -133,7 +133,7 @@ export async function startFakeSealProvider(pki: TestPki, behaviour: FakeSealBeh
       const hashes = call.hashes as string[];
       if (call.hashAlgorithmOID !== '2.16.840.1.101.3.4.2.1' || hashes.length !== 1) return json(400, { error: 'invalid_request' });
       let signature = await pki.signer.signDigest(new Uint8Array(Buffer.from(hashes[0], 'base64')));
-      if (b.rawEcdsa) signature = p256.Signature.fromDER(signature).toCompactRawBytes();
+      if (b.rawEcdsa) signature = p256.Signature.fromBytes(signature, 'der').toBytes('compact');
       return json(200, { signatures: [Buffer.from(signature).toString('base64')] });
     }
     return json(404, { error: 'not_found' });

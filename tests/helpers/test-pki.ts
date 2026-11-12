@@ -1,5 +1,5 @@
 import { constants, createPrivateKey, privateEncrypt, webcrypto } from 'node:crypto';
-import { p256 } from '@noble/curves/nist';
+import { p256 } from '@noble/curves/nist.js';
 import * as asn1js from 'asn1js';
 import * as pkijs from 'pkijs';
 import { OID, sha256 } from '@/lib/eseal/cms';
@@ -175,7 +175,7 @@ export async function createTestPki(
   let signDigest: SealSigner['signDigest'];
   if (options.sealKey === 'ec') {
     const scalar = Buffer.from((await subtle.exportKey('jwk', sealKeys.privateKey)).d!, 'base64url');
-    signDigest = async (digest) => p256.sign(digest, scalar).toDERRawBytes();
+    signDigest = async (digest) => p256.sign(digest, scalar, { prehash: false, format: 'der' });
   } else {
     const sealPrivate = createPrivateKey({ key: Buffer.from(await subtle.exportKey('pkcs8', sealKeys.privateKey)), format: 'der', type: 'pkcs8' });
     signDigest = async (digest) => new Uint8Array(privateEncrypt({ key: sealPrivate, padding: constants.RSA_PKCS1_PADDING }, Buffer.concat([SHA256_DIGEST_INFO, digest])));

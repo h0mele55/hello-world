@@ -67,6 +67,7 @@ export type AuditAction =
   | 'ots.submitted'
   | 'ots.complete'
   | 'ots.broken'
+  | 'ots.answer_refused'
   // The monthly checkpoint of the registry (#122).
   | 'checkpoint.created'
   // An audit-log head's journal row (#94): the anchor.* steps under their own prefix, and the check that queued it.

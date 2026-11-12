@@ -66,15 +66,21 @@ async function version(file: string, anchored: boolean) {
   return prisma.reportVersion.findUniqueOrThrow({ where: { id: uploaded.id }, select: { id: true, manifestHash: true } });
 }
 
-/** What a calendar answers at once: pending at itself. */
+/** What a calendar answers at once: pending at itself, behind its own aggregation. */
 const pendingAt = (uri: string): Timestamp => ({
   attestations: [],
-  ops: [{ op: { op: 'prepend', arg: new Uint8Array([0x5f, 0, 0, 1]) }, next: { attestations: [], ops: [{ op: { op: 'sha256' }, next: { attestations: [{ kind: 'pending', uri }], ops: [] } }] } }],
+  ops: [{ op: { op: 'prepend', arg: new Uint8Array([0x5f, 0, 0, [ALICE, BOB, CAROL].indexOf(uri) + 1]) }, next: { attestations: [], ops: [{ op: { op: 'sha256' }, next: { attestations: [{ kind: 'pending', uri }], ops: [] } }] } }],
 });
 /** What it answers once Bitcoin has its batch: a path to a block. */
 const confirmedAnswer: Timestamp = { attestations: [], ops: [{ op: { op: 'append', arg: new Uint8Array([1]) }, next: { attestations: [], ops: [{ op: { op: 'sha256' }, next: { attestations: [{ kind: 'bitcoin', height: HEIGHT }], ops: [] } }] } }] };
+/** A calendar's wrong answer: a path the block does not hold (the stub below knows it by its `append 02`). */
+const wrongAnswer: Timestamp = { attestations: [], ops: [{ op: { op: 'append', arg: new Uint8Array([2]) }, next: { attestations: [], ops: [{ op: { op: 'sha256' }, next: { attestations: [{ kind: 'bitcoin', height: HEIGHT - 1 }], ops: [] } }] } }] };
+const isWrong = (proof: Proof) => {
+  const walk = (stamp: Timestamp): boolean => stamp.ops.some(({ op, next }) => (op.op === 'append' && op.arg.length === 1 && op.arg[0] === 2) || walk(next));
+  return walk(proof.timestamp);
+};
 
-type Answer = 'pending' | 'confirmed' | 'down' | 'not-yet';
+type Answer = 'pending' | 'confirmed' | 'wrong' | 'down' | 'not-yet';
 /** Calendars whose answers the test sets, counting what they are asked. */
 function calendars(answers: Record<string, Answer>) {
   const asked: string[] = [];
@@ -86,15 +92,20 @@ function calendars(answers: Record<string, Answer>) {
     if (answer === 'down' || !answer) return new Response('', { status: 503 });
     if (u.pathname === '/digest') return new Response(serializeTimestamp(pendingAt(calendar)));
     if (answer === 'not-yet' || answer === 'pending') return new Response('', { status: 404 });
-    return new Response(serializeTimestamp(confirmedAnswer));
+    return new Response(serializeTimestamp(answer === 'wrong' ? wrongAnswer : confirmedAnswer));
   });
   return { deps: { calendars: [ALICE, BOB, CAROL], fetch: fetchImpl as unknown as typeof fetch }, asked };
 }
 
-/** The Bitcoin check, stubbed: a proof with a Bitcoin attestation reaches the block, or fails as told. */
+/**
+ * The Bitcoin check, stubbed: a proof with a Bitcoin attestation reaches the
+ * block, or fails as told; a wrong calendar's path never holds. Like the real
+ * check, one attestation that does not hold fails the whole proof.
+ */
 function bitcoin(outcome: 'ok' | BitcoinError = 'ok') {
   return async (proof: Proof): Promise<BitcoinTime | null> => {
     if (!attestationsOf(proof).some((a) => a.attestation.kind === 'bitcoin')) return null;
+    if (isWrong(proof)) throw new BitcoinError('NOT_IN_BLOCK', 'not the root');
     if (outcome !== 'ok') throw outcome;
     return { height: HEIGHT, blockHash: `0x${'0'.repeat(20)}${'ab'.repeat(22)}`, time: 1_790_000_000 };
   };
@@ -188,13 +199,16 @@ describe('upgrading and checking', () => {
     expect((await pass({ calendar: calendars({}).deps })).complete).toEqual([final.id]);
   });
 
-  it('is BROKEN when the proof leads to something the block does not hold', async () => {
+  it('is BROKEN only when no attestation in the proof can hold (#147)', async () => {
     const final = await version('en-unmodified.pdf', true);
     await pass({ calendar: calendars({ [ALICE]: 'pending', [BOB]: 'pending' }).deps });
     clock = new Date(clock.getTime() + 31 * MINUTE);
-    const report = await pass({ calendar: calendars({ [ALICE]: 'confirmed' }).deps, bitcoinTime: bitcoin(new BitcoinError('NOT_IN_BLOCK', 'not the root')) });
+    const report = await pass({ calendar: calendars({ [ALICE]: 'wrong', [BOB]: 'wrong' }).deps });
     expect(report.broken).toEqual([final.id]);
-    expect(await prisma.otsProof.findUniqueOrThrow({ where: { reportVersionId: final.id } })).toMatchObject({ status: 'BROKEN', lastError: 'NOT_IN_BLOCK' });
+    const row = await prisma.otsProof.findUniqueOrThrow({ where: { reportVersionId: final.id } });
+    expect(row).toMatchObject({ status: 'BROKEN', lastError: 'NOT_IN_BLOCK' });
+    // What the calendars answered is kept, for the person who looks at it.
+    expect(attestationsOf(parseProof(new Uint8Array(row.proof))).filter((a) => a.attestation.kind === 'bitcoin')).toHaveLength(2);
     expect((await events()).map((e) => e.action)).toEqual(['ots.submitted', 'ots.broken']);
 
     // A broken proof is left for a person: no pass touches it again.
@@ -202,6 +216,40 @@ describe('upgrading and checking', () => {
     const later = calendars({ [ALICE]: 'confirmed' });
     expect(await pass({ calendar: later.deps })).toMatchObject({ complete: [], broken: [], pending: [] });
     expect(later.asked).toEqual([]);
+  });
+
+  it('completes on the calendar whose answer holds, and keeps no branch that does not (#147)', async () => {
+    const final = await version('en-unmodified.pdf', true);
+    await pass({ calendar: calendars({ [ALICE]: 'pending', [BOB]: 'pending' }).deps });
+    clock = new Date(clock.getTime() + 31 * MINUTE);
+    const report = await pass({ calendar: calendars({ [ALICE]: 'wrong', [BOB]: 'confirmed' }).deps });
+    expect(report).toMatchObject({ complete: [final.id], broken: [] });
+    const row = await prisma.otsProof.findUniqueOrThrow({ where: { reportVersionId: final.id } });
+    expect(row).toMatchObject({ status: 'COMPLETE', bitcoinHeight: HEIGHT });
+    // What is served holds as a whole: the wrong calendar's path and its pending claim are gone.
+    const kept = parseProof(new Uint8Array(row.proof));
+    expect(isWrong(kept)).toBe(false);
+    expect(await bitcoin()(kept)).toMatchObject({ height: HEIGHT });
+    expect(attestationsOf(kept).map((a) => a.attestation)).toEqual([
+      { kind: 'pending', uri: BOB },
+      { kind: 'bitcoin', height: HEIGHT },
+    ]);
+    expect((await events()).map((e) => e.action)).toEqual(['ots.submitted', 'ots.answer_refused', 'ots.complete']);
+  });
+
+  it('drops a wrong answer and waits for the other calendar, never asking the wrong one again (#147)', async () => {
+    const final = await version('en-unmodified.pdf', true);
+    await pass({ calendar: calendars({ [ALICE]: 'pending', [BOB]: 'pending' }).deps });
+    clock = new Date(clock.getTime() + 31 * MINUTE);
+    expect((await pass({ calendar: calendars({ [ALICE]: 'wrong', [BOB]: 'not-yet' }).deps })).pending).toEqual([{ versionId: final.id, reason: 'CALENDAR_ANSWER_REFUSED' }]);
+    const row = await prisma.otsProof.findUniqueOrThrow({ where: { reportVersionId: final.id } });
+    expect(row).toMatchObject({ status: 'PENDING', lastError: 'CALENDAR_ANSWER_REFUSED' });
+    expect(attestationsOf(parseProof(new Uint8Array(row.proof))).map((a) => a.attestation)).toEqual([{ kind: 'pending', uri: BOB }]);
+
+    clock = new Date(clock.getTime() + 31 * MINUTE);
+    const later = calendars({ [ALICE]: 'wrong', [BOB]: 'confirmed' });
+    expect((await pass({ calendar: later.deps })).complete).toEqual([final.id]);
+    expect(later.asked).toEqual([`${BOB}/timestamp`]);
   });
 
   it('refuses rows the database would not hold: one calendar, or COMPLETE without its block', async () => {
@@ -232,7 +280,7 @@ describe('the monitor', () => {
     expect(await otsAlerts(49, start)).toEqual([{ code: 'OTS_PENDING_LONG', orgId, detail: { count: 1, oldestSubmittedAt: start.toISOString(), reasons: ['CALENDARS_UNREACHABLE'], runbook } }]);
 
     clock = new Date(start.getTime() + 50 * HOUR);
-    await pass({ calendar: calendars({ [ALICE]: 'confirmed' }).deps, bitcoinTime: bitcoin(new BitcoinError('NOT_IN_BLOCK', 'not the root')) });
+    await pass({ calendar: calendars({ [ALICE]: 'wrong', [BOB]: 'wrong' }).deps });
     const row = await prisma.otsProof.findFirstOrThrow();
     expect(await otsAlerts(51, start)).toEqual([{ code: 'OTS_BROKEN', orgId, detail: { otsProofId: row.id, reportVersionId: row.reportVersionId, checkpointId: null, reason: 'NOT_IN_BLOCK', at: clock.toISOString(), runbook } }]);
     expect(await otsAlerts(75, start)).toEqual([]);

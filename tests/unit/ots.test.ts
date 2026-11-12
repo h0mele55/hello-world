@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { agreedHeader, BitcoinError, bitcoinTimeOf, checkBitcoinAttestation, esploraSource, hasProofOfWork, readHeader, targetOf, type HeaderSource } from '@/lib/ots/bitcoin';
 import { submitDigest, upgradeProof } from '@/lib/ots/calendar';
 import { bitcoinTimestampFor, issuerProofFetcher } from '@/lib/verify-core';
-import { applyOp, attestationsOf, OtsError, OTS_MAGIC, parseProof, parseTimestamp, serializeProof, serializeTimestamp, type Proof, type Timestamp } from '@/lib/ots/format';
+import { applyOp, attestationsOf, MAX_PROOF_BYTES, OtsError, OTS_MAGIC, parseProof, parseTimestamp, pathTo, serializeProof, serializeTimestamp, withoutAttestations, type Proof, type Timestamp } from '@/lib/ots/format';
 
 /**
  * #66: the .ots format, the Bitcoin check and the calendar client, offline.
@@ -298,8 +298,100 @@ describe('the calendar client', () => {
     expect(elsewhere.seen).toEqual([]);
   });
 
+  it('refuses an answer that would make the proof larger than a proof can be read, keeping the proof as it was (#147)', async () => {
+    // A proof close to the cap: branches pending at a calendar it does not ask, and one at ALICE.
+    const filler = (n: number) => ({ op: { op: 'append' as const, arg: new Uint8Array(4000).fill(n) }, next: { attestations: [{ kind: 'pending' as const, uri: BOB }], ops: [] } });
+    const proof: Proof = {
+      digest: sha256(new TextEncoder().encode('large'), 'bytes'),
+      timestamp: { attestations: [{ kind: 'pending', uri: ALICE }], ops: Array.from({ length: 15 }, (_, i) => filler(i)) },
+    };
+    const before = serializeProof(proof);
+    expect(before.length).toBeLessThan(MAX_PROOF_BYTES);
+    const answer: Timestamp = {
+      attestations: [],
+      // Hashed between the two: a message is never longer than the format allows.
+      ops: [{ op: { op: 'append', arg: new Uint8Array(4000).fill(0xaa) }, next: { attestations: [], ops: [{ op: { op: 'sha256' }, next: { attestations: [], ops: [{ op: { op: 'append', arg: new Uint8Array(4000).fill(0xbb) }, next: { attestations: [{ kind: 'bitcoin', height: HEIGHT }], ops: [] } }] } }] } }],
+    };
+    const calendars = fakeCalendars({ [`${ALICE}/timestamp/`]: () => new Response(serializeTimestamp(answer)) });
+    expect(await upgradeProof(proof, { calendars: [ALICE], fetch: calendars.fetch })).toEqual({ changed: false, pending: [], failed: [{ calendar: ALICE, reason: 'PROOF_TOO_LARGE' }] });
+    expect(serializeProof(proof)).toEqual(before);
+  });
+
   it('refuses to timestamp anything but a 32-byte digest', async () => {
     await expect(submitDigest(new Uint8Array(20), { calendars: [], fetch: fakeCalendars({}).fetch })).rejects.toThrow(OtsError);
+  });
+});
+
+/** A body of `total` bytes, counting what the reader pulled: an answer that never stops, as far as a reader without a cap is concerned. */
+function flood(total = 50_000_000, byte = 0x61) {
+  let pulled = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (pulled >= total) return controller.close();
+      pulled += 65_536;
+      controller.enqueue(new Uint8Array(65_536).fill(byte));
+    },
+  });
+  return { body, pulled: () => pulled };
+}
+
+describe('answers read up to a cap (#147)', () => {
+  it('an explorer’s, whatever it sends and however it says how much', async () => {
+    for (const declared of [null, '64']) {
+      const { body, pulled } = flood();
+      const fetchImpl = (async () => new Response(body, { headers: declared ? { 'content-length': declared } : {} })) as unknown as typeof fetch;
+      expect(await rejectionOf(esploraSource('https://explorer.example/api', fetchImpl).header(HEIGHT))).toBe('UNREADABLE');
+      expect(pulled()).toBeLessThan(1_000_000);
+    }
+  });
+
+  it('the issuer’s proof, refused once past the largest proof read', async () => {
+    const { body, pulled } = flood();
+    const fetchImpl = (async () => new Response(body)) as unknown as typeof fetch;
+    await expect(issuerProofFetcher('https://issuer.example', fetchImpl)(sha256(FILE))).rejects.toMatchObject({ code: 'TOO_LARGE' });
+    expect(pulled()).toBeLessThan(1_000_000);
+  });
+});
+
+describe('a proof’s branches (#147)', () => {
+  /** Two calendars, each pending at itself; then ALICE's answer, and a second branch under BOB. */
+  const twoCalendars = (): Proof => ({
+    digest: sha256(new TextEncoder().encode('branches'), 'bytes'),
+    timestamp: {
+      attestations: [],
+      ops: [
+        { op: { op: 'prepend', arg: new Uint8Array([1]) }, next: { attestations: [{ kind: 'pending', uri: ALICE }], ops: [{ op: { op: 'sha256' }, next: { attestations: [{ kind: 'bitcoin', height: 1 }], ops: [] } }] } },
+        { op: { op: 'prepend', arg: new Uint8Array([2]) }, next: { attestations: [{ kind: 'pending', uri: BOB }], ops: [{ op: { op: 'sha256' }, next: { attestations: [{ kind: 'bitcoin', height: 2 }], ops: [] } }] } },
+      ],
+    },
+  });
+
+  it('takes the path to one attestation alone, leading to the same message', () => {
+    const proof = twoCalendars();
+    const all = attestationsOf(proof);
+    all.forEach((entry, i) => {
+      const alone = attestationsOf(pathTo(proof, i));
+      expect(alone).toHaveLength(1);
+      expect(alone[0].attestation).toEqual(entry.attestation);
+      expect(bytesToHex(alone[0].message)).toBe(bytesToHex(entry.message));
+    });
+  });
+
+  it('drops an attestation with the pending one its answer upgraded, and nothing of the other calendar', () => {
+    const proof = twoCalendars();
+    const before = serializeProof(proof);
+    const index = attestationsOf(proof).findIndex((a) => a.attestation.kind === 'bitcoin' && a.attestation.height === 1);
+    const pruned = withoutAttestations(proof, new Set([index]));
+    expect(attestationsOf(pruned).map((a) => a.attestation)).toEqual([
+      { kind: 'pending', uri: BOB },
+      { kind: 'bitcoin', height: 2 },
+    ]);
+    // Written and read back; the proof given is left as it was.
+    expect(attestationsOf(parseProof(serializeProof(pruned)))).toHaveLength(2);
+    expect(serializeProof(proof)).toEqual(before);
+    // Both dropped: nothing is left.
+    const bitcoin = attestationsOf(proof).flatMap((a, i) => (a.attestation.kind === 'bitcoin' ? [i] : []));
+    expect(attestationsOf(withoutAttestations(proof, new Set(bitcoin)))).toEqual([]);
   });
 });
 

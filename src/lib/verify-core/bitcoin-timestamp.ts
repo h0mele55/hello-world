@@ -1,7 +1,8 @@
 import { bytesToHex, type Hex } from 'viem';
 import { BitcoinError, bitcoinTimeOf, esploraSource, type HeaderSource } from '../ots/bitcoin';
 import { BITCOIN_EXPLORERS, EXPLORER_ORIGINS } from '../ots/explorers';
-import { attestationsOf, OtsError, parseProof } from '../ots/format';
+import { attestationsOf, MAX_PROOF_BYTES, OtsError, parseProof } from '../ots/format';
+import { readCapped } from '../ots/read-capped';
 
 /**
  * The second, independent timestamp of a matched report (#66): the issuer's
@@ -33,9 +34,6 @@ export interface TimestampSources {
   explorers: readonly [HeaderSource, HeaderSource];
 }
 
-/** The largest proof the verifier reads; the format's own limit. */
-const MAX_PROOF_BYTES = 1 << 16;
-
 /** Asks the issuer's public proof route (`/ots/<manifestHash>`) at `appUrl`. */
 export function issuerProofFetcher(appUrl: string, fetchImpl: typeof fetch = fetch): TimestampSources['fetchProof'] {
   const base = appUrl.replace(/\/+$/, '');
@@ -43,8 +41,8 @@ export function issuerProofFetcher(appUrl: string, fetchImpl: typeof fetch = fet
     const res = await fetchImpl(`${base}/ots/${manifestHash}`, { signal: AbortSignal.timeout(15_000), credentials: 'omit', redirect: 'error' });
     if (res.status === 404) return null;
     if (!res.ok) throw new Error(`the issuer answered ${res.status}`);
-    const bytes = new Uint8Array(await res.arrayBuffer());
-    if (bytes.length > MAX_PROOF_BYTES) throw new OtsError('TOO_LARGE', 'the proof is too large');
+    const bytes = await readCapped(res, MAX_PROOF_BYTES);
+    if (!bytes) throw new OtsError('TOO_LARGE', 'the proof is too large');
     return bytes;
   };
 }

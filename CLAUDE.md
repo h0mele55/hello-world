@@ -641,9 +641,19 @@ to one inflect-compliance commit.
 - **COMPLETE only on the Bitcoin check**: the path reaches the Merkle root of
   a header that both explorers (`BITCOIN_EXPLORERS`) return byte for byte,
   that hashes to the block each named and carries the proof of work Bitcoin's
-  do. An explorer out or two that disagree leave the proof PENDING with a
-  reason; a path to the wrong root is BROKEN and never touched again. Never
-  set COMPLETE or a block another way: CHECKs hold COMPLETE to its block.
+  do. Each Bitcoin attestation is checked on its own (`pathTo`): one whose
+  path misses the root is dropped with the pending claim its calendar's
+  answer fulfilled (`withoutAttestations`, `ots.answer_refused`), so one
+  wrong calendar never spoils another's answer and the proof kept holds as a
+  whole (#147). COMPLETE only when every attestation left holds; BROKEN only
+  when nothing is left that could, and never touched again. An explorer out
+  or two that disagree leave the proof PENDING with a reason. Never set
+  COMPLETE or a block another way: CHECKs hold COMPLETE to its block.
+- **Every answer from outside is read up to a cap** (`readCapped`,
+  `src/lib/ots/read-capped.ts`): a calendar's, an explorer's and the issuer's
+  proof, never with `res.text()` or `res.arrayBuffer()`. A calendar's answer
+  that would take the proof past `MAX_PROOF_BYTES` is not merged
+  (`PROOF_TOO_LARGE`): a proof that large could never be read again.
 - **The verifiers show it beside the verdict, never in it**
   (`bitcoinTimestampFor`, `src/lib/verify-core/bitcoin-timestamp.ts`): only
   for an exact match, from the matched record's manifest hash (a copy's record

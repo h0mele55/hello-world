@@ -1,5 +1,6 @@
 import { bytesToHex, sha256, type Hex } from 'viem';
 import { attestationsOf, type Proof } from './format';
+import { readCapped } from './read-capped';
 
 /**
  * Checking a proof's Bitcoin attestation (#66). The message a proof's
@@ -80,6 +81,8 @@ export interface HeaderSource {
 }
 
 const MAX_TEXT = 256;
+/** What is read of an explorer's answer before it is refused: a block hash or a header, with room for whitespace (#147). */
+const MAX_ANSWER_BYTES = 1024;
 const TIMEOUT_MS = 15_000;
 
 /**
@@ -92,7 +95,9 @@ export function esploraSource(baseUrl: string, fetchImpl: typeof fetch = fetch):
   const text = async (path: string, shape: RegExp) => {
     const res = await fetchImpl(`${base}${path}`, { signal: AbortSignal.timeout(TIMEOUT_MS), redirect: 'error', credentials: 'omit' });
     if (!res.ok) throw new BitcoinError('UNREADABLE', `${origin} answered ${res.status}`);
-    const body = (await res.text()).trim();
+    const raw = await readCapped(res, MAX_ANSWER_BYTES);
+    if (!raw) throw new BitcoinError('UNREADABLE', `${origin} answered too much`);
+    const body = new TextDecoder().decode(raw).trim();
     if (body.length > MAX_TEXT || !shape.test(body)) throw new BitcoinError('UNREADABLE', `${origin} answered something that is not a block hash or header`);
     return body;
   };

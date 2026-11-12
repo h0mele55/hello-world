@@ -3,7 +3,7 @@ import http from 'node:http';
 import path from 'node:path';
 import { p256 } from '@noble/curves/nist';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { cscSigner, ecdsaDer, type CscConfig } from '@/lib/eseal/csc';
+import { cscSigner, ecdsaDer, providerEcdsaDer, type CscConfig } from '@/lib/eseal/csc';
 import { post, providerUrl } from '@/lib/eseal/http';
 import { checkSeal, sealPdf } from '@/lib/eseal/pades';
 import { rfc3161Timestamper } from '@/lib/eseal/tsa';
@@ -87,6 +87,23 @@ describe('sealing through a CSC v2 service and an RFC 3161 authority', () => {
     }
     const signature = p256.sign(new Uint8Array(32).fill(9), p256.utils.randomPrivateKey());
     expect(Buffer.from(ecdsaDer(signature.toCompactRawBytes())).equals(Buffer.from(signature.toDERRawBytes()))).toBe(true);
+  });
+
+  it('reads r ‖ s as r ‖ s even when r begins with 0x30, the first byte of DER (#181)', () => {
+    const key = p256.utils.randomPrivateKey();
+    const digest = (i: number) => new Uint8Array(32).map((_, j) => (j < 4 ? (i >>> (8 * j)) & 0xff : 7));
+    let thirties = 0;
+    for (let i = 0; i < 20_000 && thirties < 5; i++) {
+      const signature = p256.sign(digest(i), key);
+      const der = signature.toDERRawBytes();
+      // Either encoding comes out as the one DER.
+      expect(Buffer.from(providerEcdsaDer(der)).equals(Buffer.from(der))).toBe(true);
+      expect(Buffer.from(providerEcdsaDer(signature.toCompactRawBytes())).equals(Buffer.from(der)), `signature ${i}`).toBe(true);
+      if (signature.toCompactRawBytes()[0] === 0x30) thirties += 1;
+    }
+    expect(thirties).toBe(5);
+    // Neither DER nor an even-length r ‖ s: refused, never passed on.
+    expect(() => providerEcdsaDer(new Uint8Array([0x30, 0x03, 0x02, 0x01, 0x01]))).toThrow(SealError);
   });
 
   it('gives an explicit credential its PIN, and refuses to wait on a person', async () => {

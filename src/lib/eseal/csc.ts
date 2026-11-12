@@ -142,7 +142,7 @@ export function cscSigner(config: CscConfig, fetchImpl: typeof fetch = fetch): S
       );
       const signature = unbase64(signatures[0], 'the signature');
       // An ECDSA signature may come back as r and s side by side; CMS wants it DER-encoded.
-      return ec && signature[0] !== 0x30 ? ecdsaDer(signature) : signature;
+      return ec ? providerEcdsaDer(signature) : signature;
     },
   };
 }
@@ -153,6 +153,36 @@ function chooseSignAlgo(ec: boolean, listed: string[]): string {
   if (listed.length === 0 || listed.includes(withHash)) return withHash;
   if (listed.includes(bare)) return bare;
   throw new SealError('SIGNER_REFUSED', `the seal key lists no ${ec ? 'ECDSA' : 'RSA'} signature algorithm this worker uses`);
+}
+
+/** Whether `bytes` is exactly one DER Ecdsa-Sig-Value: a SEQUENCE of two minimally encoded positive INTEGERs, and nothing else. */
+function isEcdsaSigValue(bytes: Uint8Array): boolean {
+  if (bytes.length < 8 || bytes[0] !== 0x30) return false;
+  let at: number;
+  let length: number;
+  if (bytes[1] < 0x80) [at, length] = [2, bytes[1]];
+  else if (bytes[1] === 0x81 && bytes[2] >= 0x80) [at, length] = [3, bytes[2]];
+  else return false;
+  if (at + length !== bytes.length) return false;
+  for (let n = 0; n < 2; n++) {
+    if (bytes[at] !== 0x02) return false;
+    const size = bytes[at + 1];
+    const body = bytes.subarray(at + 2, at + 2 + size);
+    if (size === 0 || size > 0x7f || body.length !== size) return false;
+    // Positive, and minimal: a leading zero only before a byte with its high bit set.
+    if (body[0] & 0x80 || (size > 1 && body[0] === 0 && !(body[1] & 0x80))) return false;
+    at += 2 + size;
+  }
+  return at === bytes.length;
+}
+
+/**
+ * A provider's ECDSA signature as DER (#181): kept when it is exactly one
+ * Ecdsa-Sig-Value, otherwise read as r ‖ s. Not by its first byte: an r that
+ * begins with 0x30, as one in 256 does, would be taken for DER and refused.
+ */
+export function providerEcdsaDer(signature: Uint8Array): Uint8Array {
+  return isEcdsaSigValue(signature) ? signature : ecdsaDer(signature);
 }
 
 /** r ‖ s (as IEEE P1363 writes them) to DER Ecdsa-Sig-Value. */

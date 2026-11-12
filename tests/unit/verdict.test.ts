@@ -81,6 +81,8 @@ const STAMP: StampFields = {
   opinionSalt: SALT,
   norm: 1,
 };
+/** The stamp the worker writes since #157: the same fields, and whether the preparer corrected the located opinion. */
+const STAMP_V2: StampFields = { ...STAMP, stamp: 2, opinionEdited: 0 };
 
 /** What the reader would return for a stamped file: the XMP packet and the mirrored Info keys. */
 function stamped(pageLines: string[][], fields: Record<string, string | number> = STAMP): DocumentRead {
@@ -204,9 +206,23 @@ describe('a file that is not registered byte for byte', () => {
 
   it('is ALTERED_OPINION_CHANGED when the opinion type or its words differ', async () => {
     const qualified = reportLines('Qualified Opinion', OPINION_TEXT, 'Basis for Qualified Opinion');
-    expect(await verify(edited, view, stamped(qualified))).toMatchObject({ kind: 'ALTERED_OPINION_CHANGED', claimed: { recordId: id(1) } });
+    // A version-2 stamp says the preparer confirmed what the locator found: a different type is a changed file.
+    expect(await verify(edited, view, stamped(qualified, STAMP_V2))).toMatchObject({ kind: 'ALTERED_OPINION_CHANGED', claimed: { recordId: id(1) } });
     const reworded = reportLines('Opinion', OPINION_TEXT.replace('present fairly', 'do not present fairly'), 'Basis for Opinion');
     expect(await verify(edited, view, stamped(reworded))).toMatchObject({ kind: 'ALTERED_OPINION_CHANGED' });
+    expect(await verify(edited, view, stamped(reworded, STAMP_V2))).toMatchObject({ kind: 'ALTERED_OPINION_CHANGED' });
+  });
+
+  it('cannot check an opinion the preparer corrected at confirmation, and says why (#157)', async () => {
+    // The located passage is not what was committed: no re-render of it could recommit, untouched or not.
+    for (const lines of [UNMODIFIED_LINES, reportLines('Opinion', OPINION_TEXT.replace('present fairly', 'do not present fairly'), 'Basis for Opinion')]) {
+      expect(await verify(edited, view, stamped(lines, { ...STAMP_V2, opinionEdited: 1 }))).toMatchObject({ kind: 'ALTERED_OPINION_NOT_CHECKABLE', reason: 'OPINION_EDITED_AT_CONFIRMATION' });
+    }
+    // A version-1 stamp cannot say whether the type was corrected: a type the file shows differently is not checkable, never CHANGED.
+    const qualified = reportLines('Qualified Opinion', OPINION_TEXT, 'Basis for Qualified Opinion');
+    expect(await verify(edited, view, stamped(qualified))).toMatchObject({ kind: 'ALTERED_OPINION_NOT_CHECKABLE', reason: 'OPINION_TYPE_DIFFERS' });
+    // An untouched re-render under a version-2 stamp still recommits.
+    expect(await verify(edited, view, stamped(UNMODIFIED_LINES, STAMP_V2))).toMatchObject({ kind: 'ALTERED_OPINION_APPEARS_UNCHANGED' });
   });
 
   it('checks against the original when the stamp names the copy record', async () => {

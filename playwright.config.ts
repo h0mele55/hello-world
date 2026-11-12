@@ -5,8 +5,10 @@ import { defineConfig, devices } from '@playwright/test';
 const PORT = 3100;
 
 // The roots of the firm's electronic seal (#120), which /verify hands the
-// browser. tests/e2e/anchoring.spec.ts writes them here when it makes the
-// stand-in provider's keys; the server reads the file on every render.
+// browser. tests/e2e/global-setup.ts writes a throwaway root here first, since
+// /verify refuses a roots file it cannot read (#157); tests/e2e/anchoring.spec.ts
+// replaces it when it makes the stand-in provider's keys. The server reads the
+// file on every render.
 process.env.E2E_SEAL_ROOTS ??= path.join(os.tmpdir(), 'anchor-e2e-seal-roots.pem');
 
 // Where the single-file verifier is published (#85): /verify links it, and the
@@ -24,6 +26,8 @@ const serverEnv = {
 
 export default defineConfig({
   testDir: 'tests/e2e',
+  // Writes a valid seal root before any test opens a page (tests/e2e/global-setup.ts).
+  globalSetup: './tests/e2e/global-setup.ts',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: 0,

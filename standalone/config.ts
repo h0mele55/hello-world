@@ -65,6 +65,17 @@ export function rpcUrlsRefusal(chainId: number, rpcUrls: readonly [string, strin
 }
 
 /** Base64 DER, as the setup carries the seal's roots, to bytes. */
+/**
+ * Whether the archives baked in apply (#157): whenever the registry in use is
+ * the one they were baked for, whether from the baked settings or from
+ * --deployment with the user's own endpoints. Dropping them there would read a
+ * file anchored on a retired registry as NOT_REGISTERED. Another registry's
+ * roots are not recorded on it, so its sets would only be refused.
+ */
+export function bakedSetsApply(baked: { chainId: number; registry: string } | null, inUse: { chainId: number; registry: string }, count: number): boolean {
+  return count > 0 && baked !== null && baked.chainId === inUse.chainId && baked.registry.toLowerCase() === inUse.registry.toLowerCase();
+}
+
 export const rootsOf = (setup: StandaloneSetup) => setup.sealRoots.map((b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
 
 /** JSON with bigints as decimal strings: verdicts carry none today, but a future field must not crash the output. */

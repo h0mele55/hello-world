@@ -538,6 +538,19 @@ to one inflect-compliance commit.
   recovery codes are stored as SHA-256 and shown once. Until the second factor
   is set up, the session is `mfa: 'ENROLL'`: pages redirect to `/account/mfa`
   and routes answer `MFA_REQUIRED`, except the two setup routes.
+- **A session stands only while its user is as it signed in** (#145).
+  `currentUser()` (`liveUser`, `src/auth.ts`) reads the `User` row on every
+  request and refuses a session whose `sessionVersion`, role or firm no longer
+  match, whose user is disabled, or that signed in more than
+  `SESSION_MAX_AGE_MS` (8 hours) ago: NextAuth slides the cookie's expiry on
+  every read, so its `maxAge` alone never ends a session. `sessionVersion` is
+  bumped when a second factor is set up or reset and when a user is disabled.
+  Anything that changes who a user is or how they sign in must bump it too.
+- **An ADMIN manages the firm's people on `/team`** (`src/lib/team.ts`,
+  `manageUsers`): resets another person's second factor (secret and recovery
+  codes cleared; they enrol afresh with their password) and disables or
+  enables another person, each audited (`mfa.reset`, `user.disabled`,
+  `user.enabled`). Never their own account: another admin must.
 - **Rate limits** (`src/lib/login-throttle.ts`, `src/lib/rate-limit.ts`):
   sign-in 10 attempts a minute per address, lockout after 5 failures per email
   or 10 per address in 15 minutes; writes 60 a minute per user (429 with

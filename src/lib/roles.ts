@@ -22,6 +22,8 @@ export const CAN = {
   reviewUnjournaledWrite: ['ADMIN'],
   /** Set up a second factor: the roles that must sign in with one. */
   setUpMfa: ['APPROVER', 'ADMIN'],
+  /** See the firm's people, reset another's second factor, and disable or enable another (#145). */
+  manageUsers: ['ADMIN'],
 } as const satisfies Record<string, readonly Role[]>;
 
 export type Act = keyof typeof CAN;

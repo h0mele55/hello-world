@@ -9,14 +9,23 @@
  *   npx tsx scripts/owner-call.ts <network> remove-issuer <address>       setIssuer(address, firm, false)
  *   npx tsx scripts/owner-call.ts <network> cancel-revocation <recordId>  cancelRevocation(recordId), before it takes effect
  *   npx tsx scripts/owner-call.ts <network> void-audit-head <index>       voidAuditHead(firm, index): a head the firm's log never held
- *   npx tsx scripts/owner-call.ts <network> record-reanchor-root <archive.json>
- *                                                                        recordReanchorRoot(...): the root of an archive scripts/reanchor.ts built
+ *   npx tsx scripts/owner-call.ts <network> record-reanchor-root <archive.json> (--source <network> | --source-gone)
+ *                                                                        recordReanchorRoot(...): the root of an archive scripts/reanchor.ts built,
+ *                                                                        once the source registry, read again at the archive's block, holds
+ *                                                                        exactly those records (#155); --source-gone only once its chain is shut down
  *   npx tsx scripts/owner-call.ts <network> void-reanchor-root <index>    voidReanchorRoot(index): a root recorded in error
  *   npx tsx scripts/owner-call.ts <network> transfer-owner <safe>         transferOwnership(safe), by the current owner
  *   npx tsx scripts/owner-call.ts <network> accept-owner                  acceptOwnership(), by the new owner
  *
  * Options:
  *   --deployment <file>  instead of deployments/<network>.json
+ *   --source <network>, --source-deployment <file>
+ *                        record-reanchor-root: the chain the archive was read
+ *                        from, and its deployment record (default
+ *                        deployments/<source>.json); read on <SOURCE>_RPC_URL and _2
+ *   --source-gone        record-reanchor-root without that comparison: only once
+ *                        the source chain cannot be read any more, and said so in the
+ *                        transaction's description
  *   --send               send it with OWNER_PRIVATE_KEY. Only for the issuer
  *                        calls, a cancellation, a void and a re-anchor root, and only while the owner is
  *                        a single key (Anvil, a testnet rehearsal). Moving
@@ -40,7 +49,10 @@ import { toRegistryError } from '../src/lib/chain/adapter';
 import { RegistryRevertError } from '../src/lib/chain/errors';
 import { deploymentPath, isNetworkName, loadDeploymentFile, NETWORKS, rpcUrlFor } from '../src/lib/chain/networks';
 import { registryAbi } from '../src/lib/chain/registry-artifact';
+import { ChainError } from '../src/lib/chain/errors';
+import { checkArchiveAgainstSource } from '../src/lib/chain/reanchor-build';
 import { CannotVerify, checkReanchorSet } from '../src/lib/verify-core';
+import { sourceReadDeps } from './reanchor-source';
 
 const ZERO = '0x0000000000000000000000000000000000000000';
 const ZERO_ORG = `0x${'0'.repeat(64)}`;
@@ -58,7 +70,16 @@ const ACTIONS: readonly Action[] = ['add-issuer', 'remove-issuer', 'cancel-revoc
 const CANCEL_MARGIN_SECONDS = 15 * 60;
 
 async function main() {
-  const { values, positionals } = parseArgs({ allowPositionals: true, options: { deployment: { type: 'string' }, send: { type: 'boolean', default: false } } });
+  const { values, positionals } = parseArgs({
+    allowPositionals: true,
+    options: {
+      deployment: { type: 'string' },
+      send: { type: 'boolean', default: false },
+      source: { type: 'string' },
+      'source-deployment': { type: 'string' },
+      'source-gone': { type: 'boolean', default: false },
+    },
+  });
   const [network, action, argument] = positionals;
   if (!isNetworkName(network) || !ACTIONS.includes(action as Action)) refuse(`usage: owner-call <${Object.keys(NETWORKS).join('|')}> <${ACTIONS.join('|')}> [address | record id | head index | archive.json | root index] [--deployment <file>] [--send]`);
   const act = action as Action;
@@ -92,6 +113,8 @@ async function main() {
     | { functionName: 'acceptOwnership'; args: readonly [] };
   let from: Address = owner;
   let description: string;
+  /** record-reanchor-root only: whether the archive was compared with its source registry (#155). */
+  let sourceChecked: boolean | null = null;
   if (act === 'add-issuer' || act === 'remove-issuer') {
     if (!argument || !isAddress(argument)) refuse('give the issuer key’s address');
     const key = getAddress(argument);
@@ -141,11 +164,29 @@ async function main() {
     if (!archive.complete) refuse(`${argument} is a single record's proof; record the root of the whole archive`);
     if (!archive.target) refuse(`${argument} is a checkpoint: its root is timestamped on Bitcoin, never recorded on a registry`);
     if (archive.target.chainId !== chain.id || archive.target.registry.toLowerCase() !== deployment.address.toLowerCase()) refuse(`${argument} was built for another registry (${archive.target.registry} on chain ${archive.target.chainId})`);
+    // The archive holding together proves nothing about the registry it names: read that registry again (#155).
+    if (values.source && values['source-gone']) refuse('give --source or --source-gone, not both');
+    if (values['source-gone']) {
+      sourceChecked = false;
+      console.error(JSON.stringify({ level: 'warn', message: 'the archive is NOT compared with its source registry: --source-gone says its chain is shut down' }));
+    } else {
+      if (!values.source) refuse('give --source <network>, the chain the archive was read from, so the root is recorded only for what that registry held; or --source-gone once that chain is shut down');
+      if (!isNetworkName(values.source)) refuse(`--source ${values.source} is not a network`);
+      const deps = sourceReadDeps(values.source, values['source-deployment']);
+      if (typeof deps === 'string') refuse(deps);
+      try {
+        await checkArchiveAgainstSource(deps, archive);
+      } catch (error) {
+        if (error instanceof ChainError) refuse(`${error.code}: ${error.message}`);
+        throw error;
+      }
+      sourceChecked = true;
+    }
     const total = await publicClient.readContract({ ...registry, functionName: 'reanchorRootCount' });
     const roots = await publicClient.readContract({ ...registry, functionName: 'reanchorRoots', args: [0n, total] });
     if (roots.some((r) => !r.voided && r.root.toLowerCase() === archive.root)) console.error(JSON.stringify({ level: 'warn', message: `root ${archive.root} is already recorded; the call adds it again` }));
     call = { functionName: 'recordReanchorRoot', args: [archive.root, BigInt(archive.source.chainId), archive.source.registry, archive.source.block, archive.count] };
-    description = `record the root ${archive.root} of the ${archive.count} records registry ${archive.source.registry} on chain ${archive.source.chainId} held at block ${archive.source.block}: from then on each verifies through its proof. Only after scripts/reanchor.ts check has been run against a copy, and the archive is published`;
+    description = `record the root ${archive.root} of the ${archive.count} records registry ${archive.source.registry} on chain ${archive.source.chainId} held at block ${archive.source.block}: from then on each verifies through its proof. ${sourceChecked ? 'The source registry was read again at that block and holds exactly these records' : 'The source registry was NOT re-read: the operator said its chain is gone'}. Only after scripts/reanchor.ts check has been run against a copy, and the archive is published`;
   } else if (act === 'void-reanchor-root') {
     if (!argument || !/^\d+$/.test(argument)) refuse('give the root’s index (a whole number)');
     const index = BigInt(argument);
@@ -177,7 +218,7 @@ async function main() {
   const transaction = { network, chainId: chain.id, from, to: deployment.address, value: '0', data: encodeFunctionData({ abi: registryAbi, ...call } as Parameters<typeof encodeFunctionData>[0]), description };
 
   if (!values.send) {
-    console.log(JSON.stringify({ level: 'info', message: 'not sent: execute this transaction from the account named in "from"', transaction }, null, 2));
+    console.log(JSON.stringify({ level: 'info', message: 'not sent: execute this transaction from the account named in "from"', ...(sourceChecked === null ? {} : { sourceChecked }), transaction }, null, 2));
     return;
   }
   const key = process.env.OWNER_PRIVATE_KEY;
@@ -197,6 +238,7 @@ async function main() {
         level: 'info',
         message: final ? 'sent, and final' : `sent and mined in block ${receipt.blockNumber}, not final yet: it counts once that block is finalized`,
         final,
+        ...(sourceChecked === null ? {} : { sourceChecked }),
         transaction: { ...transaction, hash, blockNumber: Number(receipt.blockNumber) },
       },
       null,

@@ -7,11 +7,11 @@ import { createPublicClient, createWalletClient, getAddress, http, type Address,
 import { foundry } from 'viem/chains';
 import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
 import { orgIdFor } from '@/lib/chain/deploy';
-import { buildReanchorArchive } from '@/lib/chain/reanchor-build';
+import { buildReanchorArchive, checkArchiveAgainstSource } from '@/lib/chain/reanchor-build';
 import { registryAbi } from '@/lib/chain/registry-artifact';
 import { stampPdf } from '@/lib/stamp';
 import { CannotVerify, checkReanchorSet, findRecordedRoot, openRegistryView, verifyFile, verifyWithReanchors, type CheckedSet, type Verdict, type VerifierConfig } from '@/lib/verify-core';
-import { leafOf, merkleTree, rootFromProof, type ReanchorArchive, type ReanchorProof } from '@/lib/verify-core/reanchor';
+import { archiveOf, leafOf, merkleTree, rootFromProof, type ReanchorArchive, type ReanchorProof } from '@/lib/verify-core/reanchor';
 import { startAnvil, type AnvilHandle } from './anvil';
 import { startRpcProxy } from './rpc-proxy';
 import { anchorCopy, anchorOriginal, deployOn, finalise, ISSUER_ORG, readPdf, stampFor, type Registry } from './registry-harness';
@@ -50,6 +50,8 @@ let proofs: ReanchorProof[];
 let set: CheckedSet;
 /** The same registry archived again, a block later: another root entry, for when the first is voided (#143). */
 let later: ReanchorArchive;
+/** The archive with its revoked record shown standing, rebuilt so it holds together on its own (#155). */
+let forged: ReanchorArchive;
 
 const clients = (url: string, chainId: number) => {
   const chain = { ...foundry, id: chainId };
@@ -181,6 +183,23 @@ describe('re-anchoring a registry whose chain is shut down (#65)', () => {
     expect(() => checkReanchorSet(proof)).toThrow(/does not lead to the root/);
   });
 
+  it('refuses an archive the source registry did not hold, though it holds together on its own (#155)', async () => {
+    const edited = JSON.parse(JSON.stringify(archive)) as ReanchorArchive;
+    const revoked = edited.records.find((r) => r.revoked)!;
+    Object.assign(revoked, { revoked: false, revokeReason: 0, revokeEffectiveAt: 0 });
+    forged = archiveOf({ source: edited.source, target: edited.target }, edited.records, edited.issuers);
+    // Every check the archive can make of itself passes.
+    expect(checkReanchorSet(JSON.parse(JSON.stringify(forged)))).toMatchObject({ complete: true, count: 6 });
+    expect(forged.root).not.toBe(archive.root);
+
+    const deps = { clients: clients(sourceNode.url, SEPOLIA), source: { ...source.deployment, deployBlock: 0 } };
+    await expect(checkArchiveAgainstSource(deps, checkReanchorSet(JSON.parse(JSON.stringify(forged))))).rejects.toMatchObject({ code: 'ARCHIVE_DIFFERS' });
+    await expect(checkArchiveAgainstSource(deps, set)).resolves.toMatchObject({ root: archive.root, count: 6, block: archive.source.block });
+    // Another registry's archive, or a source that cannot be read, is a refusal by name, never a pass.
+    await expect(checkArchiveAgainstSource({ ...deps, source: { ...deps.source, address: `0x${'5'.repeat(40)}` as Address } }, set)).rejects.toMatchObject({ code: 'ARCHIVE_NOT_OF_SOURCE' });
+    await expect(checkArchiveAgainstSource({ ...deps, clients: clients('http://127.0.0.1:9', SEPOLIA) }, set)).rejects.toMatchObject({ code: 'SOURCE_UNREADABLE' });
+  });
+
   it('accepts nothing until the owner records the root, and only the owner can', async () => {
     await expect(findRecordedRoot(set, targetConfig)).rejects.toMatchObject({ reason: 'REANCHOR_ROOT_NOT_RECORDED' });
     const issuerKey = getAddress((await createWalletClient({ chain: foundry, transport: http(targetNode.url) }).getAddresses())[1]);
@@ -203,18 +222,29 @@ describe('re-anchoring a registry whose chain is shut down (#65)', () => {
     // An archive is never written over.
     await expect(run(tsx, ['scripts/reanchor.ts', 'build', 'sepolia', 'local', '--out', out, '--source-deployment', sourceFile, '--target-deployment', targetFile], { cwd: ROOT, env })).rejects.toMatchObject({ code: 2 });
 
+    const fromSource = ['--source', 'sepolia', '--source-deployment', sourceFile];
     // Before the root: every proof fails, and the check says so.
-    await expect(run(tsx, ['scripts/reanchor.ts', 'check', out, 'local', '--target-deployment', targetFile], { cwd: ROOT, env })).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('REANCHOR_ROOT_NOT_RECORDED') });
+    await expect(run(tsx, ['scripts/reanchor.ts', 'check', out, 'local', '--target-deployment', targetFile, ...fromSource], { cwd: ROOT, env })).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('REANCHOR_ROOT_NOT_RECORDED') });
 
-    const printed = JSON.parse((await run(tsx, ['scripts/owner-call.ts', 'local', 'record-reanchor-root', path.join(out, 'archive.json'), '--deployment', targetFile], { cwd: ROOT, env })).stdout);
+    // The owner's call re-reads the source first (#155): it must be told where, or told the chain is gone.
+    const ownerCall = (archiveFile: string, extra: string[]) => run(tsx, ['scripts/owner-call.ts', 'local', 'record-reanchor-root', archiveFile, '--deployment', targetFile, ...extra], { cwd: ROOT, env });
+    await expect(ownerCall(path.join(out, 'archive.json'), [])).rejects.toMatchObject({ code: 2, stderr: expect.stringContaining('--source') });
+    const forgedDir = path.join(work, 'forged');
+    fs.mkdirSync(forgedDir);
+    fs.writeFileSync(path.join(forgedDir, 'archive.json'), JSON.stringify(forged));
+    await expect(ownerCall(path.join(forgedDir, 'archive.json'), fromSource)).rejects.toMatchObject({ code: 2, stderr: expect.stringContaining('ARCHIVE_DIFFERS') });
+    await expect(run(tsx, ['scripts/reanchor.ts', 'check', forgedDir, 'local', '--target-deployment', targetFile, ...fromSource], { cwd: ROOT, env })).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining('ARCHIVE_DIFFERS') });
+
+    const printed = JSON.parse((await ownerCall(path.join(out, 'archive.json'), fromSource)).stdout);
     expect(printed.message).toMatch(/not sent/);
+    expect(printed.sourceChecked).toBe(true);
     expect(printed.transaction.from).toBe(owner);
     const wallet = createWalletClient({ chain: foundry, transport: http(targetNode.url), account: owner });
     await target.publicClient.waitForTransactionReceipt({ hash: await wallet.sendTransaction({ to: printed.transaction.to, data: printed.transaction.data, chain: foundry }) });
     await finalise(target);
 
-    const checked = JSON.parse((await run(tsx, ['scripts/reanchor.ts', 'check', out, 'local', '--target-deployment', targetFile], { cwd: ROOT, env })).stdout);
-    expect(checked).toMatchObject({ index: 1, root: archive.root, records: 6, proofs: 6, failures: 0 });
+    const checked = JSON.parse((await run(tsx, ['scripts/reanchor.ts', 'check', out, 'local', '--target-deployment', targetFile, ...fromSource], { cwd: ROOT, env })).stdout);
+    expect(checked).toMatchObject({ index: 1, root: archive.root, records: 6, proofs: 6, failures: 0, sourceChecked: true });
     expect(await findRecordedRoot(set, targetConfig)).toMatchObject({ index: 1, count: 6, sourceBlock: archive.source.block });
 
     // A proof edited after the build fails the check, by name.
@@ -222,7 +252,7 @@ describe('re-anchoring a registry whose chain is shut down (#65)', () => {
     const edited = JSON.parse(fs.readFileSync(path.join(out, 'proofs', first), 'utf8')) as ReanchorProof;
     edited.records[0].record.revokeReason = 9;
     fs.writeFileSync(path.join(out, 'proofs', first), JSON.stringify(edited));
-    await expect(run(tsx, ['scripts/reanchor.ts', 'check', out, 'local', '--target-deployment', targetFile], { cwd: ROOT, env })).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining(first) });
+    await expect(run(tsx, ['scripts/reanchor.ts', 'check', out, 'local', '--target-deployment', targetFile, ...fromSource], { cwd: ROOT, env })).rejects.toMatchObject({ code: 1, stderr: expect.stringContaining(first) });
   }, 120_000);
 
   it('once the chain is shut down, every file gets the verdict it got while it was up', async () => {
@@ -231,7 +261,19 @@ describe('re-anchoring a registry whose chain is shut down (#65)', () => {
     await finalise(source);
     ({ archive: later } = await build());
     expect(later.source.block).toBeGreaterThan(archive.source.block);
+    // The first archive is still what the source held at its own block, though the source has moved on (#155).
+    await expect(checkArchiveAgainstSource({ clients: clients(sourceNode.url, SEPOLIA), source: { ...source.deployment, deployBlock: 0 } }, set)).resolves.toMatchObject({ root: archive.root, block: archive.source.block });
     await sourceNode.stop();
+    // With the source gone, the owner's call refuses by name, unless told the chain is gone (#155).
+    const env = { PATH: process.env.PATH, SEPOLIA_RPC_URL: sourceNode.url, SEPOLIA_RPC_URL_2: 'http://127.0.0.2:9', LOCAL_RPC_URL: targetNode.url } as unknown as NodeJS.ProcessEnv;
+    const laterFile = path.join(work, 'later.json');
+    fs.writeFileSync(laterFile, JSON.stringify(later));
+    const tsx = path.join(ROOT, 'node_modules', '.bin', 'tsx');
+    const ownerCall = (extra: string[]) => run(tsx, ['scripts/owner-call.ts', 'local', 'record-reanchor-root', laterFile, '--deployment', targetFile, ...extra], { cwd: ROOT, env });
+    await expect(ownerCall(['--source', 'sepolia', '--source-deployment', sourceFile])).rejects.toMatchObject({ code: 2, stderr: expect.stringContaining('SOURCE_UNREADABLE') });
+    const gone = JSON.parse((await ownerCall(['--source-gone'])).stdout);
+    expect(gone).toMatchObject({ sourceChecked: false, transaction: { from: owner } });
+    expect(gone.transaction.description).toMatch(/NOT re-read/);
     await expect(verifyFile({ bytes: files['A v2'], config: sourceConfig, openView: () => openRegistryView(sourceConfig), readPdf })).resolves.toMatchObject({ kind: 'CANNOT_VERIFY', reason: 'RPC_UNREACHABLE' });
 
     for (const [name, bytes] of Object.entries(files)) {

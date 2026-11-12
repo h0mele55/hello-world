@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
-import { errorResponse, handler } from '@/lib/http';
+import { errorResponse, handler, readJson } from '@/lib/http';
 import { createEngagement } from '@/lib/reports/intake';
 
 const Body = z.strictObject({
@@ -13,7 +13,7 @@ const Body = z.strictObject({
 });
 
 export const POST = handler(async (req, user) => {
-  const body = Body.safeParse(await req.json().catch(() => null));
+  const body = Body.safeParse(await readJson(req));
   if (!body.success) return errorResponse('INVALID_INPUT');
   const engagement = await createEngagement(user, body.data);
   return NextResponse.json({ id: engagement.id }, { status: 201 });

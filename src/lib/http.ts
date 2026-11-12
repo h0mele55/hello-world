@@ -30,6 +30,7 @@ const STATUS: Record<
   PDF_REFUSED: 422,
   DOC_ALREADY_UPLOADED: 409,
   ENGAGEMENT_EXISTS: 409,
+  CONFLICT: 409,
   DRAFT_PENDING: 409,
   VERSION_CONFLICT: 409,
   NOT_DRAFT: 409,
@@ -59,6 +60,8 @@ const STATUS: Record<
 };
 
 export type ErrorCode = keyof typeof STATUS;
+/** Every code a route can answer with, for the console to have words for each (#146). */
+export const ERROR_CODES = Object.keys(STATUS) as ErrorCode[];
 
 export function errorResponse(code: ErrorCode, detail?: string) {
   return NextResponse.json({ error: code, ...(detail ? { detail } : {}) }, { status: STATUS[code], headers: { 'Cache-Control': 'no-store' } });
@@ -108,12 +111,59 @@ export function handler<Ctx>(fn: (req: NextRequest, user: SessionUser, ctx: Ctx)
       return await fn(req, user, ctx);
     } catch (error) {
       if (error instanceof IntakeError || error instanceof AnchoringError || error instanceof AccessError) return errorResponse(error.code, error.detail);
-      if (error instanceof MfaError) return errorResponse(error.code);
+      if (error instanceof MfaError || error instanceof BodyError) return errorResponse(error.code);
       // The name only: a message could carry user data.
       console.error(`Unhandled ${error instanceof Error ? error.name : typeof error} in ${req.method} ${req.nextUrl.pathname}`);
       return errorResponse('INTERNAL');
     }
   };
+}
+
+/**
+ * A PDF the app serves: the uploaded original, a stamped copy, a certificate.
+ * The original is an untrusted file on the app's own origin, so every one is
+ * an attachment, sandboxed, never sniffed as anything else and never cached
+ * (#146). The confirmation screen reads it with fetch and draws it with
+ * pdf.js, so nothing needs it inline.
+ */
+export function pdfResponse(bytes: Uint8Array, filename: string): Response {
+  return new Response(new Uint8Array(bytes), {
+    headers: {
+      'Content-Type': 'application/pdf',
+      'Cache-Control': 'no-store',
+      'Content-Disposition': `attachment; filename="${filename.replace(/[^\w.-]/g, '_')}"`,
+      'Content-Security-Policy': "sandbox; default-src 'none'",
+      'X-Content-Type-Options': 'nosniff',
+    },
+  });
+}
+
+/** The most a JSON request body may hold (#146): every one this app takes is a few fields. */
+export const JSON_BODY_LIMIT = 64 * 1024;
+
+/** A body refused before it was parsed. */
+export class BodyError extends Error {
+  constructor(readonly code: 'TOO_LARGE') {
+    super(code);
+    this.name = 'BodyError';
+  }
+}
+
+/**
+ * A JSON request body, read up to `limit` bytes however it is sent (#146):
+ * `req.json()` buffers whatever arrives before any schema can refuse it. A
+ * body over the cap is TOO_LARGE; one that is not JSON is null, for the
+ * route's schema to refuse.
+ */
+export async function readJson(req: NextRequest, limit = JSON_BODY_LIMIT): Promise<unknown> {
+  const bytes = await readBody(req, limit);
+  if (bytes === null) throw new BodyError('TOO_LARGE');
+  if (bytes.length === 0) return null;
+  try {
+    return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as unknown;
+  } catch {
+    return null;
+  }
 }
 
 /** Reads a request body, refusing it as soon as it passes `limit` bytes. */

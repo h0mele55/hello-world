@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { explorerTxUrl, networkNameOf } from '@/lib/chain/explorer';
-import { CHOSEN_PRODUCTION_NETWORK, NETWORKS, PRODUCTION_NETWORKS, REHEARSAL_NETWORK, rpcUrlFor, rpcUrlVariable, secondRpcUrlFor, type NetworkName } from '@/lib/chain/networks';
+import { CHOSEN_PRODUCTION_NETWORK, NETWORKS, PRODUCTION_NETWORKS, REHEARSAL_NETWORK, logRangeFor, providerOf, rpcUrlFor, rpcUrlVariable, secondRpcUrlFor, type NetworkName } from '@/lib/chain/networks';
 
 /**
  * The networks every part of the system knows (#63): one table, so the worker,
@@ -60,6 +60,33 @@ describe('the networks', () => {
     );
     expect(secondRpcUrlFor('local', env())).toBe('http://127.0.0.1:8545');
     expect(secondRpcUrlFor('local', env({ LOCAL_RPC_URL_2: 'http://127.0.0.1:8546' }))).toBe('http://127.0.0.1:8546');
+  });
+
+  it('scan the registry’s events in a range per network, which the operator may set (#142)', () => {
+    expect(logRangeFor('sepolia', env())).toBe(2_000);
+    expect(logRangeFor('arbitrum', env())).toBe(10_000);
+    expect(logRangeFor('arbitrum', env({ ARBITRUM_LOG_RANGE: '500' }))).toBe(500);
+    for (const bad of ['0', '-1', '2.5', 'many', '1000001']) {
+      expect(() => logRangeFor('arbitrum', env({ ARBITRUM_LOG_RANGE: bad })), bad).toThrow(expect.objectContaining({ code: 'ENV_INVALID' }));
+    }
+  });
+
+  it('tell providers apart by registrable domain, and the loopback interface by port, however spelled (#142)', () => {
+    const same = (a: string, b: string) => () => secondRpcUrlFor('sepolia', env({ SEPOLIA_RPC_URL: a, SEPOLIA_RPC_URL_2: b }));
+    const refused = expect.objectContaining({ code: 'RPC_NOT_INDEPENDENT' });
+    // One node, spelled two ways.
+    expect(same('http://127.0.0.1:8545', 'http://localhost:8545')).toThrow(refused);
+    expect(same('http://127.0.0.1:8545', 'http://[::1]:8545')).toThrow(refused);
+    expect(same('http://127.0.0.2:8545', 'http://LOCALHOST.:8545')).toThrow(refused);
+    // Two host names of one provider.
+    expect(same('https://eth-sepolia.g.alchemy.com/v2/a', 'https://sepolia.alchemy.com/v2/b')).toThrow(refused);
+    expect(same('https://sepolia.infura.io/v3/a', 'https://SEPOLIA.INFURA.IO./v3/b')).toThrow(refused);
+    expect(same('https://rpc.example.co.uk', 'https://node.example.co.uk')).toThrow(refused);
+    // Other providers, and two loopback ports, are accepted.
+    expect(same('https://sepolia.infura.io/v3/a', 'https://eth-sepolia.g.alchemy.com/v2/b')()).toBe('https://eth-sepolia.g.alchemy.com/v2/b');
+    expect(same('https://rpc.example.co.uk', 'https://rpc.other.co.uk')()).toBe('https://rpc.other.co.uk');
+    expect(same('http://127.0.0.1:8545', 'http://localhost:8546')()).toBe('http://localhost:8546');
+    expect(providerOf('https://203.0.113.7:8545')).toBe('203.0.113.7');
   });
 
   it('link every public chain to an explorer and name it for a reader; a local chain gets no link', () => {

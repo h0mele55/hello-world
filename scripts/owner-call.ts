@@ -188,7 +188,21 @@ async function main() {
   const hash = await wallet.writeContract({ ...registry, ...call, account, chain } as Parameters<typeof wallet.writeContract>[0]);
   const receipt = await publicClient.waitForTransactionReceipt({ hash });
   if (receipt.status !== 'success') refuse(`the transaction ${hash} reverted`);
-  console.log(JSON.stringify({ level: 'info', message: 'sent', transaction: { ...transaction, hash, blockNumber: Number(receipt.blockNumber) } }, null, 2));
+  // Mined is not done (rule 2): say whether its block is final yet, rather than "sent" (#142).
+  const finalized = (await publicClient.getBlock({ blockTag: 'finalized' })).number;
+  const final = finalized >= receipt.blockNumber;
+  console.log(
+    JSON.stringify(
+      {
+        level: 'info',
+        message: final ? 'sent, and final' : `sent and mined in block ${receipt.blockNumber}, not final yet: it counts once that block is finalized`,
+        final,
+        transaction: { ...transaction, hash, blockNumber: Number(receipt.blockNumber) },
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 main().catch((error) => {

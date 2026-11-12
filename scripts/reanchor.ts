@@ -28,7 +28,7 @@ import { parseArgs } from 'node:util';
 import { createPublicClient, http, type PublicClient } from 'viem';
 import { z } from 'zod';
 import { ChainError } from '../src/lib/chain/errors';
-import { deploymentPath, isNetworkName, loadDeploymentFile, NETWORKS, rpcUrlFor, secondRpcUrlFor, type NetworkName } from '../src/lib/chain/networks';
+import { deploymentPath, isNetworkName, loadDeploymentFile, logRangeFor, NETWORKS, rpcUrlFor, secondRpcUrlFor, type NetworkName } from '../src/lib/chain/networks';
 import { buildReanchorArchive } from '../src/lib/chain/reanchor-build';
 import { CannotVerify, checkReanchorSet, findRecordedRoot, type CheckedSet } from '../src/lib/verify-core';
 
@@ -43,7 +43,8 @@ const SourceRecord = z.object({
   chainId: z.number().int().positive(),
   address: z.string().regex(/^0x[0-9a-fA-F]{40}$/),
   runtimeBytecodeHash: Hex32,
-  deployBlock: z.number().int().nonnegative().optional(),
+  // Required: without it every scan of the registry's events would start at genesis (#142).
+  deployBlock: z.number().int().nonnegative(),
   issuer: z.object({ orgName: z.string().min(1) }).optional(),
 });
 
@@ -69,15 +70,16 @@ async function build(source: NetworkName, target: NetworkName, values: { out?: s
   if (source === target) refuse('the source and the target are the same network');
   const sourceFile = values['source-deployment'] ?? deploymentPath(source);
   const record = SourceRecord.safeParse(readJson(sourceFile));
-  if (!record.success) refuse(`${sourceFile} is not a deployment record`);
+  if (!record.success) refuse(`${sourceFile} is not a deployment record naming its deployBlock`);
   if (record.data.chainId !== NETWORKS[source].id) refuse(`${sourceFile} is for chain ${record.data.chainId}, not ${source}`);
   const targetDeployment = loadDeploymentFile(target, values['target-deployment'] ?? deploymentPath(target));
 
   const { archive, proofs } = await buildReanchorArchive({
     clients: clientsOf(source),
-    source: { chainId: record.data.chainId, address: record.data.address as `0x${string}`, runtimeBytecodeHash: record.data.runtimeBytecodeHash as `0x${string}`, deployBlock: record.data.deployBlock ?? 0 },
+    source: { chainId: record.data.chainId, address: record.data.address as `0x${string}`, runtimeBytecodeHash: record.data.runtimeBytecodeHash as `0x${string}`, deployBlock: record.data.deployBlock },
     target: { chainId: targetDeployment.chainId, registry: targetDeployment.address },
     issuerNames: record.data.issuer ? [record.data.issuer.orgName] : [],
+    rangeBlocks: logRangeFor(source),
   });
 
   const dir = path.resolve(values.out ?? path.join('reanchor', `${source}-${archive.source.block}`));

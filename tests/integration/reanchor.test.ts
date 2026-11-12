@@ -5,7 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { createPublicClient, createWalletClient, getAddress, http, type Address, type Hex, type PublicClient } from 'viem';
 import { foundry } from 'viem/chains';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, onTestFinished } from 'vitest';
 import { orgIdFor } from '@/lib/chain/deploy';
 import { buildReanchorArchive } from '@/lib/chain/reanchor-build';
 import { registryAbi } from '@/lib/chain/registry-artifact';
@@ -13,6 +13,7 @@ import { stampPdf } from '@/lib/stamp';
 import { CannotVerify, checkReanchorSet, findRecordedRoot, openRegistryView, verifyFile, verifyWithReanchors, type CheckedSet, type Verdict, type VerifierConfig } from '@/lib/verify-core';
 import { leafOf, merkleTree, rootFromProof, type ReanchorArchive, type ReanchorProof } from '@/lib/verify-core/reanchor';
 import { startAnvil, type AnvilHandle } from './anvil';
+import { startRpcProxy } from './rpc-proxy';
 import { anchorCopy, anchorOriginal, deployOn, finalise, ISSUER_ORG, readPdf, stampFor, type Registry } from './registry-harness';
 
 /**
@@ -191,7 +192,10 @@ describe('re-anchoring a registry whose chain is shut down (#65)', () => {
 
   it('through the scripts: build, the owner’s call, and every proof checked against the root', async () => {
     const out = path.join(work, 'archive-dir');
-    const env = { PATH: process.env.PATH, SEPOLIA_RPC_URL: sourceNode.url, SEPOLIA_RPC_URL_2: sourceNode.url.replace('127.0.0.1', 'localhost'), LOCAL_RPC_URL: targetNode.url } as unknown as NodeJS.ProcessEnv;
+    // The one node, also served on another port: the scripts read two endpoints, and one host spelled twice is one (#142).
+    const second = await startRpcProxy(sourceNode.url);
+    onTestFinished(() => second.close());
+    const env = { PATH: process.env.PATH, SEPOLIA_RPC_URL: sourceNode.url, SEPOLIA_RPC_URL_2: second.url, LOCAL_RPC_URL: targetNode.url } as unknown as NodeJS.ProcessEnv;
     const tsx = path.join(ROOT, 'node_modules', '.bin', 'tsx');
     const built = JSON.parse((await run(tsx, ['scripts/reanchor.ts', 'build', 'sepolia', 'local', '--out', out, '--source-deployment', sourceFile, '--target-deployment', targetFile], { cwd: ROOT, env })).stdout);
     expect(built).toMatchObject({ root: archive.root, records: 6, sourceBlock: archive.source.block });

@@ -46,6 +46,19 @@ export async function runCheckpoint(deps: CheckpointDeps): Promise<CheckpointOut
   const existing = await deps.prisma.registryCheckpoint.findUnique({ where: { orgId_chainId_registry_period: key }, select: { id: true } });
   if (existing) return { status: 'EXISTS', checkpointId: existing.id, period };
 
+  // The last checkpoint holds every record up to its block: only the blocks since are scanned (#142).
+  const previous = await deps.prisma.registryCheckpoint.findFirst({
+    where: { orgId: key.orgId, chainId: key.chainId, registry, period: { lt: period } },
+    orderBy: { block: 'desc' },
+    select: { file: true, root: true, block: true },
+  });
+  let known: { block: number; records: { recordId: Hex; txHash: Hex; blockNumber: number }[] } | undefined;
+  if (previous) {
+    const stored = checkReanchorSet(JSON.parse(new TextDecoder().decode(previous.file)));
+    if (stored.root !== previous.root || stored.source.block !== previous.block) throw new Error('the previous checkpoint is not the one recorded');
+    known = { block: previous.block, records: stored.records.map((r) => ({ recordId: r.recordId, txHash: r.txHash, blockNumber: r.blockNumber })) };
+  }
+
   let checkpoint: Checkpoint;
   try {
     ({ checkpoint } = await buildCheckpoint({
@@ -54,6 +67,7 @@ export async function runCheckpoint(deps: CheckpointDeps): Promise<CheckpointOut
       issuerNames: [deps.firm.name],
       period,
       rangeBlocks: deps.rangeBlocks,
+      known,
     }));
   } catch (error) {
     if (error instanceof ChainError && error.code === 'NOTHING_TO_REANCHOR') return { status: 'EMPTY', period };

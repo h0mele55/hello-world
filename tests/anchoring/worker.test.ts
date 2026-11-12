@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { secp256k1 } from '@noble/curves/secp256k1';
+import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
@@ -1271,7 +1271,7 @@ describe('rotating the issuer key (docs/runbooks/key-rotation.md)', () => {
 describe('an issuer key in Cloud KMS (#62)', () => {
   it('anchors, copies and completes a version with a key that never leaves KMS', async () => {
     // KMS here is a stand-in that returns the high-s form of every signature, as the real one may.
-    const kms = fakeKms(secp256k1.utils.randomPrivateKey(), { highS: true });
+    const kms = fakeKms(secp256k1.utils.randomSecretKey(), { highS: true });
     const account = await createKmsAccount({ client: kms, keyName: KEY_NAME });
     await testClient.setBalance({ address: account.address, value: parseEther('10') });
     const ownerWallet = createWalletClient({ chain: foundry, transport: http(anvil.url), account: owner });
@@ -1296,7 +1296,7 @@ describe('an issuer key in Cloud KMS (#62)', () => {
   });
 
   it('sends nothing on a KMS answer that fails its check, and sends the write once KMS answers well', async () => {
-    const key = secp256k1.utils.randomPrivateKey();
+    const key = secp256k1.utils.randomSecretKey();
     const corrupted = await createKmsAccount({ client: fakeKms(key, { tamper: 'signatureCrc' }), keyName: KEY_NAME });
     const sound = await createKmsAccount({ client: fakeKms(key), keyName: KEY_NAME });
     await testClient.setBalance({ address: sound.address, value: parseEther('10') });

@@ -1,4 +1,4 @@
-import { secp256k1 } from '@noble/curves/secp256k1';
+import { secp256k1 } from '@noble/curves/secp256k1.js';
 import { parseGwei, verifyMessage, type Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { describe, expect, it } from 'vitest';
@@ -11,7 +11,7 @@ import { fakeKms, KEY_NAME, type FakeKmsOptions } from '../helpers/fake-kms';
  * it cannot vouch for.
  */
 
-const key = secp256k1.utils.randomPrivateKey();
+const key = secp256k1.utils.randomSecretKey();
 const local = privateKeyToAccount(`0x${Buffer.from(key).toString('hex')}` as Hex);
 const kmsAccount = (options: FakeKmsOptions = {}) => createKmsAccount({ client: fakeKms(key, options), keyName: KEY_NAME });
 

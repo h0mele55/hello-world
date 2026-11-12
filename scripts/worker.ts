@@ -24,6 +24,7 @@
 import path from 'node:path';
 import { parseUnits } from 'viem';
 import { runWorkerPass } from '../src/lib/anchoring/worker';
+import { logRangeFor } from '../src/lib/chain/networks';
 import { createFileStore } from '../src/lib/file-store';
 import { sweepOrphanFiles } from '../src/lib/file-sweep';
 import { standaloneVerifierUrlOf } from '../src/lib/verify-setup';
@@ -67,7 +68,8 @@ async function main() {
   // No replacement offers a fee cap above this (#139); unset for none.
   const maxFeeGwei = process.env.WORKER_MAX_FEE_GWEI;
   if (maxFeeGwei !== undefined && maxFeeGwei !== '' && !/^\d+(\.\d{1,9})?$/.test(maxFeeGwei)) fail('WORKER_MAX_FEE_GWEI must be a number of gwei');
-  const options = maxFeeGwei ? { maxFeePerGasWei: parseUnits(maxFeeGwei, 9) } : {};
+  // The network's log range (<NETWORK>_LOG_RANGE overrides it): public endpoints refuse wider queries (#156).
+  const options = { logRangeBlocks: logRangeFor(network), ...(maxFeeGwei ? { maxFeePerGasWei: parseUnits(maxFeeGwei, 9) } : {}) };
   console.log(JSON.stringify({ level: 'info', message: 'worker started', network, issuer: account.address, registry: deployment.address, sealsCopies: seal !== undefined }));
   let failedPasses = 0;
   let lastSweep = 0;

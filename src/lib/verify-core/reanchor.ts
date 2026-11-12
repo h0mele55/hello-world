@@ -351,7 +351,14 @@ const invalid = (detail: string): never => {
   throw new CannotVerify('REANCHOR_PROOF_INVALID', detail);
 };
 
-const fromBase64 = (b64: string) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+/** Badly padded base64 is a refusal by name, never the DOMException atob throws (#143). */
+const fromBase64 = (b64: string) => {
+  try {
+    return Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+  } catch {
+    return invalid('a timestamp that is not base64');
+  }
+};
 
 /**
  * An archive, a checkpoint or a proof of either, read from untrusted JSON and
@@ -501,8 +508,9 @@ export function archivedView(set: CheckedSet): RegistryView {
       return byId.get(recordId.toLowerCase() as Hex) ?? notHeld(`record ${recordId}`);
     },
     async findByDocHash(docHash) {
-      // A file a checkpoint does not hold may have been anchored after it.
-      return byDoc.get(docHash.toLowerCase() as Hex) ?? (set.checkpoint ? notHeld(`file ${docHash}`) : null);
+      // Only a whole archive can say a file was never anchored: a proof holds a few records, and a
+      // file a checkpoint does not hold may have come after it (#143).
+      return byDoc.get(docHash.toLowerCase() as Hex) ?? notHeld(`file ${docHash}`);
     },
     async latestOf(familyId) {
       const member = set.records.find((r) => r.familyId === familyId.toLowerCase());
@@ -668,18 +676,25 @@ export async function verifyWithReanchors(input: {
   const named = (set: CheckedSet) => primary.kind === 'UNKNOWN_REGISTRY' && primary.claimedChainId === set.source.chainId && same(primary.claimedContract, set.source.registry);
   // A set holding the very file first, then whole archives before single proofs.
   const candidates = sets.filter((set) => set.target && (holds(set) || named(set))).sort((a, b) => Number(holds(b)) - Number(holds(a)) || Number(b.complete) - Number(a.complete));
-  const set = candidates[0];
-  if (!set) return { verdict: primary, reanchored: null };
-  let recorded: RecordedRoot | null = null;
-  const verdict = await verifyFile({
-    bytes: input.bytes,
-    config: set.source,
-    readPdf: input.readPdf,
-    openView: async () => {
-      recorded = await findRecordedRoot(set, input.config, input.clients ?? clientsFor(input.config));
-      return archivedView(set);
-    },
-  });
-  const found = recorded as RecordedRoot | null;
-  return { verdict, reanchored: found ? { kind: 'registry', ...found, targetChainId: input.config.chainId, targetRegistry: input.config.registry, issuers: set.issuers } : null };
+  if (candidates.length === 0) return { verdict: primary, reanchored: null };
+  // Each in turn until one answers (#143): a set whose root was voided, or that does not cover the file, says nothing about the next.
+  let first: Verdict | null = null;
+  for (const set of candidates) {
+    let recorded: RecordedRoot | null = null;
+    const verdict = await verifyFile({
+      bytes: input.bytes,
+      config: set.source,
+      readPdf: input.readPdf,
+      openView: async () => {
+        recorded = await findRecordedRoot(set, input.config, input.clients ?? clientsFor(input.config));
+        return archivedView(set);
+      },
+    });
+    const found = recorded as RecordedRoot | null;
+    if (verdict.kind !== 'CANNOT_VERIFY' && found) {
+      return { verdict, reanchored: { kind: 'registry', ...found, targetChainId: input.config.chainId, targetRegistry: input.config.registry, issuers: set.issuers } };
+    }
+    first ??= verdict;
+  }
+  return { verdict: first!, reanchored: null };
 }

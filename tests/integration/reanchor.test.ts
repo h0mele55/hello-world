@@ -47,18 +47,20 @@ const direct: Record<string, Verdict> = {};
 let archive: ReanchorArchive;
 let proofs: ReanchorProof[];
 let set: CheckedSet;
+/** The same registry archived again, a block later: another root entry, for when the first is voided (#143). */
+let later: ReanchorArchive;
 
 const clients = (url: string, chainId: number) => {
   const chain = { ...foundry, id: chainId };
   return [createPublicClient({ chain, transport: http(url) }), createPublicClient({ chain, transport: http(url) })] as [PublicClient, PublicClient];
 };
 
-async function recordRoot(entry: { root: Hex; count: number }, from: Address = owner) {
+async function recordRoot(entry: { root: Hex; count: number; block?: number }, from: Address = owner) {
   const call = {
     address: target.deployment.address,
     abi: registryAbi,
     functionName: 'recordReanchorRoot',
-    args: [entry.root, BigInt(archive.source.chainId), archive.source.registry, archive.source.block, entry.count],
+    args: [entry.root, BigInt(archive.source.chainId), archive.source.registry, entry.block ?? archive.source.block, entry.count],
   } as const;
   // Simulated first, as owner-call does: Anvil would mine a refused call as a reverted transaction.
   await target.publicClient.simulateContract({ ...call, account: from });
@@ -220,6 +222,11 @@ describe('re-anchoring a registry whose chain is shut down (#65)', () => {
   }, 120_000);
 
   it('once the chain is shut down, every file gets the verdict it got while it was up', async () => {
+    // Archived again a block later, before it goes: another root entry, for when the first is voided (#143).
+    await source.testClient.mine({ blocks: 1 });
+    await finalise(source);
+    ({ archive: later } = await build());
+    expect(later.source.block).toBeGreaterThan(archive.source.block);
     await sourceNode.stop();
     await expect(verifyFile({ bytes: files['A v2'], config: sourceConfig, openView: () => openRegistryView(sourceConfig), readPdf })).resolves.toMatchObject({ kind: 'CANNOT_VERIFY', reason: 'RPC_UNREACHABLE' });
 
@@ -247,6 +254,8 @@ describe('re-anchoring a registry whose chain is shut down (#65)', () => {
     expect(verdict).toEqual({ kind: 'CANNOT_VERIFY', reason: 'REANCHOR_NOT_COVERED' });
     // The whole archive, given too, answers it.
     expect((await throughSets(files['C v1 copy, bytes appended'], [proofOf('A v2'), set])).verdict.kind).toBe('ALTERED_OPINION_APPEARS_UNCHANGED');
+    // The genuine copy, against its original's proof, which does not hold it: not covered, never "altered" (#143).
+    expect(await throughSets(files['C v1 copy'], [proofOf('C v1')])).toEqual({ verdict: { kind: 'CANNOT_VERIFY', reason: 'REANCHOR_NOT_COVERED' }, reanchored: null });
   });
 
   it('loads its sets only for a file the registry holds no record of, and fails closed when they cannot be loaded (#126)', async () => {
@@ -302,5 +311,11 @@ describe('re-anchoring a registry whose chain is shut down (#65)', () => {
     await target.publicClient.waitForTransactionReceipt({ hash: await wallet.writeContract({ address: target.deployment.address, abi: registryAbi, functionName: 'voidReanchorRoot', args: [1n] }) });
     await finalise(target);
     expect(await throughSets(files['A v2'], [set])).toEqual({ verdict: { kind: 'CANNOT_VERIFY', reason: 'REANCHOR_ROOT_NOT_RECORDED' }, reanchored: null });
+    // Another set holding the file under a root that stands still answers, whatever comes first (#143).
+    await recordRoot({ root: later.root, count: later.records.length, block: later.source.block });
+    const laterSet = checkReanchorSet(JSON.parse(JSON.stringify(later)));
+    const { verdict, reanchored } = await throughSets(files['A v2'], [set, laterSet]);
+    expect(verdict).toEqual({ ...direct['A v2'], asOfBlock: later.source.block });
+    expect(reanchored).toMatchObject({ index: 2, root: later.root, sourceBlock: later.source.block });
   });
 });

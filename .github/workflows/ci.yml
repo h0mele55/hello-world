@@ -184,8 +184,9 @@ jobs:
         run: npm run test:e2e
       - name: Back up, restore into a fresh database, and check the copy (#59)
         run: |
-          command -v pg_dump >/dev/null || (sudo apt-get update && sudo apt-get install -y postgresql-client)
-          pg_dump --version
+          # The client of the service's major version: the image's own may be newer (#184).
+          sudo apt-get update -q && sudo apt-get install -y --no-install-recommends postgresql-client-16
+          /usr/lib/postgresql/16/bin/pg_dump --version
           npm run test:backup
       - name: The nightly audit-chain check passes on what the tests wrote, and queues its head (#94)
         run: |

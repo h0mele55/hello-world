@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+import { coverageFor } from './vitest.coverage.mts';
 
 // The anchoring worker against a real Postgres (TEST_DATABASE_URL, migrated by
 // the database tests' global setup) and a throwaway Anvil chain. Needs Foundry
@@ -14,6 +15,7 @@ export default defineConfig({
   test: {
     include: ['tests/anchoring/**/*.test.ts'],
     environment: 'node',
+    coverage: coverageFor('anchoring'),
     globalSetup: ['tests/db/global-setup.ts'],
     setupFiles: ['tests/db/env.ts'],
     fileParallelism: false,

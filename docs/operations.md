@@ -15,7 +15,7 @@ on a public testnet; none of this makes its anchors legally binding (rule 9).
 | The backup | `scripts/backup.sh` | nightly, after the check, e.g. `37 2 * * *` | a non-zero exit code |
 | The monitor | `npm run monitor` | every ten minutes, e.g. `*/10 * * * *` | exit code 1 and an `ALERT` line for each thing that needs a person; route it to whoever is on call |
 | The monthly checkpoint | `npm run checkpoint` | monthly, on the 1st, e.g. `23 1 1 * *` | a non-zero exit code; the monitor's `CHECKPOINT_MISSING` from the 3rd (`docs/runbooks/checkpoints.md`) |
-| The published verifier | `.github/workflows/verifier-pages.yml` (GitHub Actions) | on every push to master, and on demand | a failed run (#85); see "The published verifier" |
+| The published verifier | `.github/workflows/verifier-pages.yml` (GitHub Actions) | once CI passes on a master commit, for that commit; and on demand | a failed run (#85); see "The published verifier" |
 | The chain reconciliation | `npm run reconcile:chain` | after every restore (`docs/runbooks/restore.md`), and weekly, e.g. `47 3 * * 0` | exit code 1 and a `DIFFERENCE` line for each version or record the database and the chain disagree on (#111) |
 
 Run the check, the watch and the backup from the app's directory with the
@@ -154,8 +154,10 @@ verified through them when the registry cannot be read.
 
 `.github/workflows/verifier-pages.yml` (#85) publishes the single-file
 verifier, so a recipient can check a report without the firm's site and keep
-a copy whose hash they can check. On every push to master, and on demand
-(Actions, "Publish the single-file verifier", Run workflow), it:
+a copy whose hash they can check. Once CI has passed on a master commit
+(never before, so no file is published whose tamper suite and end-to-end tests
+did not pass, #149), for that commit, and on demand (Actions, "Publish the
+single-file verifier", Run workflow), it:
 
 1. builds `dist/verifier.html` for Sepolia from the repository's variables
    (below), and makes the site from it (`scripts/verifier-site.ts`), checking

@@ -136,7 +136,7 @@ describe('a long-term seal', () => {
     expect(out).toContain('Signature Validation: Signature is Valid.');
   });
 
-  it.runIf(tool('qpdf'))('qpdf finds the file sound, and the DSS where the catalog says', () => {
+  it.runIf(tool('qpdf') || process.env.CI)('qpdf finds the file sound, and the DSS where the catalog says', () => {
     fs.writeFileSync(path.join(dir, 'long-term.pdf'), longTerm);
     const check = spawnSync('qpdf', ['--check', path.join(dir, 'long-term.pdf')], { encoding: 'utf8' });
     expect(check.stdout).toContain('No syntax or stream encoding errors found');

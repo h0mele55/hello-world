@@ -5,9 +5,15 @@ name: Publish the single-file verifier
 # recipient can check the copy they keep. It does nothing until the network's
 # deployment record is committed (#25). docs/operations.md, "The published
 # verifier", has the one-time setup.
+#
+# It runs once CI has passed on a master commit, and builds exactly that
+# commit (#149): never a file whose tamper suite and end-to-end tests did not
+# pass. A run started by hand builds the commit it is started on.
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [master]
   workflow_dispatch:
 
@@ -26,6 +32,8 @@ env:
 jobs:
   build:
     name: Build and release the verifier
+    # Only after CI passed on a push to master; a pull request's run, or a failed one, publishes nothing.
+    if: github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     permissions:
@@ -35,14 +43,19 @@ jobs:
       publish: ${{ steps.gate.outputs.publish }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The commit CI passed on, not whatever master is by now.
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
       - name: Is there a deployment to publish a verifier for?
         id: gate
+        env:
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch || github.ref_name }}
         run: |
-          if [ "$GITHUB_REF" != "refs/heads/master" ]; then
+          if [ "$HEAD_BRANCH" != "master" ]; then
             # A run started by hand from another branch would release code nobody merged.
             echo "publish=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Only master is published; this run is on $GITHUB_REF."
-            echo "Nothing published: only master is, and this run is on $GITHUB_REF." >> "$GITHUB_STEP_SUMMARY"
+            echo "::notice::Only master is published; this run is on $HEAD_BRANCH."
+            echo "Nothing published: only master is, and this run is on $HEAD_BRANCH." >> "$GITHUB_STEP_SUMMARY"
           elif [ -f "deployments/$NETWORK.json" ]; then
             echo "publish=true" >> "$GITHUB_OUTPUT"
           else
@@ -82,6 +95,7 @@ jobs:
         if: steps.gate.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          TARGET_SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
           TAG: ${{ steps.site.outputs.tag }}
           RELEASE_URL: ${{ steps.site.outputs.release_url }}
         run: |
@@ -89,7 +103,7 @@ jobs:
             echo "$TAG already holds this file: no new release." >> "$GITHUB_STEP_SUMMARY"
           else
             gh release create "$TAG" "$RUNNER_TEMP/site/verifier.html" "$RUNNER_TEMP/site/verifier.html.sha256" \
-              --target "$GITHUB_SHA" --title "Single-file verifier ($NETWORK, ${TAG##*-})" --notes-file "$RUNNER_TEMP/notes.md"
+              --target "$TARGET_SHA" --title "Single-file verifier ($NETWORK, ${TAG##*-})" --notes-file "$RUNNER_TEMP/notes.md"
             echo "Released $TAG: $RELEASE_URL" >> "$GITHUB_STEP_SUMMARY"
           fi
       - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0

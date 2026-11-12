@@ -1,5 +1,6 @@
 import { fileURLToPath } from 'node:url';
 import { defineConfig } from 'vitest/config';
+import { coverageFor } from './vitest.coverage.mts';
 
 // Intake use cases against a real Postgres (TEST_DATABASE_URL), migrated from
 // scratch by the global setup. Each test file truncates the tables it uses.
@@ -15,6 +16,7 @@ export default defineConfig({
   test: {
     include: ['tests/db/**/*.test.ts'],
     environment: 'node',
+    coverage: coverageFor('db'),
     globalSetup: ['tests/db/global-setup.ts'],
     setupFiles: ['tests/db/env.ts'],
     fileParallelism: false,

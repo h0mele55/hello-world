@@ -5,6 +5,7 @@ import { afterAll, beforeEach, describe, expect, it } from 'vitest';
 import type { SessionUser } from '@/auth';
 import { PrismaClient } from '@/generated/prisma/client';
 import { verifyAuditChain } from '@/lib/audit';
+import { collectAlerts } from '@/lib/monitor';
 import { deliverNotifications, type MailMessage, type MailTransport } from '@/lib/notifications/mailer';
 import { queueRevokedNotices, queueSupersededNotices } from '@/lib/notifications/queue';
 import { confirmOpinion, createEngagement, IntakeError, uploadVersion } from '@/lib/reports/intake';
@@ -266,31 +267,97 @@ describe('the mailer', () => {
     expect(await verifyAuditChain(prisma, admin.orgId)).toMatchObject({ ok: true });
   });
 
-  it('retries a failure, keeps a name for it rather than what the server said, and gives up after five attempts', async () => {
-    await queued([{ name: 'Maria Petrova', email: 'maria@lender.example', locale: 'en' }]);
-    const refused = () => Object.assign(new Error('550 5.1.1 <maria@lender.example>: Recipient address rejected'), { code: 'EENVELOPE' });
-    const { transport, sent } = fakeTransport(refused);
+  /** Moves the clock to just after the notice may be tried again, and says how long that was. */
+  async function untilRetry() {
+    const row = await prisma.notification.findFirstOrThrow();
+    const wait = row.leaseUntil!.getTime() - clock.getTime();
+    clock = new Date(row.leaseUntil!.getTime() + 1);
+    return wait;
+  }
+  const rejected = () => Object.assign(new Error('550 5.1.1 <maria@lender.example>: Recipient address rejected'), { code: 'EENVELOPE', responseCode: 550 });
+  const unreachable = () => Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:25'), { code: 'ECONNECTION' });
 
+  it('gives up on a permanent rejection after five attempts within minutes, keeping a name for it rather than what the server said (#148)', async () => {
+    await queued([{ name: 'Maria Petrova', email: 'maria@lender.example', locale: 'en' }]);
+    const { transport, sent } = fakeTransport(rejected);
+    const waits: number[] = [];
     for (let attempt = 1; attempt <= 4; attempt += 1) {
-      const report = await deliver(transport);
-      expect(report.retrying).toHaveLength(1);
-      const row = await prisma.notification.findFirstOrThrow();
-      expect(row).toMatchObject({ status: 'PENDING', attempts: attempt, lastError: 'EENVELOPE', leaseUntil: null });
+      expect((await deliver(transport)).retrying).toHaveLength(1);
+      expect(await prisma.notification.findFirstOrThrow()).toMatchObject({ status: 'PENDING', attempts: attempt, lastError: 'EENVELOPE' });
+      waits.push(await untilRetry());
     }
+    expect(waits).toEqual([60_000, 120_000, 240_000, 480_000]);
     expect((await deliver(transport)).failed).toHaveLength(1);
-    expect(await prisma.notification.findFirstOrThrow()).toMatchObject({ status: 'FAILED', attempts: 5, lastError: 'EENVELOPE' });
+    expect(await prisma.notification.findFirstOrThrow()).toMatchObject({ status: 'FAILED', attempts: 5, lastError: 'EENVELOPE', leaseUntil: null });
     expect(sent).toEqual([]);
     const failed = await prisma.auditEvent.findFirstOrThrow({ where: { action: 'notification.failed' } });
     expect(failed.data).toMatchObject({ reason: 'EENVELOPE', attempts: 5 });
     expect(JSON.stringify(failed.data)).not.toContain('lender');
     // A FAILED notice is for a person to look at; the mailer leaves it.
+    clock = new Date(clock.getTime() + 24 * 3_600_000);
     expect((await deliver(fakeTransport().transport)).sent).toEqual([]);
+  });
+
+  it('waits longer after each failure to reach the server, and does not try again before then (#148)', async () => {
+    await queued([{ name: 'Maria Petrova', email: 'maria@lender.example', locale: 'en' }]);
+    const { transport } = fakeTransport(unreachable);
+    expect((await deliver(transport)).retrying).toHaveLength(1);
+    // Thirty seconds later, the next pass leaves it alone.
+    clock = new Date(clock.getTime() + 30_000);
+    expect(await deliver(transport)).toMatchObject({ sent: [], retrying: [], failed: [] });
+    expect(await prisma.notification.findFirstOrThrow()).toMatchObject({ attempts: 1 });
+  });
+
+  it('keeps trying a server it cannot reach for about three days, spacing the attempts out to four hours, before giving up (#148)', async () => {
+    await queued([{ name: 'Maria Petrova', email: 'maria@lender.example', locale: 'en' }]);
+    const start = clock.getTime();
+    const { transport } = fakeTransport(unreachable);
+    const waits: number[] = [];
+    let report = await deliver(transport);
+    while (report.retrying.length) {
+      waits.push(await untilRetry());
+      report = await deliver(transport);
+    }
+    expect(report.failed).toHaveLength(1);
+    expect(waits.slice(0, 9)).toEqual([1, 2, 4, 8, 16, 32, 64, 128, 240].map((m) => m * 60_000));
+    expect(new Set(waits.slice(8))).toEqual(new Set([4 * 3_600_000]));
+    // Five failures in a row (a three-minute restart, as it were) are nowhere near giving up.
+    expect(waits.length).toBeGreaterThan(5);
+    const days = (clock.getTime() - start) / (24 * 3_600_000);
+    expect(days).toBeGreaterThan(2.5);
+    expect(days).toBeLessThan(3.5);
+    expect(await prisma.notification.findFirstOrThrow()).toMatchObject({ status: 'FAILED', lastError: 'ECONNECTION' });
+  });
+
+  it('counts a refused sign-in to the server as the firm’s problem, not the recipient’s (#148)', async () => {
+    await queued([{ name: 'Maria Petrova', email: 'maria@lender.example', locale: 'en' }]);
+    const { transport } = fakeTransport(() => Object.assign(new Error('535 5.7.8 Authentication credentials invalid'), { code: 'EAUTH', responseCode: 535 }));
+    for (let attempt = 1; attempt <= 6; attempt += 1) {
+      expect((await deliver(transport)).retrying).toHaveLength(1);
+      await untilRetry();
+    }
+    expect(await prisma.notification.findFirstOrThrow()).toMatchObject({ status: 'PENDING', attempts: 6, lastError: 'EAUTH' });
+  });
+
+  it('tells the monitor about a notice still failing after half an hour, long before it gives up (#148)', async () => {
+    await queued([{ name: 'Maria Petrova', email: 'maria@lender.example', locale: 'en' }]);
+    const { transport } = fakeTransport(unreachable);
+    const notices = async () => (await collectAlerts(prisma, clock)).filter((a) => a.code.startsWith('NOTICE_'));
+    for (let attempt = 1; attempt <= 6; attempt += 1) {
+      await deliver(transport);
+      if (attempt === 5) expect(await notices()).toEqual([]);
+      await untilRetry();
+    }
+    expect(await notices()).toEqual([{ code: 'NOTICE_RETRYING', orgId: admin.orgId, detail: { count: 1, reasons: ['ECONNECTION'], runbook: 'docs/runbooks/mail.md' } }]);
+    await deliver(fakeTransport().transport);
+    expect(await notices()).toEqual([]);
   });
 
   it('a failure after a retry still sends', async () => {
     await queued([{ name: 'Maria Petrova', email: 'maria@lender.example', locale: 'en' }]);
     const { transport, sent } = fakeTransport((_, n) => (n === 1 ? Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' }) : null));
     expect((await deliver(transport)).retrying).toHaveLength(1);
+    await untilRetry();
     expect((await deliver(transport)).sent).toHaveLength(1);
     expect(sent).toHaveLength(1);
     expect(await prisma.notification.findFirstOrThrow()).toMatchObject({ status: 'SENT', attempts: 2, lastError: null });

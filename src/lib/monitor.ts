@@ -29,6 +29,7 @@ export type AlertCode =
   | 'WATCH_STALE'
   | 'UNJOURNALED_OPEN'
   | 'NOTICE_FAILED'
+  | 'NOTICE_RETRYING'
   | 'OTS_NOT_SUBMITTED'
   | 'OTS_PENDING_LONG'
   | 'OTS_BROKEN'
@@ -60,6 +61,9 @@ export const MONITOR_THRESHOLDS = {
   /** The checkpoint runs on the 1st; by the 3rd, a month without one has a job that did not run. */
   checkpointGraceMs: 2 * 24 * 60 * 60 * 1000,
 };
+
+/** Failed attempts after which a notice still pending is reported (#148): about half an hour of the mailer's waits. */
+export const NOTICE_RETRYING_ATTEMPTS = 6;
 
 const iso = (d: Date | null | undefined) => d?.toISOString() ?? null;
 
@@ -153,6 +157,12 @@ export async function collectAlerts(prisma: PrismaClient, now = new Date(), t = 
     // The mailer records each notice it gave up on in the audit log, with its time.
     const notices = await prisma.auditEvent.count({ where: { orgId, action: 'notification.failed', at: { gte: since(t.recentMs).toISOString() } } });
     if (notices) alerts.push({ code: 'NOTICE_FAILED', orgId, detail: { count: notices, runbook: 'docs/runbooks/mail.md' } });
+    // A notice still failing after half an hour of attempts (#148): the mailer keeps trying for days, so the outage is told now.
+    const retrying = await prisma.notification.findMany({
+      where: { status: 'PENDING', lastError: { not: null }, attempts: { gte: NOTICE_RETRYING_ATTEMPTS }, reportVersion: { engagement: { client: { orgId } } } },
+      select: { lastError: true },
+    });
+    if (retrying.length) alerts.push({ code: 'NOTICE_RETRYING', orgId, detail: { count: retrying.length, reasons: [...new Set(retrying.map((n) => n.lastError!))].sort(), runbook: 'docs/runbooks/mail.md' } });
 
     // The OpenTimestamps job (#66), for versions and checkpoints (#122).
     const ofFirm = { OR: [{ reportVersion: { engagement: { client: { orgId } } } }, { checkpoint: { orgId } }] };

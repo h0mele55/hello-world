@@ -40,7 +40,7 @@ export interface VerifierSetup extends VerifierConfig {
   reanchorArchives: number;
 }
 
-export type VerifierSetupRefusal = 'NOT_CONFIGURED' | 'NETWORK_INVALID' | 'DEPLOYMENT_UNAVAILABLE' | 'RPC_URLS_MISSING' | 'RPC_URLS_INVALID' | 'RPC_URLS_NOT_INDEPENDENT';
+export type VerifierSetupRefusal = 'NOT_CONFIGURED' | 'NETWORK_INVALID' | 'DEPLOYMENT_UNAVAILABLE' | 'RPC_URLS_MISSING' | 'RPC_URLS_INVALID' | 'RPC_URLS_NOT_INDEPENDENT' | 'SEAL_ROOTS_INVALID';
 
 export type VerifierSetupResult = { ok: true; setup: VerifierSetup } | { ok: false; reason: VerifierSetupRefusal };
 
@@ -58,12 +58,19 @@ function issuersOf(network: NetworkName, root: string): Record<string, string> {
 }
 
 /** The seal's roots, as base64 DER. A file that cannot be read gives none: the seal then says it cannot be checked, and the verdict is unaffected. */
-export function sealRootsOf(file: string | undefined): string[] {
+/**
+ * The seal's published roots, base64. None when SEAL_TRUST_ANCHORS is not set;
+ * SEAL_ROOTS_INVALID when it is set but cannot be read, holds no certificate,
+ * or holds a block that is not one (#157): a verifier that can check no seal
+ * must never be built, or served, by mistake.
+ */
+export function sealRootsOf(file: string | undefined): string[] | 'SEAL_ROOTS_INVALID' {
   if (!file) return [];
   try {
-    return pemCertificates(fs.readFileSync(file, 'utf8')).map((der) => btoa(String.fromCharCode(...der)));
+    const roots = pemCertificates(fs.readFileSync(file, 'utf8')).map((der) => btoa(String.fromCharCode(...der)));
+    return roots.length > 0 ? roots : 'SEAL_ROOTS_INVALID';
   } catch {
-    return [];
+    return 'SEAL_ROOTS_INVALID';
   }
 }
 
@@ -113,6 +120,8 @@ export function verifierSetupFromEnv(env: Env = process.env, root = process.cwd(
   }
   const rpcUrls = rpcUrlsOf(network, env);
   if (typeof rpcUrls === 'string') return { ok: false, reason: rpcUrls };
+  const sealRoots = sealRootsOf(env.SEAL_TRUST_ANCHORS);
+  if (typeof sealRoots === 'string') return { ok: false, reason: sealRoots };
   return {
     ok: true,
     setup: {
@@ -122,7 +131,7 @@ export function verifierSetupFromEnv(env: Env = process.env, root = process.cwd(
       runtimeBytecodeHash: deployment.runtimeBytecodeHash as Hex,
       rpcUrls,
       issuers: issuersOf(network, root),
-      sealRoots: sealRootsOf(env.SEAL_TRUST_ANCHORS),
+      sealRoots,
       reanchorArchives: reanchorArchivesOf(env).length,
     },
   };

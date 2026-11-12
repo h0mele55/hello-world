@@ -15,7 +15,7 @@ on a public testnet; none of this makes its anchors legally binding (rule 9).
 | The backup | `scripts/backup.sh` | nightly, after the check, e.g. `37 2 * * *` | a non-zero exit code |
 | The monitor | `npm run monitor` | every ten minutes, e.g. `*/10 * * * *` | exit code 1 and an `ALERT` line for each thing that needs a person; route it to whoever is on call |
 | The monthly checkpoint | `npm run checkpoint` | monthly, on the 1st, e.g. `23 1 1 * *` | a non-zero exit code; the monitor's `CHECKPOINT_MISSING` from the 3rd (`docs/runbooks/checkpoints.md`) |
-| The published verifier | `.github/workflows/verifier-pages.yml` (GitHub Actions) | on every push to master, and on demand | a failed run (#85); see "The published verifier" |
+| The published verifier | `.github/workflows/verifier-pages.yml` (GitHub Actions) | once CI passes on a master commit, for that commit; and on demand | a failed run (#85); see "The published verifier" |
 | The chain reconciliation | `npm run reconcile:chain` | after every restore (`docs/runbooks/restore.md`), and weekly, e.g. `47 3 * * 0` | exit code 1 and a `DIFFERENCE` line for each version or record the database and the chain disagree on (#111) |
 
 Run the check, the watch and the backup from the app's directory with the
@@ -30,7 +30,10 @@ before then (`docs/runbooks/stolen-issuer-key.md`).
 
 The worker reads two RPC endpoints from different providers,
 `<NETWORK>_RPC_URL` and `<NETWORK>_RPC_URL_2`, and settles a row only on what
-both read (#92); it refuses to start without the second.
+both read (#92); it refuses to start without the second. The registry watch
+reads both too (#141), so a provider that drops events cannot hide a
+revocation from it: while they disagree it exits 2 and reads the range again
+next run.
 
 Run the worker, the mailer and the OpenTimestamps job under a supervisor that restarts them (for
 example a systemd unit with `Restart=always`). Each tries a failed pass again
@@ -75,6 +78,7 @@ for each of these, with ids, codes and times, never a client or a file:
 | `AUDIT_CHECK_BROKEN` / `AUDIT_CHECK_STALE` | the nightly check found a break, or has not run for 36 hours | [audit-head-missing.md](runbooks/audit-head-missing.md) for a missing head |
 | `WATCH_STALE` / `UNJOURNALED_OPEN` | the registry watch has not run for two hours, or found a write nobody has reviewed | [stolen-issuer-key.md](runbooks/stolen-issuer-key.md) |
 | `NOTICE_FAILED` | the mailer gave up on a notice in the last day | [mail.md](runbooks/mail.md) |
+| `NOTICE_RETRYING` | a notice is still failing after six attempts (about half an hour): usually the SMTP server is out or refuses the firm's sign-in | [mail.md](runbooks/mail.md) |
 | `OTS_NOT_SUBMITTED` | a version approved more than a day ago is final on chain and has no OpenTimestamps proof | [opentimestamps.md](runbooks/opentimestamps.md) |
 | `OTS_PENDING_LONG` | a proof has waited more than two days for Bitcoin | [opentimestamps.md](runbooks/opentimestamps.md) |
 | `OTS_BROKEN` | a proof turned out not to lead to the block it names, in the last day | [opentimestamps.md](runbooks/opentimestamps.md) |
@@ -112,9 +116,15 @@ only, holds no key and writes no chain. Each pass:
   They must also meet the header's own proof-of-work target, at least as hard
   as Bitcoin's in 2015. The message the proof leads to must be the block's
   Merkle root. Only then is the proof COMPLETE, with the block's height, hash
-  and time (`ots.complete`). A proof that leads elsewhere is BROKEN
-  (`ots.broken`). An explorer that cannot be read, or two that disagree, leave
-  the proof pending with a name for why, and the next pass tries again.
+  and time (`ots.complete`). Each Bitcoin attestation is checked on its own:
+  one that leads elsewhere is dropped, with its calendar's pending claim, and
+  the rest of the proof stands (`ots.answer_refused`; pending as
+  `CALENDAR_ANSWER_REFUSED` while no other attestation has completed it). A
+  proof is BROKEN (`ots.broken`) only when nothing is left in it that could
+  hold. An explorer that cannot be read, or two that disagree, leave the proof
+  pending with a name for why, and the next pass tries again. A calendar's
+  answer that would make the proof larger than a proof can be read is not
+  merged.
 
 The version's page shows where its proof stands and offers the `.ots` file,
 which the reference client (`ots verify`) checks without this app. Bitcoin's
@@ -144,8 +154,10 @@ verified through them when the registry cannot be read.
 
 `.github/workflows/verifier-pages.yml` (#85) publishes the single-file
 verifier, so a recipient can check a report without the firm's site and keep
-a copy whose hash they can check. On every push to master, and on demand
-(Actions, "Publish the single-file verifier", Run workflow), it:
+a copy whose hash they can check. Once CI has passed on a master commit
+(never before, so no file is published whose tamper suite and end-to-end tests
+did not pass, #149), for that commit, and on demand (Actions, "Publish the
+single-file verifier", Run workflow), it:
 
 1. builds `dist/verifier.html` for Sepolia from the repository's variables
    (below), and makes the site from it (`scripts/verifier-site.ts`), checking
@@ -282,7 +294,11 @@ both endpoints at one finalized block, and every head the registry's owner
 has not voided must still be the hash of one of its events
 (`ANCHORED_HEAD_MISSING` otherwise, naming the heads;
 `docs/runbooks/audit-head-missing.md`). A chain it cannot read is
-`CHAIN_UNREADABLE`, never a pass. When the log has moved on since the last
+`CHAIN_UNREADABLE`, never a pass. The heads are those of the firm the issuer
+key is registered to on chain (#141): the firm's name in the database must be
+the deployment record's `issuer.orgName`, or its check fails `FIRM_MISMATCH`;
+another firm in the database is checked on the database alone, with a warning
+line each night. When the log has moved on since the last
 head, it queues the new head in the journal, and the worker writes it like
 any other write. It therefore reads `ANCHOR_NETWORK`, `ISSUER_ADDRESS`, the
 deployment record and both `<NETWORK>_RPC_URL` and `<NETWORK>_RPC_URL_2`, and
@@ -304,6 +320,19 @@ with the last intact one, not with the break.
 - `SHA256SUMS`.
 
 The dump runs first, so every file a dumped row names is already in the store.
+A file is never deleted with its row (#158): a discarded draft's file stays
+in the store, and the worker removes files no row names once they are 48 hours
+old (`sweepOrphanFiles`, hourly), so a backup whose dump still names a file
+finds it. `verify-restore` names a row whose file a restore lacks
+(`FILE_MISSING`).
+
+Both `backup.sh` and `restore.sh` use the PostgreSQL client tools of the
+server's own major version (#184): `/usr/lib/postgresql/<major>/bin` when
+installed (`postgresql-client-16` for this app's PostgreSQL 16), otherwise the
+tools on PATH only if their major matches, and otherwise they refuse, naming the
+package to install. A newer `pg_restore` sets parameters an older server refuses,
+and an older one cannot read a newer dump. `PG_BIN` names the tools to use
+instead.
 
 **Keys are not in the backup.** Without `FILE_ENCRYPTION_KEY`, the files and
 every sealed column (opinions, manifests, notes, TOTP secrets) cannot be read.

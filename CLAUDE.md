@@ -94,9 +94,9 @@ npm run contracts:artifact     # regenerate src/lib/chain/registry-artifact.ts a
 npm run test:integration       # chain adapter and verifier against throwaway Anvil nodes
 npx tsx scripts/deploy-registry.ts <network>             # deploy (sepolia, local, base-sepolia, …); of the production networks only arbitrum, after arbitrum-sepolia (#63); REVOCATION_DELAY_HOURS (default 24, local 0)
 npx tsx scripts/measure-chain-costs.ts                   # today's cost per report and finality lag on the production candidates
-npx tsx scripts/owner-call.ts <sepolia|local> <add-issuer|remove-issuer|cancel-revocation|void-audit-head|record-reanchor-root|void-reanchor-root|transfer-owner|accept-owner> [address|recordId|index|archive.json]   # prints the owner's transaction; sends nothing
+npx tsx scripts/owner-call.ts <network> <add-issuer|remove-issuer|cancel-revocation|void-audit-head|record-reanchor-root|void-reanchor-root|transfer-owner|accept-owner> [address|recordId|index|archive.json]   # prints the owner's transaction; sends nothing
 npx tsx scripts/reanchor.ts build <source> <target>      # archive every record of a retiring registry, with a proof per record (#65)
-npx tsx scripts/reanchor.ts check <dir> <target>         # every proof against the root the owner recorded; exit 1 on any failure
+npx tsx scripts/reanchor.ts check <dir> <target> --source <network>   # every proof against the root the owner recorded, the archive against its source; exit 1 on any failure
 npx tsx scripts/kms-address.ts <KMS key version name>     # the address of a Cloud KMS issuer key, to register it
 
 # Database (Postgres 16: `docker compose up -d`, or any local server; Prisma 7 does not read .env)
@@ -162,9 +162,21 @@ Locally, Playwright needs the browser of its own version:
   root vouches for a whole registry's history. `scripts/reanchor.ts build`
   archives a registry (`src/lib/chain/reanchor-build.ts`, both endpoints at
   one agreed finalized block, refusing while a revocation is pending),
-  `owner-call.ts record-reanchor-root` prints the owner's call, and
-  `reanchor.ts check` holds every proof to the recorded root. A re-anchored
+  `owner-call.ts record-reanchor-root --source <network>` prints the owner's
+  call only once the source registry, read again on both endpoints at the
+  archive's block, holds exactly the archive's records
+  (`checkArchiveAgainstSource`, #155): an archive edited and rebuilt after
+  the build passes every check it can make of itself. `--source-gone` skips
+  that only by name, once the chain is gone. `reanchor.ts check` holds every
+  proof to the recorded root, and the archive to its source the same way. A re-anchored
   family is frozen at the snapshot until #127 is decided.
+- **A record's block is the block its transaction is in (#138).** On Arbitrum
+  `block.number` is the L1 block, so `_blockNumber()` asks the ArbSys
+  precompile (`arbBlockNumber`) on chain ids 42161 and 421614 and reads
+  `block.number` elsewhere. It is keyed on the chain id, never set at
+  deployment, so every network runs one bytecode. Never write
+  `block.number` into a record directly. Forge answers ArbSys itself on an
+  Arbitrum chain id, shadowing an etched mock, so tests use `vm.mockCall`.
 - **Gas ceilings are tests.** `contracts/test/AuditReportRegistry.gas.t.sol`
   caps each write, and `contracts/snapshots/` pins the exact figures. A change
   that moves them updates the snapshot in the same pull request
@@ -178,10 +190,27 @@ Locally, Playwright needs the browser of its own version:
   script refuses the other `PRODUCTION_NETWORKS`, and deploys to Arbitrum One
   only once `deployments/arbitrum-sepolia.json` exists (#123). A monthly root
   of its records goes to Bitcoin through OpenTimestamps (#122).
-- **All chain access goes through `src/lib/chain/`.** `createChainAdapter`
-  checks the chain id and the code at the registry address, then simulates,
-  before every write, so a refusal is a named `RegistryRevertError` and nothing
-  is broadcast. A returned `txHash` is not an anchor: call `waitFinal`.
+- **All chain access goes through `src/lib/chain/`.** The app's only chain
+  writer is the worker, through the journal (rule 3); the scripts write as the
+  owner (`owner-call.ts`) or deploy (#142). `createChainAdapter`, which checks
+  the chain id and the code, simulates, signs without a journal and reads one
+  endpoint, is for tests and rehearsals only: never use it to write from the
+  app. A returned `txHash` is not an anchor: it counts once its block is
+  `finalized`.
+- **Scripts that scan the registry's events** (the watch, reconcile, the
+  checkpoint, re-anchoring) read `getLogs` in `LOG_RANGE_BLOCKS[network]`
+  windows, `<NETWORK>_LOG_RANGE` to override, from the record's `deployBlock`,
+  which is required: without it a scan would start at genesis. A month's
+  checkpoint scans only the blocks since the last one, whose records it reads
+  again at its own block (#142).
+- **The deploy script records the registry before registering its issuer**
+  (#142): the record is written, issuer `pending`, as soon as the bytecode
+  checks, and a rerun with the same settings finishes it rather than deploying
+  another. Nothing loads a pending record (`DEPLOYMENT_PENDING`).
+- **The second endpoint's "another provider" check is a heuristic**
+  (`providerOf`): the loopback interface, however spelled, is told apart only
+  by port, and a host name by its registrable domain. It catches a mistake; it
+  cannot prove two providers are independent.
 - **Integration tests start their own Anvil** with `--slots-in-an-epoch 1`, so
   `finalized` trails `latest` by two blocks; mine blocks to reach finality.
 
@@ -226,13 +255,33 @@ to one inflect-compliance commit.
 ## PDFs, the opinion and the commitments
 
 - **Never parse an untrusted PDF in the server process.** Call
-  `parsePdf` (`src/lib/pdf/parse.ts`), which forks `parse-child.mjs` with a
-  heap cap and a timeout and returns a parsed PDF or a named refusal.
+  `parsePdf` (`src/lib/pdf/parse.ts`), which runs `parse-child.mjs`, and
+  `editPdf` (`src/lib/pdf/edit.ts`), which runs `edit-child.mjs`, for every
+  pdf-lib load of a stored PDF (stamping, the seal's signature field). Both go
+  through `runIsolated` (`src/lib/pdf/isolated.ts`, #154), the only place the
+  server forks: a heap cap, a cap on the child's whole memory (pdf-lib inflates
+  every object stream, referenced or not, and the heap cap does not count
+  ArrayBuffers), a timeout, an empty environment (no key, credential or
+  database URL), and at most `ISOLATED_CONCURRENCY` children at once. Each
+  returns a result or a named refusal. Signing stays in the worker, over the
+  digest. `tests/pdf/isolation.test.ts` refuses a `fork(` or a
+  `PDFDocument.load(` anywhere else.
 - **What a commitment means is versioned.** `normaliseText`, `joinLines`,
   `dropRunningLines` and the commitment encodings are normaliser v1 and
   manifest schema 1. A change that moves any value in
   `tests/pdf/golden.test.ts` is a new version (and a reader for the old one),
   never an edit; regenerating a fixture legitimately moves only its `docHash`.
+  `normaliseText` repeats its pass until nothing changes (#143): one pass is
+  not idempotent where an invisible character sits between a letter and its
+  accent, and every committed text was the second pass's output already.
+- **A page whose text cannot be laid out is refused, never laid out**
+  (`lines.mjs`, #143): text more than 20,000 points across, or at a position
+  that is not a number, throws `PageLayoutError`, which both readers turn into
+  `UNPARSEABLE`. The column finder works point by point, so a hostile file
+  could otherwise freeze the browser or overflow the stack. `readDocument`
+  turns anything pdf.js throws reading pages or metadata into `UNPARSEABLE`,
+  and the verdict turns a text it cannot commit to into
+  `ALTERED_OPINION_NOT_CHECKABLE`, never an exception.
 - **The locator answers FOUND only when it is sure.** Every doubt is a
   `NOT_FOUND` with a reason, and a person types the opinion instead. Do not
   loosen a heading rule to raise the hit rate without a corpus case that shows
@@ -257,8 +306,17 @@ to one inflect-compliance commit.
   page in parallel, so a layout's check does not protect the page. Route
   handlers wrap in `handler()` (`src/lib/http.ts`), which also refuses a
   cross-origin write and turns an `IntakeError` into a status and a code.
+  A route reads JSON with `readJson(req)` (64 KiB at most, however it is
+  sent), never `req.json()`, and serves a PDF with `pdfResponse` (an
+  attachment, sandboxed, nosniff, no-store), never by hand; every code a
+  route can answer has words in `errors.*` in both languages
+  (`tests/unit/http.test.ts` holds all three, #146).
 - **Use cases scope every query to the caller's firm** (`orgId`) and check the
-  role. A record from another firm is `NOT_FOUND`, never `FORBIDDEN`.
+  role. A record from another firm is `NOT_FOUND`, never `FORBIDDEN`. A
+  value unique across every firm (a file's `docHash`, an engagement's
+  `familyId`) is named as a duplicate only within the firm; another firm's is
+  a generic `CONFLICT` (#146). A list that loads at most N rows reads N + 1
+  and says when it was cut.
 - **Confidential data is sealed, never stored in clear**: use `seal`/`open`
   from `src/lib/sealed.ts` with a context naming the row and field, and
   `storeFile`/`readStoredFile` for PDFs. Never log a file, an opinion or a
@@ -299,10 +357,23 @@ to one inflect-compliance commit.
 - **Unknown is INDETERMINATE, and INDETERMINATE is never resent.** It is
   settled only by reading the chain: receipts for every hash, the node's
   pool, the issuer's finalized nonce, the record for the document. While one
-  is unsettled no new LIVE write starts for that issuer key. When it cannot be
+  is unsettled no new LIVE write starts for that issuer key, and neither while
+  an INTENT row holds a journalled hash, whatever its lease (`issuerBlocked`,
+  #139): its nonce is reserved and its fate unknown. When it cannot be
   settled (its transaction unknown, its nonce unused), an approver runs
   `scripts/settle-write.ts`, which uses the nonce with a no-op transfer; the
-  worker then reads the outcome.
+  worker then reads the outcome. A write whose transaction is final but whose
+  record does not match (`RECORD_MISMATCH`) is held for a person on every
+  pass; once an approver has looked, `settle-write.ts … --release-mismatch`
+  marks it released (no chain access) and the worker reads it again on both
+  endpoints: still a mismatch, it is FAILED `RECORD_MISMATCH_RESOLVED`,
+  keeping its nonce and hash (#140). settle-write's `--operator` is named,
+  not signed in: its events carry `namedOperatorId` and no actor, and an
+  audit-log head's are `audit_head.*`.
+- **Replacement is bounded** (#139): at most `maxReplacements` (6), never
+  above `WORKER_MAX_FEE_GWEI`, and a refused replacement's hash stays in
+  `replacedTxHashes`, since its bytes reached a node. `firstBroadcastAt` is
+  set by the first send and never by `replace`; `FINALITY_LAG` reads it.
 - **A row holds its nonce only while its transaction may land or once its own
   transaction used it**; otherwise clear the nonce. A partial unique index
   allows one row per (chain, issuer, nonce).
@@ -353,8 +424,24 @@ to one inflect-compliance commit.
   version (`anchorOnly`) is never stamped; it gets a certificate
   (`src/lib/certificate.ts`). Stamping and certificates are deterministic.
 - **Stamps are read with `readStamp`** (`src/lib/stamp-fields.ts`, no Node
-  imports, so the browser verifier can share it). A stamp is a claim; only the
+  imports, so the browser verifier can share it), from the rdf:Description
+  that binds the stamp's namespace only: an original may bind the same prefix
+  to another namespace (#144). A stamp is a claim; only the
   chain says whether the record it names is this file.
+- **The stamp is versioned** (`STAMP_VERSION`, #157). Version 2 adds
+  `opinionEdited`, set from `ReportVersion.opinionEdited`. That column is
+  written at confirmation and is true when the person corrected the text or
+  type the locator found, or typed one it did not find. Readers accept
+  versions 1 and 2; the worker writes 2. For a file that is not an exact
+  match:
+  - an edited v2 opinion is `ALTERED_OPINION_NOT_CHECKABLE`
+    (`OPINION_EDITED_AT_CONFIRMATION`);
+  - a located type differing from the stamp's is CHANGED under v2, and
+    `OPINION_TYPE_DIFFERS` (not checkable) under v1, which cannot say whether
+    the type was corrected.
+
+  A new stamp field is a new version with a reader for the old one, never an
+  edit.
 - **The worker runs from the app's directory** (the PDF parser is found from
   there) and needs `FILE_*` and `APP_PUBLIC_URL` besides its chain settings.
   A failed pass (an endpoint or the database out) is tried again after the
@@ -372,12 +459,17 @@ to one inflect-compliance commit.
   (rule 3): a new path that sends a registry write without a journal row will
   be reported as a stolen key. Findings (`UnjournaledWrite`) and the checkpoint
   are written in one transaction per range; only an ADMIN marks a finding
-  reviewed (`reviewUnjournaledWrite`).
+  reviewed (`reviewUnjournaledWrite`). Every read is made on both endpoints
+  at an agreed finalized block (#141): one endpoint that lags or drops events
+  must never move the checkpoint past a stolen key's revocation, so a
+  disagreement stops the run (`RPC_DISAGREE`) and the checkpoint stays.
 - **The owner's acts go through `scripts/owner-call.ts`**, which checks the
   chain and the registry, simulates, and prints the transaction for the owner
-  (the deployer key, later a Safe) to execute. It sends only an issuer change
-  or a cancellation, only with `--send` and `OWNER_PRIVATE_KEY`, and never an
-  ownership move. A revocation the firm did not ask for is
+  (the deployer key, later a Safe) to execute, on any network in `NETWORKS`.
+  With `--send` and `OWNER_PRIVATE_KEY` it sends an issuer change, a
+  cancellation, a void (of an audit head or a re-anchor root) or a re-anchor
+  root, never an ownership move, and says whether the write's block is final
+  yet (`final`). A revocation the firm did not ask for is
   `docs/runbooks/stolen-issuer-key.md`.
 
 ## The verifier
@@ -418,7 +510,8 @@ to one inflect-compliance commit.
   `APP_PUBLIC_URL`, that origin and the two Bitcoin explorers. The CLI asks
   for the timestamp only with the issuer's origin (baked in, or `--app-url`).
 - **The published copy (#85).** `.github/workflows/verifier-pages.yml`
-  builds `verifier.html` for its `NETWORK` (Sepolia) and publishes it on
+  runs once CI has passed on a master commit (a `workflow_run`, #149) and
+  builds that commit's `verifier.html` for its `NETWORK` (Sepolia), publishing it on
   GitHub Pages and, once per SHA-256, on a release named by that hash. The
   site (`standalone/site.ts`) is made from the `dist/verifier.json` the build
   writes, whose hash must be the file's. It does nothing until
@@ -434,9 +527,11 @@ to one inflect-compliance commit.
   it. Then the root must be on the verifier's own registry, not voided, for
   the same source, block and count, read on both endpoints at one finalized
   block. `archivedView` answers the verdict's reads from the set, and a proof
-  asked about a record it does not hold refuses (`REANCHOR_NOT_COVERED`)
-  rather than say "none". `verifyWithReanchors` tries a set only when the
-  verifier's own registry holds no record of the file. The CLI takes
+  asked about a record or a file it does not hold refuses
+  (`REANCHOR_NOT_COVERED`) rather than say "none": only a whole archive can
+  (#143). `verifyWithReanchors` tries a set only when the verifier's own
+  registry holds no record of the file, and tries every candidate set in turn
+  until one answers, so a voided root does not hide a set that stands. The CLI takes
   `--reanchor`. The archives in `REANCHOR_ARCHIVES` are fetched by `/verify`
   from `/reanchor/<n>` and baked into `verifier.html` and the CLI by
   `build:verifier` (#126); all three pass them as `loadSets`, which runs only
@@ -474,10 +569,35 @@ to one inflect-compliance commit.
   recovery codes are stored as SHA-256 and shown once. Until the second factor
   is set up, the session is `mfa: 'ENROLL'`: pages redirect to `/account/mfa`
   and routes answer `MFA_REQUIRED`, except the two setup routes.
+- **A session stands only while its user is as it signed in** (#145).
+  `currentUser()` (`liveUser`, `src/auth.ts`) reads the `User` row on every
+  request and refuses a session whose `sessionVersion`, role or firm no longer
+  match, whose user is disabled, or that signed in more than
+  `SESSION_MAX_AGE_MS` (8 hours) ago: NextAuth slides the cookie's expiry on
+  every read, so its `maxAge` alone never ends a session. `sessionVersion` is
+  bumped when a second factor is set up or reset and when a user is disabled.
+  Anything that changes who a user is or how they sign in must bump it too.
+- **An ADMIN manages the firm's people on `/team`** (`src/lib/team.ts`,
+  `manageUsers`): resets another person's second factor (secret and recovery
+  codes cleared; they enrol afresh with their password) and disables or
+  enables another person, each audited (`mfa.reset`, `user.disabled`,
+  `user.enabled`). Never their own account: another admin must.
 - **Rate limits** (`src/lib/login-throttle.ts`, `src/lib/rate-limit.ts`):
   sign-in 10 attempts a minute per address, lockout after 5 failures per email
   or 10 per address in 15 minutes; writes 60 a minute per user (429 with
-  `Retry-After`). The address is read only with `TRUST_PROXY_HEADERS=1`.
+  `Retry-After`). The address is read only with `TRUST_PROXY_HEADERS=1`, and
+  only the rightmost `X-Forwarded-For` entry, by `clientAddressOf` alone.
+- **A sign-in attempt is a failure until it succeeds** (#150): `authorize`
+  calls `beginSignIn` before any other `await`. It takes the per-address
+  limit (ADDRESS_LIMIT) and the 120-a-minute cap at once, then puts the
+  attempt in its email's line: attempts for one email are checked one at a
+  time, in order, each held to the lockout the one before left and counted as
+  a failure from its turn. A second attempt is not refused for arriving early
+  (a double click, two tabs, two e2e workers); only past two waiting is one
+  refused unchecked (IN_FLIGHT). At most 4 are checked at once (BUSY). The
+  attempt ends SUCCEEDED, RELEASED (`MFA_CODE_REQUIRED`) or, by default in
+  `finally`, FAILED. Never check the lockout outside the line: attempts sent
+  together would all pass it.
 - **E2E**: the seeded approver and admin have two-step sign-in on with
   `SEED_APPROVER_TOTP_SECRET` and `SEED_ADMIN_TOTP_SECRET`, and
   `tests/e2e/helpers.ts` computes their codes;
@@ -514,6 +634,11 @@ to one inflect-compliance commit.
   PREPARER or ADMIN keeps the list (`manageRecipients`), one live entry per
   lower-cased address (a partial unique index). Removing someone keeps the
   row and cancels what was not yet sent to them.
+- **A delivered notice is recorded as SENT whatever happened meanwhile**
+  (#158). A recipient removed during the send cancelled it, so the mailer
+  then moves it from CANCELLED to SENT, with `cancelledMeanwhile` in
+  `notification.sent`. The log never says "cancelled" for a mail that went
+  out.
 - **Notices are an outbox.** When a version 2 or later becomes COMPLETE, the
   worker queues one `Notification` per live recipient in the same transaction
   (`queueSupersededNotices`, `src/lib/notifications/queue.ts`); when a
@@ -522,7 +647,14 @@ to one inflect-compliance commit.
   owner may still cancel it. Do not send
   mail from a use case or the worker: only the mailer sends
   (`src/lib/notifications/mailer.ts`, run by `scripts/mailer.ts`), at least
-  once, under a lease, giving up after five attempts (FAILED).
+  once, under a lease. A failed send waits before the next attempt
+  (`retryWaitMs`: a minute, doubling to four hours, held in `leaseUntil`).
+  Only a permanent 5xx rejection spends attempts quickly
+  (`MAX_PERMANENT_ATTEMPTS`, about a quarter of an hour). A server that cannot
+  be reached, answers 4xx or refuses the firm's own sign-in gets
+  `MAX_TRANSIENT_ATTEMPTS` (about three days), so a short SMTP outage fails
+  nothing (#148). The monitor reports a notice still failing after six
+  attempts (`NOTICE_RETRYING`).
 - **The email carries no PDF, no opinion and no figure** (decision #8):
   names, the engagement's reference, the period end, the version number and
   two links, as plain text with no attachment (`supersededEmail`,
@@ -550,9 +682,19 @@ to one inflect-compliance commit.
 - **COMPLETE only on the Bitcoin check**: the path reaches the Merkle root of
   a header that both explorers (`BITCOIN_EXPLORERS`) return byte for byte,
   that hashes to the block each named and carries the proof of work Bitcoin's
-  do. An explorer out or two that disagree leave the proof PENDING with a
-  reason; a path to the wrong root is BROKEN and never touched again. Never
-  set COMPLETE or a block another way: CHECKs hold COMPLETE to its block.
+  do. Each Bitcoin attestation is checked on its own (`pathTo`): one whose
+  path misses the root is dropped with the pending claim its calendar's
+  answer fulfilled (`withoutAttestations`, `ots.answer_refused`), so one
+  wrong calendar never spoils another's answer and the proof kept holds as a
+  whole (#147). COMPLETE only when every attestation left holds; BROKEN only
+  when nothing is left that could, and never touched again. An explorer out
+  or two that disagree leave the proof PENDING with a reason. Never set
+  COMPLETE or a block another way: CHECKs hold COMPLETE to its block.
+- **Every answer from outside is read up to a cap** (`readCapped`,
+  `src/lib/ots/read-capped.ts`): a calendar's, an explorer's and the issuer's
+  proof, never with `res.text()` or `res.arrayBuffer()`. A calendar's answer
+  that would take the proof past `MAX_PROOF_BYTES` is not merged
+  (`PROOF_TOO_LARGE`): a proof that large could never be read again.
 - **The verifiers show it beside the verdict, never in it**
   (`bitcoinTimestampFor`, `src/lib/verify-core/bitcoin-timestamp.ts`): only
   for an exact match, from the matched record's manifest hash (a copy's record
@@ -581,6 +723,15 @@ to one inflect-compliance commit.
   timestamp (`provenCheckpoint`: of this head, reaching a block both explorers
   agree on, else `CHECKPOINT_UNPROVEN`), and as of its block: it never says a
   file was not registered, since it may have come after (`CHECKPOINT_NOT_COVERED`).
+- **A checkpoint is believed only because the issuer published it (#151).**
+  Bitcoin says when a checkpoint existed, never who made it: anyone can build
+  one over any records and timestamp it. So `provenCheckpoint` first requires
+  its head's SHA-256 to be one the verifier trusts (`trustedCheckpoints`), baked
+  into the CLI by `build:verifier` from `CHECKPOINTS` (the exported
+  `checkpoint.json` files) or given with `--trust-checkpoint`. Never take the
+  trusted digest from the checkpoint file itself. An exact match through a
+  checkpoint is `AUTHENTIC_AS_OF_CHECKPOINT`, never `AUTHENTIC_LATEST`: a later
+  version or a withdrawal is not in it.
 
 ## The electronic seal (#70)
 
@@ -631,13 +782,17 @@ to one inflect-compliance commit.
   file on chain is the sealed one and `copySealedAt` holds its timestamp's
   time. A provider that does not answer (`*_UNAVAILABLE`) leaves the copy's
   write INTENT for the next pass; any other `SealError` fails it for a person.
-  While sealing is on, a copy is never anchored unsealed.
+  While sealing is on, a copy is never anchored unsealed: a copy stored
+  unsealed before sealing was turned on, and not on chain, is stamped and
+  sealed again (`replacedUnsealedCopy` on its `version.stamped` event, #140).
 - **The providers** are `cscSigner` (`csc.ts`, CSC API v2: `credentials/info`,
   `credentials/authorize`, `signatures/signHash`) and `rfc3161Timestamper`
   (`tsa.ts`, with a fresh nonce, and the token's bytes kept as written). Both
   go through `post` (`http.ts`): HTTPS only (plain HTTP only to loopback, for
   the tests), a timeout and a size cap; no answer, 429 or 5xx is
-  UNAVAILABLE, anything else wrong is REFUSED. A credential that needs a
+  UNAVAILABLE, anything else wrong is REFUSED, a redirect included: it is
+  never followed, and refusing it reaches a person where waiting would not
+  (#144). A credential that needs a
   person for each signature (an OAuth code, a one-time password) is refused.
   Only `scripts/seal-env.ts` reads `CSC_CLIENT_SECRET`, `CSC_PIN` and
   `TSA_PASSWORD` (`tests/unit/key-boundary.test.ts`).
@@ -648,7 +803,11 @@ to one inflect-compliance commit.
   to an anchor and was valid at the timestamp's time, and the timestamp is
   over this signature, signed by a certificate with the timestamping usage
   that also chains to an anchor. For a long-term seal every status it carries
-  is checked again, and it reports `longTerm`. Every failure is a named
+  is checked again, along the very path each chain was validated on
+  (`signerPath`, `stamperPath`; never a re-issued or cross-signed certificate
+  carried beside it, #144), and a CRL counts only for a certificate its scope
+  covers (CA or end-entity only, attribute certificates, another distribution
+  point's partition); it reports `longTerm`. Every failure is a named
   `SealError`.
 - **Tests use a throwaway PKI** (`tests/helpers/test-pki.ts`), made fresh in
   memory, and a stand-in provider on loopback (`tests/helpers/fake-seal-provider.ts`)
@@ -685,7 +844,12 @@ to one inflect-compliance commit.
   head in the registry that is not voided must still be the hash of an event
   (`ANCHORED_HEAD_MISSING`), read on both endpoints through
   `registryHeadWitness` (`src/lib/anchoring/audit-head.ts`); an unreadable
-  chain is `CHAIN_UNREADABLE`, never a pass. Do not weaken this to the latest
+  chain is `CHAIN_UNREADABLE`, never a pass. The heads read are those filed
+  under the firm the writing key is registered to on chain, never under the
+  database firm's name (#141): a firm whose name is not the key's fails
+  `FIRM_MISMATCH`, any other firm in the database is checked on the database
+  alone and has no head queued (`chainBound: false`), and two firms with the
+  key's name are refused (`FIRM_AMBIGUOUS`). Do not weaken this to the latest
   head only: the database owner can queue rows, so could have the worker write
   a rewritten log's head. A broken check puts a banner on every console page
   and stays reported; a check older than 36 hours shows as stopped.
@@ -693,7 +857,9 @@ to one inflect-compliance commit.
   `src/lib/anchoring/reconcile.ts`): every version's record, copy and
   revocation read on both endpoints at one agreed finalized block, and every
   record the firm's keys wrote. It only reads, and names each difference
-  (`ANCHORED_AFTER_BACKUP`, `UNKNOWN_RECORD`, `RECORD_DIFFERS`, …); after a
+  (`ANCHORED_AFTER_BACKUP`, `UNKNOWN_RECORD`, `RECORD_DIFFERS`,
+  `REVOCATION_DIFFERS` for a scheduled revocation the chain holds with
+  another reason or time, #141, …); after a
   restore it is step 5 of `docs/runbooks/restore.md`. A new state the chain
   can hold for a version needs its own code here, or a restore will not see it.
 - **Backups** are `scripts/backup.sh` (`pg_dump` custom format, the store as

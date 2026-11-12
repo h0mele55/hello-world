@@ -82,7 +82,13 @@ async function fetchCrl(url: string, options: LongTermOptions): Promise<Uint8Arr
  * Revoked stops at once; otherwise the first good status is kept, and with
  * none, every source not answering is UNAVAILABLE and anything else REFUSED.
  */
-async function fetchStatus(cert: pkijs.Certificate, issuer: pkijs.Certificate, at: Date, options: LongTermOptions): Promise<{ ocsp?: Uint8Array; crl?: Uint8Array }> {
+async function fetchStatus(
+  cert: pkijs.Certificate,
+  issuer: pkijs.Certificate,
+  at: Date,
+  options: LongTermOptions,
+  crls: Map<string, Promise<Uint8Array>>,
+): Promise<{ ocsp?: Uint8Array; crl?: Uint8Array }> {
   const sources = revocationSources(cert);
   if (sources.ocsp.length === 0 && sources.crl.length === 0) throw new SealError('NO_REVOCATION_SOURCE', `${subjectOf(cert)} names no OCSP responder and no CRL`);
   const now = () => options.now?.() ?? new Date();
@@ -94,7 +100,9 @@ async function fetchStatus(cert: pkijs.Certificate, issuer: pkijs.Certificate, a
       return { ocsp: der };
     }),
     ...sources.crl.map((url) => async () => {
-      const der = await fetchCrl(url, options);
+      // One fetch per CRL per seal: certificates of one CA share it, and a CA that re-issued it between two fetches would leave two versions in the file.
+      if (!crls.has(url)) crls.set(url, fetchCrl(url, options));
+      const der = await crls.get(url)!;
       if ((await crlStatus(der, cert, issuer, at, now())) !== 'GOOD') throw new SealError('REVOCATION_REFUSED', `the CRL at ${new URL(url).origin} is not the issuer’s`);
       return { crl: der };
     }),
@@ -121,17 +129,18 @@ export async function validationDataFor(sealed: Uint8Array, trustAnchors: readon
   if (seal.dss) throw new SealError('PDF_REFUSED', 'the file already carries validation data');
   const checked = await checkDetached(seal.cms, seal.content, trustAnchors);
   const anchors = trustAnchors.map(parseCertificate);
-  const pool = [...checked.certificates, ...checked.stamperCertificates];
   const data: ValidationData = { certs: [], ocsps: [], crls: [] };
   const done: Uint8Array[] = [];
-  for (const leaf of [checked.signer, checked.stamper]) {
-    for (const { cert, issuer } of await chainToAnchor(leaf, pool, anchors)) {
+  const crls = new Map<string, Promise<Uint8Array>>();
+  // The statuses of the path each chain was validated on, which every reader checks again (#144).
+  for (const [leaf, path] of [[checked.signer, checked.signerPath], [checked.stamper, checked.stamperPath]] as const) {
+    for (const { cert, issuer } of await chainToAnchor(leaf, path, anchors)) {
       addUnique(data.certs, derOf(cert));
       addUnique(data.certs, derOf(issuer));
       // A CA both chains share has its status fetched once.
       if (done.some((der) => sameBytes(der, derOf(cert)))) continue;
       done.push(derOf(cert));
-      const status = await fetchStatus(cert, issuer, checked.sealedAt, options);
+      const status = await fetchStatus(cert, issuer, checked.sealedAt, options, crls);
       if (status.ocsp) addUnique(data.ocsps, status.ocsp);
       if (status.crl) addUnique(data.crls, status.crl);
     }

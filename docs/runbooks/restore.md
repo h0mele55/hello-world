@@ -37,6 +37,7 @@ still verifies, but the console no longer knows it.
    | `ANCHORED_AFTER_BACKUP`, `COPY_ANCHORED_AFTER_BACKUP` | the version, or its copy, was anchored | nothing to fix: once the write mode is LIVE again, an approval (for a copy, a retry) finds the record on chain and links it, sending nothing |
    | `REVOCATION_PENDING_ON_CHAIN`, `REVOKED_ON_CHAIN` | a revocation was asked for, or took effect | if the firm asked for it, ask again in the console, which links it; if nobody did, [stolen-issuer-key.md](stolen-issuer-key.md) at once |
    | `SCHEDULED_NOT_ON_CHAIN` | the owner cancelled a revocation | nothing: the worker settles it as CANCELLED |
+   | `REVOCATION_DIFFERS` | the chain holds a pending revocation with another reason or time than the one the firm scheduled: the owner cancelled the firm's, and someone asked again | if the firm did not ask again, [stolen-issuer-key.md](stolen-issuer-key.md) at once: the owner can still cancel it before it takes effect |
    | `UNKNOWN_RECORD` | a version uploaded after the backup, lost with its salts and manifest | it still verifies for anyone who holds it; list it for the firm's records, and review the registry watch's finding for it on `/audit-log` |
 
    Anything else (`RECORD_MISSING`, `RECORD_DIFFERS`, `COPY_MISSING`,

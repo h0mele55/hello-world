@@ -10,6 +10,7 @@ import { manifestHashOf, parseManifest } from '@/lib/manifest';
 import { normaliseText } from '@/lib/opinion/normalise';
 import { open } from '@/lib/sealed';
 import { readStoredFile } from '@/lib/storage';
+import { sweepOrphanFiles } from '@/lib/file-sweep';
 import { confirmOpinion, createEngagement, discardDraft, getVersion, IntakeError, readVersionFile, uploadVersion, type NewEngagement } from '@/lib/reports/intake';
 import { REPORTS } from '../fixtures/pdf/reports';
 import { BUNDLE_OPINIONS, twoReportsPdf } from '../helpers/minimal-pdf';
@@ -129,6 +130,17 @@ describe('upload', () => {
     expect(await prisma.storedFile.count()).toBe(0);
   });
 
+  it('tells another firm nothing about this one’s engagements or files (#146)', async () => {
+    const mine = await createEngagement(preparer, ENGAGEMENT);
+    await uploadVersion(preparer, { engagementId: mine.id, reasonCode: 'INITIAL', bytes: fixture('en-unmodified.pdf') });
+    // The same engagement, or the same file, in another firm: refused, without saying that this firm holds it.
+    await expectIntakeError(createEngagement(outsider, ENGAGEMENT), 'CONFLICT');
+    const theirs = await createEngagement(outsider, { ...ENGAGEMENT, engagementRef: 'ENG-ELSEWHERE' });
+    await expectIntakeError(uploadVersion(outsider, { engagementId: theirs.id, reasonCode: 'INITIAL', bytes: fixture('en-unmodified.pdf') }), 'CONFLICT');
+    // Within the firm, the precise answer stands.
+    await expectIntakeError(createEngagement(preparer, ENGAGEMENT), 'ENGAGEMENT_EXISTS');
+  });
+
   it('refuses the same file twice, a second draft, and a wrong reason code', async () => {
     const first = await createEngagement(preparer, ENGAGEMENT);
     const second = await createEngagement(preparer, { ...ENGAGEMENT, engagementRef: 'ENG-2026-015' });
@@ -181,6 +193,18 @@ describe('confirmation (rule 6)', () => {
 
     const view = await getVersion(approver, uploaded.id);
     expect(view).toMatchObject({ status: 'CONFIRMED', confirmedOpinion: corrected, opinionType: 'ADVERSE' });
+  });
+
+  it.each([
+    ['as the locator found it', 'QUALIFIED', '', false],
+    ['with its text corrected', 'QUALIFIED', ' (corrected by hand)', true],
+    ['with its type corrected', 'ADVERSE', '', true],
+  ] as const)('records whether the person corrected the located opinion, so the stamp can say so: %s (#157)', async (_, opinionType, suffix, edited) => {
+    const uploaded = await draft();
+    await confirmOpinion(preparer, { versionId: uploaded.id, opinionType, text: `${normaliseText(report.opinion.join(' '))}${suffix}`, reportDate: '2026-03-20' });
+    expect((await prisma.reportVersion.findUniqueOrThrow({ where: { id: uploaded.id } })).opinionEdited).toBe(edited);
+    const event = await prisma.auditEvent.findFirstOrThrow({ where: { action: 'version.confirmed', subjectId: uploaded.id } });
+    expect(event.data).toMatchObject({ opinionEdited: edited });
   });
 
   it('runs once, only for a preparer, and never for an empty text or a bad date', async () => {
@@ -267,9 +291,17 @@ describe('discarding a draft', () => {
     const uploaded = await uploadVersion(preparer, { engagementId: engagement.id, reasonCode: 'INITIAL', bytes: fixture('en-unmodified.pdf') });
     await discardDraft(preparer, uploaded.id);
     expect(await prisma.reportVersion.count()).toBe(0);
-    expect(fs.readdirSync(process.env.FILE_STORAGE_DIR!)).toEqual([]);
+    // The file outlives its row (#158): a backup whose dump still names it must find it in the store.
+    const dir = process.env.FILE_STORAGE_DIR!;
+    const orphans = fs.readdirSync(dir);
+    expect(orphans).toHaveLength(1);
 
     const again = await uploadVersion(preparer, { engagementId: engagement.id, reasonCode: 'INITIAL', bytes: fixture('en-unmodified.pdf') });
+    const kept = (await prisma.storedFile.findFirstOrThrow()).path;
+    // The sweep removes only a file no row names, and only once it is older than the grace period.
+    expect(await sweepOrphanFiles({ prisma, dir, olderThanMs: 48 * 3_600_000 })).toEqual({ removed: 0, kept: 1 });
+    expect(await sweepOrphanFiles({ prisma, dir, olderThanMs: 0 })).toEqual({ removed: 1, kept: 0 });
+    expect(fs.readdirSync(dir)).toEqual([kept]);
     await confirmOpinion(preparer, { versionId: again.id, opinionType: 'UNMODIFIED', text: 'x', reportDate: '2026-03-20' });
     await expectIntakeError(discardDraft(preparer, again.id), 'NOT_DRAFT');
   });

@@ -103,6 +103,12 @@ export interface WorkerOptions {
   gasHeadroomPercent: number;
   /** Below this balance the pass reports the issuer key as low. */
   lowBalanceWei: bigint;
+  /** A write replaced this many times is not replaced again: it waits, and the monitor's FINALITY_LAG names it (#139). */
+  maxReplacements: number;
+  /** No replacement offers a fee cap above this, in wei; null for none (#139). */
+  maxFeePerGasWei: bigint | null;
+  /** At most this many versions awaiting a certificate, and as many scheduled revocations, are read a pass. */
+  scanLimit: number;
 }
 
 export const DEFAULT_WORKER_OPTIONS: WorkerOptions = {
@@ -111,6 +117,9 @@ export const DEFAULT_WORKER_OPTIONS: WorkerOptions = {
   feeBumpPercent: 20,
   gasHeadroomPercent: 20,
   lowBalanceWei: parseEther('0.02'),
+  maxReplacements: 6,
+  maxFeePerGasWei: null,
+  scanLimit: 500,
 };
 
 /**
@@ -473,6 +482,8 @@ function headAction(action: AuditAction): AuditAction {
   if (!(AUDIT_HEAD_ACTIONS as readonly string[]).includes(named)) throw new ChainError('ACTION_UNKNOWN', `no audit-head action for ${action}`);
   return named as AuditAction;
 }
+/** The error a person's release of a RECORD_MISMATCH row leaves for the worker to act on (#140). */
+export const RECORD_MISMATCH_RELEASED = 'RECORD_MISMATCH_RELEASED';
 const AUDIT_HEAD_ACTIONS = ['audit_head.simulated', 'audit_head.broadcast', 'audit_head.replaced', 'audit_head.indeterminate', 'audit_head.final', 'audit_head.failed'] as const;
 
 /** What a version write's transition does to its version, in the same transaction. */
@@ -619,8 +630,17 @@ const contractCall = (ctx: Context, call: Call) =>
     PublicClient['simulateContract']
   >[0];
 
+/**
+ * Whether a write of this key has an unknown outcome, so its nonce's fate is
+ * unknown and no new LIVE write may take the next one. An INTENT row that
+ * already holds a journalled hash counts too, whatever its lease (#139): it
+ * reserves its nonce, so a write started now would take the one after and
+ * wait behind a gap if the first was never used.
+ */
 async function issuerBlocked(ctx: Context): Promise<boolean> {
-  const count = await ctx.prisma.chainWrite.count({ where: { chainId: ctx.chainId, issuer: ctx.issuer, status: 'INDETERMINATE' } });
+  const count = await ctx.prisma.chainWrite.count({
+    where: { chainId: ctx.chainId, issuer: ctx.issuer, OR: [{ status: 'INDETERMINATE' }, { status: 'INTENT', txHash: { not: null } }] },
+  });
   return count > 0;
 }
 
@@ -695,8 +715,11 @@ async function startCopy(ctx: Context, write: Write): Promise<StepReport> {
   if (await issuerBlocked(ctx)) return release(ctx, write, { error: 'ISSUER_BLOCKED' }, 'waiting: an INDETERMINATE write must be settled first');
 
   let copyDocHash = version.copyDocHash;
-  if (!copyDocHash) {
-    const stamped = await stampCopy(ctx, write);
+  // A copy stored unsealed, before sealing was turned on, is made again sealed
+  // unless it is already on chain (#140): while sealing is on, no copy is anchored unsealed.
+  const unsealed = copyDocHash !== null && ctx.seal !== null && version.copySealedAt === null && !(await ctx.reader.findByDocHash(copyDocHash as Hex));
+  if (!copyDocHash || unsealed) {
+    const stamped = await stampCopy(ctx, write, unsealed ? copyDocHash : null);
     if (!stamped.ok && stamped.wait) return release(ctx, write, { error: stamped.reason }, 'waiting: the seal provider did not answer; tried again on the next pass');
     if (!stamped.ok) return fail(ctx, write, `STAMP_${stamped.reason}`);
     copyDocHash = stamped.docHash;
@@ -860,7 +883,7 @@ async function originalRecordOk(ctx: Context, version: { recordId: string | null
  * check passes. A seal provider that does not answer leaves the copy to wait
  * (`wait`); one that refuses fails it, for a person.
  */
-async function stampCopy(ctx: Context, write: Write): Promise<{ ok: true; docHash: string } | { ok: false; reason: string; wait?: true }> {
+async function stampCopy(ctx: Context, write: Write, replacing: string | null = null): Promise<{ ok: true; docHash: string } | { ok: false; reason: string; wait?: true }> {
   const version = write.reportVersion;
   if (!(await originalRecordOk(ctx, version))) return { ok: false, reason: 'ORIGINAL_RECORD_MISMATCH' };
   if (!version.anchorTxHash) return { ok: false, reason: 'ORIGINAL_TX_UNKNOWN' };
@@ -878,6 +901,8 @@ async function stampCopy(ctx: Context, write: Write): Promise<{ ok: true; docHas
     opinionType: version.opinionType,
     opinionSalt: hexOf(version.opinionSalt),
     norm: NORMALISER_VERSION,
+    // Whether the preparer corrected the located opinion (#157): verifiers then do not check a re-render against it.
+    opinionEdited: version.opinionEdited ? 1 : 0,
   };
   const original = await ctx.files.read(version.storedFile);
   // The copy must be of exactly the file that was anchored.
@@ -914,7 +939,8 @@ async function stampCopy(ctx: Context, write: Write): Promise<{ ok: true; docHas
     await ctx.prisma.$transaction(async (tx) => {
       const file = await tx.storedFile.create({ data: stored, select: { id: true } });
       const { count } = await tx.reportVersion.updateMany({
-        where: { id: version.id, status: 'ANCHORED', copyDocHash: null },
+        // Replacing only the unsealed copy that was read, never one stored meanwhile.
+        where: replacing ? { id: version.id, status: 'ANCHORED', copyDocHash: replacing, copySealedAt: null } : { id: version.id, status: 'ANCHORED', copyDocHash: null },
         data: { copyDocHash: docHash, copyStoredFileId: file.id, copySealedAt: seal?.sealedAt ?? null },
       });
       if (count !== 1) throw new ChainError('VERSION_NOT_ANCHORED', `version ${version.id} already has a copy or is not ANCHORED`);
@@ -926,7 +952,14 @@ async function stampCopy(ctx: Context, write: Write): Promise<{ ok: true; docHas
           action: 'version.stamped',
           subjectType: 'ReportVersion',
           subjectId: version.id,
-          data: { chainWriteId: write.id, recordId: fields.recordId, copyDocHash: docHash, sealed: seal !== null, timestampSerial: seal?.timestampSerial ?? null },
+          data: {
+            chainWriteId: write.id,
+            recordId: fields.recordId,
+            copyDocHash: docHash,
+            sealed: seal !== null,
+            timestampSerial: seal?.timestampSerial ?? null,
+            ...(replacing ? { replacedUnsealedCopy: replacing } : {}),
+          },
         },
         ctx.now(),
       );
@@ -938,6 +971,29 @@ async function stampCopy(ctx: Context, write: Write): Promise<{ ok: true; docHas
   return { ok: true, docHash };
 }
 
+export const PAGE_ROWS = 50;
+
+/** One page of a cursor walk, in the query's own order, after the row named. */
+const pageAfter = (cursor: string | undefined) => ({ take: PAGE_ROWS, ...(cursor ? { cursor: { id: cursor }, skip: 1 } : {}) });
+
+/**
+ * Every row a query finds, page by page, up to `scanLimit` (#139). A single
+ * `take` would let rows that fail on every pass, always first in the order,
+ * starve every row behind them.
+ */
+export async function* pagesOf<T extends { id: string }>(find: (cursor: string | undefined) => Promise<T[]>, scanLimit: number): AsyncGenerator<T> {
+  let cursor: string | undefined;
+  for (let seen = 0; seen < scanLimit; ) {
+    const page = await find(cursor);
+    for (const row of page) yield row;
+    seen += page.length;
+    if (page.length < PAGE_ROWS) return;
+    cursor = page[page.length - 1].id;
+  }
+}
+
+const pages = <T extends { id: string }>(ctx: Context, find: (cursor: string | undefined) => Promise<T[]>) => pagesOf(find, ctx.options.scanLimit);
+
 /**
  * Anchor-only versions (signed or edit-protected) are never rewritten: once
  * their ANCHOR is final they get a verification certificate and are COMPLETE.
@@ -945,7 +1001,7 @@ async function stampCopy(ctx: Context, write: Write): Promise<{ ok: true; docHas
  * anchored by a key since rotated away still needs one (docs/runbooks).
  */
 async function certifyAnchorOnly(ctx: Context, report: PassReport) {
-  const versions = await ctx.prisma.reportVersion.findMany({
+  const versions = pages(ctx, (cursor) => ctx.prisma.reportVersion.findMany({
     where: {
       status: 'ANCHORED',
       anchorOnly: true,
@@ -955,10 +1011,10 @@ async function certifyAnchorOnly(ctx: Context, report: PassReport) {
       revocations: { none: { status: { in: ['APPROVED', 'SCHEDULED'] } } },
     },
     include: { engagement: { include: { client: { select: { orgId: true } } } } },
-    orderBy: { createdAt: 'asc' },
-    take: 20,
-  });
-  for (const version of versions) {
+    orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+    ...pageAfter(cursor),
+  }));
+  for await (const version of versions) {
     let storedPath: string | null = null;
     try {
       if (!(await originalRecordOk(ctx, version))) {
@@ -1025,16 +1081,22 @@ async function certifyAnchorOnly(ctx: Context, report: PassReport) {
  * Whichever issuer key sent it: a rotation must not strand one.
  */
 async function settleScheduledRevocations(ctx: Context, report: PassReport) {
-  const scheduled = await ctx.prisma.revocation.findMany({
+  const due = await ctx.prisma.revocation.count({
+    where: {
+      status: 'SCHEDULED',
+      reportVersion: { chainWrites: { some: { kind: 'REVOKE', status: 'FINAL', chainId: ctx.chainId, registry: ctx.registry } } },
+    },
+  });
+  if (due === 0) return;
+  const scheduled = pages(ctx, (cursor) => ctx.prisma.revocation.findMany({
     where: {
       status: 'SCHEDULED',
       reportVersion: { chainWrites: { some: { kind: 'REVOKE', status: 'FINAL', chainId: ctx.chainId, registry: ctx.registry } } },
     },
     include: { reportVersion: { include: { engagement: { include: { client: { select: { orgId: true } } } } } } },
-    orderBy: { effectiveAt: 'asc' },
-    take: 50,
-  });
-  if (scheduled.length === 0) return;
+    orderBy: [{ effectiveAt: 'asc' }, { id: 'asc' }],
+    ...pageAfter(cursor),
+  }));
   let finalized: bigint;
   try {
     finalized = await agreedFinalized(ctx);
@@ -1042,7 +1104,7 @@ async function settleScheduledRevocations(ctx: Context, report: PassReport) {
     report.errors.push({ writeId: 'scheduled-revocations', error: errorName(error) });
     return;
   }
-  for (const revocation of scheduled) {
+  for await (const revocation of scheduled) {
     const version = revocation.reportVersion;
     try {
       if (!version.recordId || !revocation.effectiveAt) throw new ChainError('REVOCATION_INCOMPLETE', `revocation ${revocation.id} has no record or time`);
@@ -1221,12 +1283,12 @@ async function signAndSend(ctx: Context, write: Row): Promise<StepReport> {
 
   switch (outcome.kind) {
     case 'SENT':
-      return transition(ctx, sent, 'BROADCAST', { broadcastAt: ctx.now(), error: null }, { audit: { action: 'anchor.broadcast', data: { txHash, nonce } } });
+      return transition(ctx, sent, 'BROADCAST', { broadcastAt: ctx.now(), firstBroadcastAt: ctx.now(), error: null }, { audit: { action: 'anchor.broadcast', data: { txHash, nonce } } });
     case 'REJECTED':
       // The node refused the bytes: this nonce was not used, so give it back.
       return fail(ctx, sent, `SEND_REJECTED:${outcome.reason}`, { nonce: null });
     case 'UNKNOWN':
-      return indeterminate(ctx, sent, outcome.reason, { broadcastAt: ctx.now() });
+      return indeterminate(ctx, sent, outcome.reason, { broadcastAt: ctx.now(), firstBroadcastAt: ctx.now() });
   }
 }
 
@@ -1254,12 +1316,22 @@ async function startAuditHead(ctx: Context, write: Row): Promise<StepReport> {
   return signAndSend(ctx, write);
 }
 
+/**
+ * What a final, successful transaction whose record does not match its write
+ * comes to: held INDETERMINATE for a person (RECORD_MISMATCH), or, once a
+ * person released it (#140), FAILED with its nonce kept.
+ */
+type OnMismatch = 'HOLD' | 'FAIL';
+const mismatch = (ctx: Context, write: Row, onMismatch: OnMismatch, settled: { txHash: Hash; replacedTxHashes: string[]; blockNumber: bigint }) =>
+  onMismatch === 'HOLD' ? indeterminate(ctx, write, 'RECORD_MISMATCH', settled) : fail(ctx, write, 'RECORD_MISMATCH_RESOLVED', settled);
+
 /** Final once its own transaction's event, as both endpoints read it, names this head and this key. */
 function settleAuditHead(
   ctx: Context,
   write: Row,
   receipt: NonNullable<ReturnType<typeof receiptSummary>>,
   settled: { txHash: Hash; replacedTxHashes: string[]; blockNumber: bigint },
+  onMismatch: OnMismatch,
 ): Promise<StepReport> {
   let index: number | null = null;
   for (const log of receipt.logs) {
@@ -1273,7 +1345,7 @@ function settleAuditHead(
       // Not one of the registry's events.
     }
   }
-  if (index === null) return indeterminate(ctx, write, 'RECORD_MISMATCH', settled);
+  if (index === null) return mismatch(ctx, write, onMismatch, settled);
   return transition(ctx, write, 'FINAL', { txHash: settled.txHash, replacedTxHashes: settled.replacedTxHashes, blockNumber: settled.blockNumber, error: null }, {
     audit: { action: 'anchor.final', data: { head: write.auditHead, index, txHash: settled.txHash, blockNumber: Number(settled.blockNumber) } },
   });
@@ -1304,7 +1376,18 @@ async function trackBroadcast(ctx: Context, row: Row): Promise<StepReport> {
     if (pendingFor >= ctx.options.replaceAfterMs) return replace(ctx, write);
     return release(ctx, write, {}, 'pending');
   }
+  return settleLanded(ctx, row, receipt, hashes, 'HOLD');
+}
 
+/** A mined transaction of a write: settled once final and read alike on both endpoints. */
+async function settleLanded(
+  ctx: Context,
+  row: Row,
+  receipt: NonNullable<Awaited<ReturnType<typeof firstReceipt>>>,
+  hashes: Hash[],
+  onMismatch: OnMismatch,
+): Promise<StepReport> {
+  const write = row;
   const landed = receipt.transactionHash;
   const settled = { txHash: landed, replacedTxHashes: hashes.filter((h) => h !== landed), blockNumber: receipt.blockNumber };
 
@@ -1318,8 +1401,8 @@ async function trackBroadcast(ctx: Context, row: Row): Promise<StepReport> {
   // only once final and agreed: a revert in a block later reorged out may be
   // mined again, and succeed.
   if (again.status !== 'success') return fail(ctx, write, 'TX_REVERTED', settled);
-  if (row.kind === 'AUDIT_HEAD') return settleAuditHead(ctx, row, again, settled);
-  return settleVersionWrite(ctx, versionOf(row), again, receipt.blockNumber, finalized, settled);
+  if (row.kind === 'AUDIT_HEAD') return settleAuditHead(ctx, row, again, settled, onMismatch);
+  return settleVersionWrite(ctx, versionOf(row), again, receipt.blockNumber, finalized, settled, onMismatch);
 }
 
 async function settleVersionWrite(
@@ -1329,6 +1412,7 @@ async function settleVersionWrite(
   blockNumber: bigint,
   finalized: bigint,
   settled: { txHash: Hash; replacedTxHashes: string[]; blockNumber: bigint },
+  onMismatch: OnMismatch,
 ): Promise<StepReport> {
   const landed = settled.txHash;
   const receipt = { blockNumber };
@@ -1336,10 +1420,10 @@ async function settleVersionWrite(
   if (write.kind === 'REVOKE') {
     // The request is judged by the transaction's own event: the owner may have cancelled it since.
     const effectiveAt = isRevokeTarget(record, write) ? requestedEffectiveAt(again, ctx, write) : null;
-    if (effectiveAt === null) return indeterminate(ctx, write, 'RECORD_MISMATCH', settled);
+    if (effectiveAt === null) return mismatch(ctx, write, onMismatch, settled);
     return finalize(ctx, write, { txHash: landed, blockNumber: receipt.blockNumber, recordId: write.recordId!, linked: false, revokeEffectiveAt: effectiveAt, data: { replacedTxHashes: settled.replacedTxHashes } });
   }
-  if (!recordMatches(record, write, ctx.issuer, receipt.blockNumber)) return indeterminate(ctx, write, 'RECORD_MISMATCH', settled);
+  if (!recordMatches(record, write, ctx.issuer, receipt.blockNumber)) return mismatch(ctx, write, onMismatch, settled);
   return finalize(ctx, write, { txHash: landed, blockNumber: receipt.blockNumber, recordId: write.recordId!, linked: false, data: { replacedTxHashes: settled.replacedTxHashes } });
 }
 
@@ -1349,11 +1433,19 @@ async function replace(ctx: Context, write: Row): Promise<StepReport> {
   if (write.nonce === null || !write.txHash || !built || !write.gasLimit || !write.maxFeePerGas || !write.maxPriorityFeePerGas) {
     return indeterminate(ctx, write, 'CANNOT_REPLACE');
   }
+  // Each replacement raises the fees on the last, so both are bounded (#139): past either limit the write waits, and FINALITY_LAG names it.
+  if (write.replacedTxHashes.length >= ctx.options.maxReplacements) {
+    return release(ctx, write, { error: 'REPLACEMENTS_EXHAUSTED' }, `not replaced: ${write.replacedTxHashes.length} replacements already`);
+  }
   const fees = await ctx.publicClient.estimateFeesPerGas();
   const bump = (value: bigint) => (value * BigInt(100 + ctx.options.feeBumpPercent) + 99n) / 100n;
   const max = (...values: bigint[]) => values.reduce((a, b) => (a > b ? a : b));
+  const ceiling = ctx.options.maxFeePerGasWei;
   const maxPriorityFeePerGas = max(bump(BigInt(write.maxPriorityFeePerGas)), fees.maxPriorityFeePerGas);
   const maxFeePerGas = max(bump(BigInt(write.maxFeePerGas)), fees.maxFeePerGas, maxPriorityFeePerGas);
+  if (ceiling !== null && maxFeePerGas > ceiling) {
+    return release(ctx, write, { error: 'FEE_CEILING_REACHED' }, `not replaced: the fee cap would pass ${ceiling} wei`);
+  }
   const serialized = await ctx.account.signTransaction({
     chainId: ctx.chainId,
     type: 'eip1559',
@@ -1386,9 +1478,10 @@ async function replace(ctx: Context, write: Row): Promise<StepReport> {
       }, `replaced at nonce ${write.nonce}`);
     case 'REJECTED':
       // The original is still the live transaction; try again after another window.
+      // The refused hash stays journalled: its bytes reached a node, and should they ever be mined they are ours (#139).
       return release(ctx, replacing, {
         txHash: write.txHash,
-        replacedTxHashes: write.replacedTxHashes,
+        replacedTxHashes: [...write.replacedTxHashes, txHash],
         maxFeePerGas: write.maxFeePerGas,
         maxPriorityFeePerGas: write.maxPriorityFeePerGas,
         error: `REPLACEMENT_REJECTED:${outcome.reason}`,
@@ -1404,13 +1497,21 @@ async function reconcile(ctx: Context, write: Row): Promise<StepReport> {
   if (write.nonce === null || !write.txHash) return release(ctx, write, {}, 'nothing to reconcile');
   // A record that does not match what was sent needs a person, not another loop.
   if (write.error === 'RECORD_MISMATCH') return release(ctx, write, {}, 'held for a person: the record does not match the write');
+  // A person released it (#140): read it again on both endpoints at an agreed
+  // finalized block; a match still settles it, a mismatch fails it, keeping its nonce.
+  if (write.error === RECORD_MISMATCH_RELEASED) {
+    const hashes = hashesOf(write);
+    const receipt = await firstReceipt(ctx.publicClient, hashes);
+    if (!receipt) return release(ctx, write, {}, 'released by a person, but none of its transactions is mined; held');
+    return settleLanded(ctx, write, receipt, hashes, 'FAIL');
+  }
   // Read the finalized nonce before the receipts: a transaction mined in
   // between then shows up as a receipt rather than as someone else's nonce.
   const finalizedNonce = await ctx.publicClient.getTransactionCount({ address: ctx.issuer, blockTag: 'finalized' });
   const hashes = hashesOf(write);
   if ((await firstReceipt(ctx.publicClient, hashes)) || (await anyKnown(ctx.publicClient, hashes))) {
     // It was sent: track it like any broadcast.
-    return transition(ctx, write, 'BROADCAST', { broadcastAt: write.broadcastAt ?? ctx.now(), error: null }, {
+    return transition(ctx, write, 'BROADCAST', { broadcastAt: write.broadcastAt ?? ctx.now(), firstBroadcastAt: write.firstBroadcastAt ?? write.broadcastAt ?? ctx.now(), error: null }, {
       audit: { action: 'anchor.broadcast', data: { txHash: write.txHash, nonce: write.nonce, reconciled: true } },
     }, 'found on chain');
   }

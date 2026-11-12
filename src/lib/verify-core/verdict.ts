@@ -3,7 +3,7 @@ import type { RegistryRecord } from '../chain/records';
 import { locateOpinion } from '../opinion/locate';
 import { dropRunningLines } from '../opinion/normalise';
 import { readStamp } from '../stamp-fields';
-import { docHashOf, opinionCommitmentOf } from './commitment';
+import { CommitmentInputError, docHashOf, opinionCommitmentOf } from './commitment';
 import type { DocumentRead } from './document';
 import { CannotVerify, type CannotVerifyReason, type RegistryView, type VerifierConfig } from './registry-view';
 
@@ -58,6 +58,8 @@ interface Resolved {
 
 export type Verdict =
   | (Resolved & { kind: 'AUTHENTIC_LATEST' | 'AUTHENTIC_SUPERSEDED'; matched: RecordSummary })
+  /** Only through a checkpoint (#151): the exact file, and the latest version as of the checkpoint's block, which is all a checkpoint can say. */
+  | (Resolved & { kind: 'AUTHENTIC_AS_OF_CHECKPOINT'; matched: RecordSummary })
   | (Resolved & { kind: 'REVOKED'; matched: RecordSummary; revoked: RecordSummary })
   /** The issuer asked to withdraw it; the registry's owner may still cancel that until `pending.revokeEffectiveAt`. Never authentic. */
   | (Resolved & { kind: 'REVOCATION_PENDING'; matched: RecordSummary; pending: RecordSummary })
@@ -134,8 +136,23 @@ async function decide(view: RegistryView, input: Parameters<typeof verifyFile>[0
   // Recommit to the opinion as this file now reads, with the salt the file carries.
   const located = locateOpinion(dropRunningLines(read.doc.pageLines));
   // A file holding several reports is not checked against one of them: which one was registered is the person's choice, not the file's (#77).
+  // The preparer corrected the opinion the locator found (#157): what was committed is not the file's passage.
+  if (claim.stamp === 2 && claim.opinionEdited === 1) return { kind: 'ALTERED_OPINION_NOT_CHECKABLE', ...resolved, reason: 'OPINION_EDITED_AT_CONFIRMATION' };
   if (located.status !== 'FOUND') return { kind: 'ALTERED_OPINION_NOT_CHECKABLE', ...resolved, reason: located.status === 'NOT_FOUND' ? located.reason : 'MULTIPLE_OPINION_HEADINGS' };
-  const commitment = opinionCommitmentOf({ salt: hexToBytes(claim.opinionSalt as Hex), type: located.type, text: located.text });
+  if (located.type !== claim.opinionType) {
+    // A version-2 stamp says the type confirmed is the type the file showed: a different one is a changed file.
+    // A version-1 stamp cannot say whether the preparer corrected the type, so it cannot be checked.
+    if (claim.stamp === 2) return { kind: 'ALTERED_OPINION_CHANGED', ...resolved };
+    return { kind: 'ALTERED_OPINION_NOT_CHECKABLE', ...resolved, reason: 'OPINION_TYPE_DIFFERS' };
+  }
+  let commitment: Hex;
+  try {
+    commitment = opinionCommitmentOf({ salt: hexToBytes(claim.opinionSalt as Hex), type: located.type, text: located.text });
+  } catch (error) {
+    // What the file holds cannot be committed to (a salt of the wrong length, text no reading settles): not checkable, never an exception (#143).
+    if (error instanceof CommitmentInputError) return { kind: 'ALTERED_OPINION_NOT_CHECKABLE', ...resolved, reason: error.code };
+    throw error;
+  }
   return { kind: commitment === original.opinionCommitment ? 'ALTERED_OPINION_APPEARS_UNCHANGED' : 'ALTERED_OPINION_CHANGED', ...resolved };
 }
 

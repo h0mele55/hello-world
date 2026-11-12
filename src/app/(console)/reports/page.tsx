@@ -6,13 +6,13 @@ import { EmptyState } from '@inflect/ui/components/ui/empty-state';
 import { Heading } from '@inflect/ui/components/ui/typography';
 import { requireUser } from '@/lib/page-auth';
 import { VersionStatusBadge } from '@/components/reports/version-status-badge';
-import { listEngagements } from '@/lib/reports/queries';
+import { ENGAGEMENT_LIST_CAP, listEngagements } from '@/lib/reports/queries';
 import { mayDo } from '@/lib/roles';
 
 export default async function ReportsPage() {
   const user = await requireUser();
   const t = await getTranslations('reports');
-  const engagements = await listEngagements(user);
+  const { engagements, truncated } = await listEngagements(user);
   const newButton =
     mayDo(user.role, 'prepare') ? (
       <Link href="/reports/new" className={buttonVariants({ variant: 'primary' })} data-testid="new-engagement">
@@ -26,6 +26,11 @@ export default async function ReportsPage() {
         <Heading level={1}>{t('title')}</Heading>
         {newButton}
       </div>
+      {truncated ? (
+        <p className="text-sm text-content-muted" data-testid="engagements-truncated">
+          {t('truncated', { cap: ENGAGEMENT_LIST_CAP })}
+        </p>
+      ) : null}
       {engagements.length === 0 ? (
         <EmptyState title={t('empty.title')} description={t('empty.description')} />
       ) : (

@@ -41,9 +41,13 @@ export type AuditAction =
   | 'anchor.failed'
   | 'anchor.copy_requeued'
   | 'anchor.nonce_released'
+  | 'anchor.mismatch_released'
   | 'version.stamped'
   | 'version.certified'
   | 'mfa.enabled'
+  | 'mfa.reset'
+  | 'user.disabled'
+  | 'user.enabled'
   | 'mfa.recovery_code_used'
   | 'revocation.requested'
   | 'revocation.approved'
@@ -63,6 +67,7 @@ export type AuditAction =
   | 'ots.submitted'
   | 'ots.complete'
   | 'ots.broken'
+  | 'ots.answer_refused'
   // The monthly checkpoint of the registry (#122).
   | 'checkpoint.created'
   // An audit-log head's journal row (#94): the anchor.* steps under their own prefix, and the check that queued it.
@@ -73,7 +78,8 @@ export type AuditAction =
   | 'audit_head.indeterminate'
   | 'audit_head.final'
   | 'audit_head.failed'
-  | 'audit_head.nonce_released';
+  | 'audit_head.nonce_released'
+  | 'audit_head.mismatch_released';
 
 export interface AuditEventInput {
   orgId: string;

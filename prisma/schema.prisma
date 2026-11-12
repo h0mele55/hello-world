@@ -184,6 +184,12 @@ model User {
   totpPendingSecret Bytes?
   recoveryCodes     RecoveryCode[]
 
+  /// Carried in every session; bumped when the user's second factor is set up or reset, or the user is disabled,
+  /// so every session issued before stops working at its next request (#145).
+  sessionVersion Int       @default(0)
+  /// Set by an admin: the user cannot sign in, and every session of theirs is refused.
+  disabledAt     DateTime?
+
   @@index([orgId])
 }
 
@@ -260,6 +266,11 @@ model ReportVersion {
   /// When the PDF holds several auditor's reports (#77): which one, counted
   /// from 0, the person chose to start from. Null when there was one, or none.
   opinionCandidate        Int?
+  /// Whether the preparer corrected, at confirmation, the opinion text or type
+  /// the locator found, or typed one it did not find (#157). Written into the
+  /// stamp, so a verifier never checks a re-render against a passage that was
+  /// not the one committed.
+  opinionEdited           Boolean        @default(false)
   reportDate              DateTime?      @db.Date
   /// Fresh from the CSPRNG per version; unique, so a reused salt is refused.
   opinionSalt             Bytes?         @unique
@@ -347,6 +358,8 @@ model ChainWrite {
   error                String?
   attempts             Int              @default(0)
   broadcastAt          DateTime?
+  /// When the write was first sent; replacements never move it, so the finality-lag alert sees the whole wait (#139).
+  firstBroadcastAt     DateTime?
   /// The worker holding this row; another may take it once this passes.
   leaseUntil           DateTime?
   createdAt            DateTime         @default(now())

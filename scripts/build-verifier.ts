@@ -16,8 +16,15 @@
  * REANCHOR_ARCHIVES, when set, lists the re-anchor archives or proofs of the
  * registries this one replaced (#65); both outputs carry them, so a file
  * anchored on a retired chain verifies with no server and that chain gone
- * (#126). Each must hold together and have its root on this registry, or the
- * build is refused.
+ * (#126). Each must hold together and name this registry as the one its root
+ * is recorded on, or the build is refused; whether the root is recorded there,
+ * and not voided, is read on chain by the verifier each time it uses one.
+ *
+ * CHECKPOINTS, when set, lists the monthly checkpoints the issuer exported and
+ * published (#122, `npm run checkpoint -- --export`). The CLI is built to
+ * trust exactly their heads (#151): a checkpoint is only ever believed
+ * because the issuer published it, never because Bitcoin timestamped it, which
+ * anyone can have done. Each must hold together and be of this registry.
  *
  * Beside the HTML file it writes dist/verifier.json, what was built: the
  * file's SHA-256, the network and registry, and every origin the file may
@@ -29,7 +36,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { build } from 'esbuild';
 import { EXPLORER_ORIGINS } from '../src/lib/ots/explorers';
-import { checkReanchorSet } from '../src/lib/verify-core/reanchor';
+import { checkpointDigestOf, checkReanchorSet } from '../src/lib/verify-core/reanchor';
+import { certificatesFromPem } from '../src/lib/verify-core/seal';
 import { reanchorArchivesOf, verifierSetupFromEnv } from '../src/lib/verify-setup';
 import type { StandaloneSetup } from '../standalone/config';
 
@@ -68,6 +76,25 @@ function reanchorSetsFor(setup: StandaloneSetup): unknown[] {
   });
 }
 
+/** The head digests of the checkpoints this build trusts (#151); the build stops on one that does not hold together or is of another registry. */
+function checkpointDigestsFor(setup: StandaloneSetup): string[] {
+  const files = (process.env.CHECKPOINTS ?? '').split(',').map((file) => file.trim()).filter(Boolean);
+  return files.map((file) => {
+    let set;
+    try {
+      set = checkReanchorSet(JSON.parse(fs.readFileSync(file, 'utf8')));
+    } catch (error) {
+      refuse(`${file} (CHECKPOINTS) is not a checkpoint that holds together: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const digest = checkpointDigestOf(set);
+    if (!digest) refuse(`${file} (CHECKPOINTS) is a re-anchor archive, not a checkpoint; give it to REANCHOR_ARCHIVES.`);
+    if (set.source.chainId !== setup.chainId || set.source.registry.toLowerCase() !== setup.registry.toLowerCase()) {
+      refuse(`${file} (CHECKPOINTS) is a checkpoint of registry ${set.source.registry} (chain ${set.source.chainId}), not this verifier's.`);
+    }
+    return digest;
+  });
+}
+
 async function main() {
   const appUrl = process.env.APP_PUBLIC_URL ? process.env.APP_PUBLIC_URL.replace(/\/+$/, '') : null;
   if (appUrl && !/^https?:\/\/[^\s/]+$/.test(appUrl)) {
@@ -75,6 +102,15 @@ async function main() {
     process.exit(1);
   }
   const result = verifierSetupFromEnv();
+  if (!result.ok && result.reason === 'SEAL_ROOTS_INVALID') refuse('SEAL_TRUST_ANCHORS is set, but its file cannot be read or holds no certificate.');
+  // Every block parsed as a certificate, not only shaped like one (#157): a published file that can check no seal is never built.
+  if (result.ok && process.env.SEAL_TRUST_ANCHORS) {
+    try {
+      certificatesFromPem(fs.readFileSync(process.env.SEAL_TRUST_ANCHORS, 'utf8'));
+    } catch (error) {
+      refuse(`SEAL_TRUST_ANCHORS holds a block that is not a certificate: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   const network = result.ok ? result.setup.network : null;
   const setup: StandaloneSetup | null = result.ok
     ? {
@@ -93,6 +129,7 @@ async function main() {
     process.exit(1);
   }
   const reanchorSets = setup ? reanchorSetsFor(setup) : [];
+  const checkpointDigests = setup ? checkpointDigestsFor(setup) : [];
   fs.mkdirSync(DIST, { recursive: true });
 
   await build({
@@ -104,12 +141,12 @@ async function main() {
     target: 'node22',
     // pdf.js finds its own worker module next to itself, so it stays in node_modules.
     external: ['pdfjs-dist', 'pdfjs-dist/*'],
-    define: { __VERIFIER_SETUP__: JSON.stringify(setup), __REANCHOR_SETS__: JSON.stringify(reanchorSets) },
+    define: { __VERIFIER_SETUP__: JSON.stringify(setup), __REANCHOR_SETS__: JSON.stringify(reanchorSets), __CHECKPOINT_DIGESTS__: JSON.stringify(checkpointDigests) },
     // A CommonJS dependency of the seal check (#120) requires Node's built-ins, which an ES module can do only through createRequire.
     banner: { js: "#!/usr/bin/env node\nimport { createRequire as __createRequire } from 'node:module';\nconst require = __createRequire(import.meta.url);" },
     logLevel: 'warning',
   });
-  console.log(`wrote dist/verify-report.mjs${setup ? ` (chain ${setup.chainId}, ${setup.registry}, ${setup.sealRoots.length} seal root(s), ${reanchorSets.length} re-anchor archive(s))` : ' (no baked settings)'}`);
+  console.log(`wrote dist/verify-report.mjs${setup ? ` (chain ${setup.chainId}, ${setup.registry}, ${setup.sealRoots.length} seal root(s), ${reanchorSets.length} re-anchor archive(s), ${checkpointDigests.length} trusted checkpoint(s))` : ' (no baked settings)'}`);
   if (cliOnly || !setup) return;
 
   const messages = { en: JSON.parse(read('messages', 'en.json')).verify, bg: JSON.parse(read('messages', 'bg.json')).verify };

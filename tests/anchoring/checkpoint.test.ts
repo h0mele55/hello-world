@@ -4,12 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { bytesToHex, createPublicClient, http, sha256, type Hex, type PublicClient } from 'viem';
+import { bytesToHex, createPublicClient, custom, http, sha256, type Hex, type PublicClient } from 'viem';
 import { foundry } from 'viem/chains';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
 import { exportCheckpoint, runCheckpoint, type CheckpointDeps } from '@/lib/anchoring/checkpoint';
 import { orgIdFor } from '@/lib/chain/deploy';
+import { buildCheckpoint } from '@/lib/chain/reanchor-build';
 import { attestationsOf, parseProof, serializeProof, serializeTimestamp, type Proof, type Timestamp } from '@/lib/ots/format';
 import type { BitcoinTime } from '@/lib/ots/bitcoin';
 import { runOtsPass } from '@/lib/ots/job';
@@ -95,6 +96,10 @@ describe('the monthly checkpoint (#122)', () => {
   let made: { checkpointId: string; root: Hex; block: number };
   /** What October's timestamp is of. */
   const head = () => ({ source: { chainId: config.chainId, registry: config.registry, block: made.block }, period: '2026-10', count: 4, root: made.root });
+  /** The checkpoints a verifier built from the published export trusts (#151). */
+  const trusted = () => [checkpointDigest(head())];
+  /** Through a checkpoint the latest is the latest as of its block, never now (#151). */
+  const asOfCheckpoint = (v: Verdict) => (v.kind === 'AUTHENTIC_LATEST' ? { ...v, kind: 'AUTHENTIC_AS_OF_CHECKPOINT' as const } : v);
   let exported: Checkpoint;
   let proofs: CheckedSet[];
 
@@ -188,6 +193,40 @@ describe('the monthly checkpoint (#122)', () => {
     expect(new Set(digests.map((d) => d.digest)).size).toBe(2);
   });
 
+  it('makes the next month’s checkpoint from the blocks since the last one only, and still holds every record (#142)', async () => {
+    const last = await prisma.registryCheckpoint.findFirstOrThrow({ orderBy: { block: 'desc' }, select: { block: true, count: true } });
+    const c1 = await anchorOriginal(registry, fixture('en-disclaimer.pdf'), family(0xc1));
+    await finalise(registry);
+    // Endpoints that note every range of logs they are asked for.
+    const asked: { from: bigint; to: bigint }[] = [];
+    const counting = () => {
+      const upstream = http(anvil.url)({ chain: foundry });
+      return createPublicClient({
+        chain: foundry,
+        transport: custom({
+          request: ({ method, params }: { method: string; params?: unknown }) => {
+            if (method === 'eth_getLogs') {
+              const filter = (params as { fromBlock: Hex; toBlock: Hex }[])[0];
+              asked.push({ from: BigInt(filter.fromBlock), to: BigInt(filter.toBlock) });
+            }
+            return upstream.request({ method, params } as Parameters<typeof upstream.request>[0]);
+          },
+        }),
+      }) as PublicClient;
+    };
+    const december = await runCheckpoint({ ...deps, clients: [counting(), counting()], now: () => new Date('2027-01-01T02:00:00Z') });
+    if (december.status !== 'CREATED') throw new Error(december.status);
+    expect(december).toMatchObject({ period: '2026-12', count: last.count + 1 });
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every((range) => range.from > BigInt(last.block))).toBe(true);
+    // The same records, the new one among them, under the same root as a scan from the deploy block gives at that block.
+    const stored = checkReanchorSet(JSON.parse(new TextDecoder().decode((await prisma.registryCheckpoint.findUniqueOrThrow({ where: { id: december.checkpointId } })).file)));
+    expect(stored.records.map((r) => r.recordId)).toContain(c1.recordId.toLowerCase());
+    const { checkpoint: full } = await buildCheckpoint({ clients, source: { ...registry.deployment, deployBlock: 0 }, issuerNames: [ISSUER_ORG], period: '2026-12' });
+    if (full.source.block === december.block) expect(full.root).toBe(december.root);
+    expect(full.records.map((r) => r.recordId).sort()).toEqual(stored.records.map((r) => r.recordId).sort());
+  });
+
   it('is not used while the registry answers', async () => {
     const set = checkReanchorSet(JSON.parse(JSON.stringify(exported)));
     const live = await verifyWithReanchors({ bytes: files['A v2'], config, openView: () => openRegistryView(config), readPdf, sets: [set], bitcoinCheck: bitcoinTime });
@@ -209,13 +248,13 @@ describe('the monthly checkpoint (#122)', () => {
       'B v1, being revoked': 'REVOCATION_PENDING',
     });
     for (const [name, bytes] of Object.entries(files)) {
-      const { verdict, reanchored } = await verifyWithReanchors({ bytes, config, openView: () => openRegistryView(config), readPdf, sets: [set], bitcoinCheck: bitcoinTime });
-      expect(verdict, name).toEqual({ ...direct[name], asOfBlock: made.block });
+      const { verdict, reanchored } = await verifyWithReanchors({ bytes, config, openView: () => openRegistryView(config), readPdf, sets: [set], bitcoinCheck: bitcoinTime, trustedCheckpoints: trusted() });
+      expect(verdict, name).toEqual({ ...asOfCheckpoint(direct[name]), asOfBlock: made.block });
       expect(reanchored, name).toMatchObject({ kind: 'checkpoint', period: '2026-10', root: made.root, sourceBlock: made.block, bitcoin: { height: HEIGHT } });
     }
     // One record's proof answers for its file.
     const ownProof = proofs.find((p) => p.records[0].docHash === (direct['A v1 copy'] as { matched: { docHash: Hex } }).matched.docHash)!;
-    expect((await verifyWithReanchors({ bytes: files['A v1 copy'], config, openView: () => openRegistryView(config), readPdf, sets: [ownProof], bitcoinCheck: bitcoinTime })).verdict).toEqual({
+    expect((await verifyWithReanchors({ bytes: files['A v1 copy'], config, openView: () => openRegistryView(config), readPdf, sets: [ownProof], bitcoinCheck: bitcoinTime, trustedCheckpoints: trusted() })).verdict).toEqual({
       ...direct['A v1 copy'],
       asOfBlock: made.block,
     });
@@ -223,7 +262,7 @@ describe('the monthly checkpoint (#122)', () => {
 
   it('never says "none": a file it does not hold may have come after it', async () => {
     const set = checkReanchorSet(JSON.parse(JSON.stringify(exported)));
-    const verify = (bytes: Uint8Array, sets: CheckedSet[]) => verifyWithReanchors({ bytes, config, openView: () => openRegistryView(config), readPdf, sets, bitcoinCheck: bitcoinTime });
+    const verify = (bytes: Uint8Array, sets: CheckedSet[]) => verifyWithReanchors({ bytes, config, openView: () => openRegistryView(config), readPdf, sets, bitcoinCheck: bitcoinTime, trustedCheckpoints: trusted() });
     expect(await verify(fixture('en-disclaimer.pdf'), [set])).toEqual({ verdict: { kind: 'CANNOT_VERIFY', reason: 'CHECKPOINT_NOT_COVERED' }, reanchored: null });
     // A proof of another record does not hold this file either.
     const ownProof = proofs.find((p) => p.records[0].docHash === (direct['A v2'] as { matched: { docHash: Hex } }).matched.docHash)!;
@@ -234,7 +273,7 @@ describe('the monthly checkpoint (#122)', () => {
     const verify = (edit: (c: Checkpoint) => void, check = bitcoinTime) => {
       const copy = JSON.parse(JSON.stringify(exported)) as Checkpoint;
       edit(copy);
-      return verifyWithReanchors({ bytes: files['A v2'], config, openView: () => openRegistryView(config), readPdf, sets: [checkReanchorSet(copy)], bitcoinCheck: check });
+      return verifyWithReanchors({ bytes: files['A v2'], config, openView: () => openRegistryView(config), readPdf, sets: [checkReanchorSet(copy)], bitcoinCheck: check, trustedCheckpoints: trusted() });
     };
     const unproven = { verdict: { kind: 'CANNOT_VERIFY', reason: 'CHECKPOINT_UNPROVEN' }, reanchored: null };
     // Not timestamped yet.
@@ -244,6 +283,21 @@ describe('the monthly checkpoint (#122)', () => {
     expect(await verify((c) => (c.ots = Buffer.from(other).toString('base64')))).toEqual(unproven);
     // Not on Bitcoin yet, by the explorers' reading.
     expect(await verify(() => {}, async () => null)).toEqual(unproven);
+  });
+
+  it('is believed only if the issuer published it: a well-formed checkpoint timestamped on Bitcoin is not enough (#151)', async () => {
+    // Anyone can build a checkpoint that holds together and have its head timestamped; this one is
+    // even genuine, but a verifier not built to trust it must refuse it all the same.
+    const set = checkReanchorSet(JSON.parse(JSON.stringify(exported)));
+    const verify = (trustedCheckpoints?: string[]) =>
+      verifyWithReanchors({ bytes: files['A v2'], config, openView: () => openRegistryView(config), readPdf, sets: [set], bitcoinCheck: bitcoinTime, trustedCheckpoints });
+    const unproven = { verdict: { kind: 'CANNOT_VERIFY', reason: 'CHECKPOINT_UNPROVEN' }, reanchored: null };
+    expect(await verify()).toEqual(unproven);
+    expect(await verify([])).toEqual(unproven);
+    expect(await verify([`0x${'ab'.repeat(32)}`])).toEqual(unproven);
+    // Trusted, it answers, and never says LATEST: only the latest as of its block.
+    const { verdict } = await verify([checkpointDigest(head()).toUpperCase().replace('0X', '0x')]);
+    expect(verdict).toMatchObject({ kind: 'AUTHENTIC_AS_OF_CHECKPOINT', asOfBlock: made.block });
   });
 
   it('through the CLI: --checkpoint with the chain down, held to the timestamp it carries', async () => {
@@ -261,8 +315,14 @@ describe('the monthly checkpoint (#122)', () => {
     await expect(cli).rejects.toMatchObject({ code: 3 });
     const out = JSON.parse(((await cli.catch((e: { stdout: string }) => e)) as { stdout: string }).stdout);
     expect(out).toMatchObject({ verdict: { kind: 'CANNOT_VERIFY', reason: 'CHECKPOINT_UNPROVEN' }, reanchored: null });
+    // Trusted by its head (#151), it is still held to its timestamp, which Bitcoin has not confirmed.
+    const trustedCli = run(process.execPath, ['bin/verify-report.mjs', pdf, '--deployment', deployment, '--rpc', anvil.url, '--rpc', anvil.url, '--checkpoint', file, '--trust-checkpoint', checkpointDigest(head()).slice(2)], { cwd: ROOT });
+    await expect(trustedCli).rejects.toMatchObject({ code: 3 });
+    // Something that is not a head's SHA-256 is a usage error.
+    await expect(run(process.execPath, ['bin/verify-report.mjs', pdf, '--deployment', deployment, '--rpc', anvil.url, '--rpc', anvil.url, '--trust-checkpoint', 'abc'], { cwd: ROOT })).rejects.toMatchObject({ code: 2 });
     // A file that is not a checkpoint is refused before anything is read.
     fs.writeFileSync(file, JSON.stringify({ ...pending, root: `0x${'0'.repeat(64)}` }));
     await expect(run(process.execPath, ['bin/verify-report.mjs', pdf, '--checkpoint', file], { cwd: ROOT })).rejects.toMatchObject({ code: 2 });
   }, 120_000);
 });
+

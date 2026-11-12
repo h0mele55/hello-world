@@ -9,6 +9,33 @@
 
 const round = (n) => Math.round(n * 100) / 100;
 
+/**
+ * The widest a page's text may spread, in points (#143). A PDF page is at most
+ * 14,400 points across, so real files never come near; a hostile one could
+ * place text a trillion points out, and the column finder works point by
+ * point. A page beyond it is refused, which changes nothing normaliser v1
+ * reads from a real file.
+ */
+const MAX_PAGE_EXTENT = 20_000;
+
+/** A page whose text cannot be laid out: refused, never guessed (rule 7). */
+function refuse(message) {
+  const error = new Error(message);
+  error.name = 'PageLayoutError';
+  throw error;
+}
+
+/** The leftmost and rightmost points of some glyphs, without spreading them into arguments. */
+function extentOf(parts) {
+  let left = Infinity;
+  let right = -Infinity;
+  for (const p of parts) {
+    if (p.x < left) left = p.x;
+    if (p.x + p.w > right) right = p.x + p.w;
+  }
+  return { left, right };
+}
+
 /** Groups glyphs into lines by baseline, top to bottom. */
 function groupLines(glyphs) {
   const sorted = [...glyphs].sort((a, b) => b.y - a.y || a.x - b.x);
@@ -88,9 +115,9 @@ function guttersIn(free, lines, left) {
  */
 function bandsOf(lines) {
   if (lines.length === 0) return [];
-  const parts = lines.flatMap((l) => l.parts);
-  const left = Math.floor(Math.min(...parts.map((p) => p.x)));
-  const width = Math.ceil(Math.max(...parts.map((p) => p.x + p.w))) - left + 1;
+  const extent = extentOf(lines.flatMap((l) => l.parts));
+  const left = Math.floor(extent.left);
+  const width = Math.ceil(extent.right) - left + 1;
   const bands = [];
   let band = null;
   for (const line of lines) {
@@ -142,8 +169,11 @@ export function linesOf(items) {
     if (typeof item.str !== 'string' || item.str === '') continue;
     const [, , c, d, x, y] = item.transform;
     const size = Math.hypot(c, d) || item.height || 1;
+    if (![x, y, item.width, size].every(Number.isFinite)) refuse('a text item has a position that is not a number');
     glyphs.push({ str: item.str, x, y, w: item.width, size });
   }
+  const extent = extentOf(glyphs);
+  if (glyphs.length && extent.right - extent.left > MAX_PAGE_EXTENT) refuse(`the page's text spreads over more than ${MAX_PAGE_EXTENT} points`);
   return bandsOf(groupLines(glyphs)).flatMap(({ lines, gutters }) => {
     if (gutters.length === 0) return lines.map(lineText);
     const columns = Array.from({ length: gutters.length + 1 }, () => []);

@@ -1,5 +1,5 @@
 import { getAddress, keccak256, type Address, type Hash, type Hex, type PublicClient } from 'viem';
-import { archiveOf, checkpointOf, checkReanchorSet, proofsOf, type ArchivedRecord, type Checkpoint, type CheckpointProof, type ReanchorArchive, type ReanchorProof } from '../verify-core/reanchor';
+import { archiveOf, checkpointOf, checkReanchorSet, leafOf, proofsOf, type ArchivedRecord, type Checkpoint, type CheckpointProof, type CheckedSet, type ReanchorArchive, type ReanchorProof } from '../verify-core/reanchor';
 import { agreedFinalizedBlock, readOnBoth } from './agree';
 import { orgIdFor } from './deploy';
 import { BytecodeMismatchError, ChainError, ChainMismatchError } from './errors';
@@ -40,6 +40,12 @@ export interface ReadDeps {
   /** Names of the source's issuer firms, each the one its org id is the hash of. */
   issuerNames?: readonly string[];
   rangeBlocks?: number;
+  /**
+   * The records an earlier read held at its finalized block, a checkpoint of
+   * this very registry (#142): their events are not scanned again, only the
+   * blocks after it. Every record is still read again at the new block.
+   */
+  known?: { block: number; records: readonly { recordId: Hex; txHash: Hash; blockNumber: number }[] };
 }
 
 export interface BuildDeps extends ReadDeps {
@@ -64,10 +70,51 @@ export async function buildCheckpoint(deps: ReadDeps & { period: string }): Prom
   return { checkpoint, proofs: proofsOf(checkpoint) };
 }
 
-/** Every record, at one finalized block both endpoints agree on. */
+/**
+ * Holds an archive to the registry it says it came from (#155), before its
+ * root is recorded or while it is checked: the source is read again on both
+ * endpoints at the archive's own block, the archive rebuilt from what it held
+ * then, and anything but the same root is ARCHIVE_DIFFERS, naming the records
+ * that differ. An archive is otherwise checked only against itself, which an
+ * archive edited after it was built (a record added, a revoked one shown
+ * standing, a family's latest changed) and rebuilt passes.
+ *
+ * A source that cannot be read is SOURCE_UNREADABLE, never a pass; once its
+ * chain is gone, only a person can decide to go on without this check.
+ */
+export async function checkArchiveAgainstSource(deps: ReadDeps, archive: CheckedSet): Promise<{ root: Hex; count: number; block: number }> {
+  if (!archive.complete || !archive.target) throw new ChainError('NOT_AN_ARCHIVE', 'only a whole re-anchor archive is compared with its source registry');
+  if (archive.source.chainId !== deps.source.chainId || archive.source.registry.toLowerCase() !== deps.source.address.toLowerCase()) {
+    throw new ChainError('ARCHIVE_NOT_OF_SOURCE', `the archive is of registry ${archive.source.registry} on chain ${archive.source.chainId}, not ${deps.source.address} on chain ${deps.source.chainId}`);
+  }
+  let read: Awaited<ReturnType<typeof readRegistryRecords>>;
+  try {
+    read = await readRegistryRecords({ ...deps, issuerNames: Object.values(archive.issuers) }, { refusePending: true, atBlock: archive.source.block });
+  } catch (error) {
+    if (error instanceof ChainError) throw error;
+    throw new ChainError('SOURCE_UNREADABLE', `the source registry could not be read at block ${archive.source.block}: ${error instanceof Error ? error.name : 'unknown error'}`);
+  }
+  const rebuilt = archiveOf({ source: read.source, target: archive.target }, read.records, read.issuers);
+  if (rebuilt.root !== archive.root || rebuilt.records.length !== archive.count) {
+    const leaves = (records: ArchivedRecord[]) => new Map(records.map((r) => [r.recordId.toLowerCase(), leafOf(read.source, r)]));
+    const held = leaves(rebuilt.records);
+    const claimed = leaves(archive.records);
+    const differ = [...new Set([...held.keys(), ...claimed.keys()])].filter((id) => held.get(id) !== claimed.get(id));
+    throw new ChainError(
+      'ARCHIVE_DIFFERS',
+      `the archive is not what the registry held at block ${archive.source.block}: ${differ.length} record(s) differ or are missing (${differ.slice(0, 5).join(', ')}${differ.length > 5 ? ', …' : ''})`,
+    );
+  }
+  return { root: rebuilt.root, count: rebuilt.records.length, block: read.source.block };
+}
+
+/**
+ * Every record, at one finalized block both endpoints agree on; or, with
+ * `atBlock`, at that earlier block, which must be finalized (#155).
+ */
 export async function readRegistryRecords(
   deps: ReadDeps,
-  options: { refusePending: boolean },
+  options: { refusePending: boolean; atBlock?: number },
 ): Promise<{ source: { chainId: number; registry: Address; block: number }; records: ArchivedRecord[]; issuers: Record<string, string> }> {
   const { clients, source } = deps;
   const address = source.address;
@@ -78,12 +125,19 @@ export async function readRegistryRecords(
     const code = await client.getCode({ address });
     if (!code || keccak256(code) !== source.runtimeBytecodeHash) throw new BytecodeMismatchError(address);
   }
-  const block = await agreedFinalizedBlock(clients);
+  const finalized = await agreedFinalizedBlock(clients);
+  if (options.atBlock !== undefined && BigInt(options.atBlock) > finalized) {
+    throw new ChainError('ARCHIVE_DIFFERS', `block ${options.atBlock} is not finalized on the source: no archive is built from it`);
+  }
+  const block = options.atBlock !== undefined ? BigInt(options.atBlock) : finalized;
   const read = <T>(what: string, run: (client: PublicClient) => Promise<T>) => readOnBoth(clients, what, run);
 
   const anchored: { recordId: Hex; txHash: Hash; blockNumber: number }[] = [];
+  const known = deps.known && BigInt(deps.known.block) <= block ? deps.known : null;
+  for (const r of known?.records ?? []) anchored.push({ recordId: r.recordId.toLowerCase() as Hex, txHash: r.txHash.toLowerCase() as Hash, blockNumber: r.blockNumber });
+  const scanFrom = known && known.block + 1 > source.deployBlock ? BigInt(known.block + 1) : BigInt(source.deployBlock);
   const range = BigInt(deps.rangeBlocks ?? RANGE_BLOCKS);
-  for (let from = BigInt(source.deployBlock); from <= block; from += range) {
+  for (let from = scanFrom; from <= block; from += range) {
     const to = from + range - 1n < block ? from + range - 1n : block;
     const events = await read(`the registry's anchors in blocks ${from} to ${to}`, async (c) =>
       (await c.getContractEvents({ address, abi: registryAbi, eventName: 'Anchored', fromBlock: from, toBlock: to })).map((e) => ({

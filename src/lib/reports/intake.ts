@@ -29,6 +29,8 @@ export type IntakeErrorCode =
   | 'PDF_REFUSED'
   | 'DOC_ALREADY_UPLOADED'
   | 'ENGAGEMENT_EXISTS'
+  /** Unique across every firm, held by another one: refused without saying so (#146). */
+  | 'CONFLICT'
   | 'DRAFT_PENDING'
   | 'VERSION_CONFLICT'
   | 'NOT_DRAFT'
@@ -81,28 +83,33 @@ export async function createEngagement(user: SessionUser, input: NewEngagement) 
   }
   const familyId = familyIdOf(serverEnv().ISSUER_FAMILY_SECRET, key);
 
+  try {
+    return await createEngagementRow(user, clientName, country, key, familyId);
+  } catch (error) {
+    if (!isUniqueViolation(error)) throw error;
+    // A family id is unique across every firm: only this firm's own engagement is named (#146).
+    const own = await db().engagement.findFirst({ where: { familyId, client: { orgId: user.orgId } }, select: { id: true } });
+    throw new IntakeError(own ? 'ENGAGEMENT_EXISTS' : 'CONFLICT');
+  }
+}
+
+async function createEngagementRow(user: SessionUser, clientName: string, country: string, key: ReturnType<typeof canonicalFamilyKey>, familyId: string) {
   return db().$transaction(async (tx) => {
     // INSERT … ON CONFLICT DO NOTHING, then read: unlike a find-then-create
     // upsert, two requests creating the same new client cannot both insert.
     const clientKey = { orgId: user.orgId, country, registrationNumber: key.registrationNumber };
     await tx.client.createMany({ data: [{ ...clientKey, name: clientName }], skipDuplicates: true });
     const client = await tx.client.findUniqueOrThrow({ where: { orgId_country_registrationNumber: clientKey } });
-    let engagement;
-    try {
-      engagement = await tx.engagement.create({
-        data: {
-          clientId: client.id,
-          engagementRef: key.engagementRef,
-          periodEnd: new Date(`${key.periodEnd}T00:00:00Z`),
-          reportType: key.reportType,
-          familyId,
-          createdById: user.id,
-        },
-      });
-    } catch (error) {
-      if (isUniqueViolation(error)) throw new IntakeError('ENGAGEMENT_EXISTS');
-      throw error;
-    }
+    const engagement = await tx.engagement.create({
+      data: {
+        clientId: client.id,
+        engagementRef: key.engagementRef,
+        periodEnd: new Date(`${key.periodEnd}T00:00:00Z`),
+        reportType: key.reportType,
+        familyId,
+        createdById: user.id,
+      },
+    });
     await appendAuditEvent(tx, {
       orgId: user.orgId,
       actorId: user.id,
@@ -186,8 +193,9 @@ export async function uploadVersion(user: SessionUser, input: { engagementId: st
     if (isUniqueViolation(error)) {
       // The driver adapter does not say which constraint fired, so ask: the
       // same file already stored, or another upload took this version number.
-      const duplicate = await db().reportVersion.findUnique({ where: { docHash }, select: { id: true } });
-      throw new IntakeError(duplicate ? 'DOC_ALREADY_UPLOADED' : 'VERSION_CONFLICT');
+      // A file is unique across every firm: only this firm's own copy is named (#146).
+      const duplicate = await db().reportVersion.findUnique({ where: { docHash }, select: { engagement: { select: { client: { select: { orgId: true } } } } } });
+      throw new IntakeError(!duplicate ? 'VERSION_CONFLICT' : duplicate.engagement.client.orgId === user.orgId ? 'DOC_ALREADY_UPLOADED' : 'CONFLICT');
     }
     throw error;
   }
@@ -267,11 +275,15 @@ export async function confirmOpinion(user: SessionUser, input: Confirmation) {
   if (!isIsoDate(input.reportDate)) throw new IntakeError('INVALID_INPUT', 'reportDate');
   // A choice among candidates is recorded only when there were candidates to choose from (#77).
   let chosen: OpinionPassage | null = null;
+  const extraction = openJson<LocateResult>(sealingKeys(), version.extraction, extractionContext(version.docHash));
   if (input.candidate !== undefined) {
-    const extraction = openJson<LocateResult>(sealingKeys(), version.extraction, extractionContext(version.docHash));
     chosen = extraction.status === 'CANDIDATES' && Number.isInteger(input.candidate) ? (extraction.candidates[input.candidate] ?? null) : null;
     if (!chosen) throw new IntakeError('INVALID_INPUT', 'candidate');
   }
+  // What a verifier's locator would find in the file: the passage found, or the one chosen (#157).
+  const located = extraction.status === 'FOUND' ? extraction : chosen;
+  // Edited when the person corrected its text or type, or typed an opinion the locator did not find.
+  const opinionEdited = !located || normaliseText(located.text) !== text || located.type !== input.opinionType;
 
   const opinionSalt = newSalt();
   const manifestSalt = newSalt();
@@ -298,6 +310,7 @@ export async function confirmOpinion(user: SessionUser, input: Confirmation) {
         opinionType: input.opinionType,
         confirmedOpinion: seal(key, new TextEncoder().encode(text), opinionContext(version.docHash)),
         opinionCandidate: chosen ? input.candidate : null,
+        opinionEdited,
         reportDate: new Date(`${input.reportDate}T00:00:00Z`),
         opinionSalt,
         opinionCommitment,
@@ -320,6 +333,7 @@ export async function confirmOpinion(user: SessionUser, input: Confirmation) {
         manifestHash,
         // Which report the person started from, and whether they changed its text: ids and pages, never the text.
         ...(chosen ? { candidate: input.candidate, pages: chosen.pageRange, edited: text !== chosen.text } : {}),
+        opinionEdited,
       },
     });
     return true;
@@ -347,5 +361,6 @@ export async function discardDraft(user: SessionUser, versionId: string) {
     return true;
   });
   if (!deleted) throw new IntakeError('NOT_DRAFT');
-  await discardStoredFile(version.storedFile.path);
+  // The file stays until the orphan sweep (src/lib/file-sweep.ts, #158): a backup
+  // whose dump was taken before this commit still names it, and must find it.
 }

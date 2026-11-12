@@ -11,6 +11,7 @@ import { loadDeploymentFile, NETWORKS } from '@/lib/chain/networks';
 import { registryAbi } from '@/lib/chain/registry-artifact';
 import { ZERO_HASH } from '@/lib/chain/records';
 import { startAnvil, type AnvilHandle } from './anvil';
+import { startRpcProxy } from './rpc-proxy';
 
 /**
  * A production candidate's testnet end to end (#63): the deploy script deploys
@@ -85,6 +86,43 @@ describe('deploying to a production candidate’s testnet', () => {
     await testClient.mine({ blocks: 3 });
     await adapter.waitFinal(sent.txHash, { pollMs: 20, timeoutMs: 5_000 });
     expect(await adapter.findByDocHash(h('d'))).toMatchObject({ recordId: sent.recordId, issuer: getAddress(issuer.address) });
+  });
+
+  it('records the registry before registering its issuer, and a second run finishes it rather than deploying another (#142)', async () => {
+    const transport = http(anvil.url);
+    const testClient = createTestClient({ chain: NETWORKS['base-sepolia'], mode: 'anvil', transport });
+    const deployerKey = generatePrivateKey();
+    await testClient.setBalance({ address: privateKeyToAccount(deployerKey).address, value: parseEther('0.05') });
+    const issuer = privateKeyToAccount(generatePrivateKey()).address;
+    // An endpoint that takes the deployment and then drops: the issuer's registration never leaves.
+    let sends = 0;
+    const flaky = await startRpcProxy(anvil.url, { refuse: (method) => method === 'eth_sendRawTransaction' && ++sends > 1 });
+    const flakyUrl = flaky.url;
+    const file = path.join(dir, 'resumed.json');
+    const env = { DEPLOYER_PRIVATE_KEY: deployerKey, ISSUER_ADDRESS: issuer, ISSUER_ORG_NAME: 'Firm', DEPLOYMENT_FILE: file };
+    try {
+      const failed = await deploy('base-sepolia', { ...env, BASE_SEPOLIA_RPC_URL: flakyUrl });
+      expect(failed.code).toBe(1);
+    } finally {
+      await flaky.close();
+    }
+    // The registry is on chain and recorded, its issuer pending; nothing will use it yet.
+    const pending = JSON.parse(fs.readFileSync(file, 'utf8'));
+    expect(pending).toMatchObject({ issuer: { address: issuer, orgName: 'Firm', pending: true } });
+    expect(() => loadDeploymentFile('base-sepolia', file)).toThrow(expect.objectContaining({ code: 'DEPLOYMENT_PENDING' }));
+
+    // Another issuer is refused; the same settings finish the same registry.
+    const other = await deploy('base-sepolia', { ...env, BASE_SEPOLIA_RPC_URL: anvil.url, ISSUER_ADDRESS: privateKeyToAccount(generatePrivateKey()).address });
+    expect(other).toMatchObject({ code: 1, err: expect.stringContaining('resume it with the same ISSUER_ADDRESS') });
+    const resumed = await deploy('base-sepolia', { ...env, BASE_SEPOLIA_RPC_URL: anvil.url });
+    expect(resumed).toMatchObject({ code: 0, out: expect.stringContaining(`Resuming the registry at ${pending.address}`) });
+    const done = JSON.parse(fs.readFileSync(file, 'utf8'));
+    expect(done).toMatchObject({ address: pending.address, deployTxHash: pending.deployTxHash, issuer: { address: issuer, setIssuerTxHash: expect.stringMatching(/^0x/) } });
+    expect(done.issuer.pending).toBeUndefined();
+    const publicClient = createPublicClient({ chain: NETWORKS['base-sepolia'], transport }) as PublicClient;
+    expect(await publicClient.readContract({ address: pending.address, abi: registryAbi, functionName: 'issuers', args: [issuer] })).toEqual([keccak256(toBytes('Firm')), true]);
+    // Complete, it is never deployed over.
+    expect(await deploy('base-sepolia', { ...env, BASE_SEPOLIA_RPC_URL: anvil.url })).toMatchObject({ code: 1, err: expect.stringContaining('already exists') });
   });
 
   it('refuses a revocation delay under an hour off a local chain, or over the contract\'s 30 days, before deploying', async () => {

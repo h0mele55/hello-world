@@ -42,7 +42,40 @@ export function setupFromDeployment(json: unknown, rpcUrls: [string, string], ap
   });
 }
 
+/**
+ * Why two endpoints given on the command line cannot be used, or null (#143):
+ * the rule /verify applies (src/lib/verify-setup.ts). Off a local chain both
+ * must be https, carry no credentials, and be on different hosts, since two
+ * endpoints that must agree are worth something only if different parties run
+ * them.
+ */
+export function rpcUrlsRefusal(chainId: number, rpcUrls: readonly [string, string]): string | null {
+  let urls: URL[];
+  try {
+    urls = rpcUrls.map((value) => new URL(value));
+  } catch {
+    return 'an --rpc value is not a URL';
+  }
+  const local = chainId === 31337;
+  if (urls.some((url) => !(local ? ['http:', 'https:'] : ['https:']).includes(url.protocol) || url.username || url.password)) {
+    return local ? 'an --rpc endpoint must be http(s) with no credentials in it' : 'an --rpc endpoint must be https, with no credentials in it';
+  }
+  if (!local && urls[0].hostname.toLowerCase() === urls[1].hostname.toLowerCase()) return 'the two --rpc endpoints must be on different hosts, run by different providers';
+  return null;
+}
+
 /** Base64 DER, as the setup carries the seal's roots, to bytes. */
+/**
+ * Whether the archives baked in apply (#157): whenever the registry in use is
+ * the one they were baked for, whether from the baked settings or from
+ * --deployment with the user's own endpoints. Dropping them there would read a
+ * file anchored on a retired registry as NOT_REGISTERED. Another registry's
+ * roots are not recorded on it, so its sets would only be refused.
+ */
+export function bakedSetsApply(baked: { chainId: number; registry: string } | null, inUse: { chainId: number; registry: string }, count: number): boolean {
+  return count > 0 && baked !== null && baked.chainId === inUse.chainId && baked.registry.toLowerCase() === inUse.registry.toLowerCase();
+}
+
 export const rootsOf = (setup: StandaloneSetup) => setup.sealRoots.map((b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0)));
 
 /** JSON with bigints as decimal strings: verdicts carry none today, but a future field must not crash the output. */

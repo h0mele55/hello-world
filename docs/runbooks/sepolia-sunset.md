@@ -51,11 +51,21 @@ Ethereum Foundation's announcements and those of the two RPC providers.
    prints:
 
    ```bash
-   npx tsx scripts/owner-call.ts arbitrum record-reanchor-root reanchor/sepolia-<block>/archive.json
+   npx tsx scripts/owner-call.ts arbitrum record-reanchor-root reanchor/sepolia-<block>/archive.json --source sepolia
    ```
 
    It refuses an archive that does not hash to its own root or was built for
-   another registry. Only the owner can record a root: it vouches for every
+   another registry. It then reads Sepolia's registry again, on
+   `SEPOLIA_RPC_URL` and `SEPOLIA_RPC_URL_2`, at the archive's own block, and
+   refuses (`ARCHIVE_DIFFERS`, naming the records) unless the archive holds
+   exactly what the registry held then (#155). An archive is otherwise
+   checked only against itself, so one edited after it was built (a record
+   added, a revoked one shown standing) would pass. A Sepolia that cannot be
+   read is `SOURCE_UNREADABLE`: record the root while Sepolia still answers.
+   `--source-gone`, in place of `--source sepolia`, records it without that
+   comparison. Use it only if the chain is already gone, and only for an
+   archive whose copy was checked with `--source` while it was up: the
+   transaction's description says so. Only the owner can record a root: it vouches for every
    record under it. A root recorded in error is voided with
    `owner-call.ts arbitrum void-reanchor-root <index>`, and the right one is
    recorded anew.
@@ -63,11 +73,14 @@ Ethereum Foundation's announcements and those of the two RPC providers.
    `ARBITRUM_RPC_URL` and `ARBITRUM_RPC_URL_2`, once its block is finalized:
 
    ```bash
-   npx tsx scripts/reanchor.ts check reanchor/sepolia-<block> arbitrum
+   npx tsx scripts/reanchor.ts check reanchor/sepolia-<block> arbitrum --source sepolia
    ```
 
-   It prints one `DOES NOT PROVE` line per failure and exits 1. It needs no
-   Sepolia endpoint, so run it again after the shutdown.
+   It prints one `DOES NOT PROVE` line per failure and exits 1. With
+   `--source sepolia` it also compares the archive with what Sepolia's
+   registry held at its block, as the owner's call did. After the shutdown,
+   run it again with `--source-gone` in its place: the proofs need no Sepolia
+   endpoint.
 6. **Publish** the archive and the proofs: commit the directory, and give
    each client the proofs of their reports. Anyone can then check a file
    with the CLI:

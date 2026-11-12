@@ -28,6 +28,16 @@ work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
 psql "$source_url" -qc "DROP DATABASE IF EXISTS \"$restore_db\"" -c "CREATE DATABASE \"$restore_db\""
 
+# Client tools of another major version on PATH (#184): the server's own are used
+# when installed, and without them the backup is refused, naming what to install.
+mkdir -p "$work/other-client"
+printf '#!/bin/sh\necho "pg_dump (PostgreSQL) 99.0"\n' > "$work/other-client/pg_dump"
+chmod +x "$work/other-client/pg_dump"
+if PATH="$work/other-client:$PATH" PG_LIB_DIR="$work/nowhere" BACKUP_DIR="$work/refused" scripts/backup.sh >/dev/null 2>"$work/refused.log"; then
+  echo "FAIL: a backup ran with client tools of another major version" >&2; exit 1
+fi
+grep -q 'install postgresql-client-' "$work/refused.log" || { echo "FAIL: the refusal does not name the client to install" >&2; cat "$work/refused.log" >&2; exit 1; }
+
 backup=$(BACKUP_DIR="$work/backups" scripts/backup.sh)
 echo "backed up to $backup"
 
@@ -39,6 +49,17 @@ fi
 
 RESTORE_DATABASE_URL="$restore_url" RESTORE_FILE_STORAGE_DIR="$work/files" scripts/restore.sh "$backup"
 RESTORE_DATABASE_URL="$restore_url" RESTORE_FILE_STORAGE_DIR="$work/files" npx tsx scripts/verify-restore.ts --expect-identical
+
+# A row whose file the restored store lacks is named, not passed (#158).
+first=$(ls "$work/files" | head -1)
+if [ -n "$first" ]; then
+  mv "$work/files/$first" "$work/held-aside"
+  if RESTORE_DATABASE_URL="$restore_url" RESTORE_FILE_STORAGE_DIR="$work/files" npx tsx scripts/verify-restore.ts --expect-identical >"$work/missing.log" 2>&1; then
+    echo "FAIL: a restore missing a file was verified" >&2; exit 1
+  fi
+  grep -q "FILE_MISSING" "$work/missing.log" || { echo "FAIL: the missing file was not named" >&2; cat "$work/missing.log" >&2; exit 1; }
+  mv "$work/held-aside" "$work/files/$first"
+fi
 
 if RESTORE_DATABASE_URL="$restore_url" RESTORE_FILE_STORAGE_DIR="$work/other" scripts/restore.sh "$backup" >/dev/null 2>&1; then
   echo "FAIL: a restore wrote over a database that was not empty" >&2; exit 1

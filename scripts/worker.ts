@@ -9,6 +9,7 @@
  *   FILE_ENCRYPTION_KEY, FILE_ENCRYPTION_KEY_VERSION, FILE_STORAGE_DIR
  *                       the same values as the app's: the worker reads originals and stores copies
  *   APP_PUBLIC_URL      the app's public origin; stamps and certificates point at <origin>/verify
+ *   WORKER_MAX_FEE_GWEI optional; no replacement offers a fee cap above this (#139)
  *   STANDALONE_VERIFIER_URL  optional; the published single-file verifier (#85), which
  *                       certificates name as the way to check without the app
  *   <NETWORK>_RPC_URL_2 a second endpoint, from another provider: a row is settled only on
@@ -21,8 +22,10 @@
  * for its supervisor to restart.
  */
 import path from 'node:path';
+import { parseUnits } from 'viem';
 import { runWorkerPass } from '../src/lib/anchoring/worker';
 import { createFileStore } from '../src/lib/file-store';
+import { sweepOrphanFiles } from '../src/lib/file-sweep';
 import { standaloneVerifierUrlOf } from '../src/lib/verify-setup';
 import { issuerEnv, refuse, requireEnv, secondPublicClient } from './issuer-env';
 import { sealEnv } from './seal-env';
@@ -30,6 +33,8 @@ import { sealEnv } from './seal-env';
 const fail = (message: string): never => refuse('worker', message);
 /** Passes in a row that may fail before the process gives up: about five minutes at the default interval. */
 const MAX_FAILED_PASSES = 20;
+/** How often the worker removes stored files no row names (#158). */
+const SWEEP_EVERY_MS = 3_600_000;
 const env = (name: string) => requireEnv('worker', name);
 
 async function main() {
@@ -39,7 +44,8 @@ async function main() {
   const keyVersion = Number(process.env.FILE_ENCRYPTION_KEY_VERSION || 1);
   if (!Number.isInteger(keyVersion) || keyVersion < 1) fail('FILE_ENCRYPTION_KEY_VERSION must be a positive integer');
   const sealingKey = { key: new Uint8Array(keyBytes), version: keyVersion };
-  const files = createFileStore({ dir: path.resolve(process.env.FILE_STORAGE_DIR || 'storage'), current: sealingKey, keys: [sealingKey] });
+  const storageDir = path.resolve(process.env.FILE_STORAGE_DIR || 'storage');
+  const files = createFileStore({ dir: storageDir, current: sealingKey, keys: [sealingKey] });
   const verifyBaseUrl = env('APP_PUBLIC_URL');
   if (!/^https?:\/\/[^\s]+$/.test(verifyBaseUrl)) fail('APP_PUBLIC_URL must be an http(s) URL');
   const standaloneVerifierUrl = standaloneVerifierUrlOf();
@@ -58,13 +64,18 @@ async function main() {
 
   const intervalMs = Number(process.env.WORKER_INTERVAL_MS || 15_000);
   if (!Number.isInteger(intervalMs) || intervalMs < 1_000) fail('WORKER_INTERVAL_MS must be a whole number of milliseconds, at least 1000');
+  // No replacement offers a fee cap above this (#139); unset for none.
+  const maxFeeGwei = process.env.WORKER_MAX_FEE_GWEI;
+  if (maxFeeGwei !== undefined && maxFeeGwei !== '' && !/^\d+(\.\d{1,9})?$/.test(maxFeeGwei)) fail('WORKER_MAX_FEE_GWEI must be a number of gwei');
+  const options = maxFeeGwei ? { maxFeePerGasWei: parseUnits(maxFeeGwei, 9) } : {};
   console.log(JSON.stringify({ level: 'info', message: 'worker started', network, issuer: account.address, registry: deployment.address, sealsCopies: seal !== undefined }));
   let failedPasses = 0;
+  let lastSweep = 0;
   try {
     do {
       let report;
       try {
-        report = await runWorkerPass({ prisma, lockClient, publicClient, checkClient, account, deployment, files, verifyBaseUrl, standaloneVerifierUrl, seal });
+        report = await runWorkerPass({ prisma, lockClient, publicClient, checkClient, account, deployment, files, verifyBaseUrl, standaloneVerifierUrl, seal, options });
         failedPasses = 0;
       } catch (error) {
         // An endpoint or the database out for a moment must not stop anchoring:
@@ -90,6 +101,16 @@ async function main() {
             rpcDisagreed: report.rpcDisagreed,
           }),
         );
+      }
+      // Files no row names, past their grace period (#158): at most once an hour.
+      if (Date.now() - lastSweep >= SWEEP_EVERY_MS) {
+        lastSweep = Date.now();
+        try {
+          const swept = await sweepOrphanFiles({ prisma, dir: storageDir });
+          if (swept.removed > 0) console.log(JSON.stringify({ level: 'info', message: 'orphan files removed', removed: swept.removed }));
+        } catch (error) {
+          console.error(JSON.stringify({ level: 'error', message: 'orphan sweep failed; tried again in an hour', error: error instanceof Error ? error.name : typeof error }));
+        }
       }
       if (once) break;
       for (let waited = 0; waited < intervalMs && !stopping; waited += 250) await new Promise((r) => setTimeout(r, 250));

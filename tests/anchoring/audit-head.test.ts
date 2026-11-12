@@ -29,7 +29,7 @@ import { watchRegistry } from '@/lib/anchoring/registry-watch';
 import type { AnchorTarget } from '@/lib/anchoring/target';
 import { runWorkerPass } from '@/lib/anchoring/worker';
 import { appendAuditEvent } from '@/lib/audit';
-import { checkAuditChain, NO_WITNESS } from '@/lib/audit-check';
+import { checkAllAuditChains, checkAuditChain, NO_WITNESS } from '@/lib/audit-check';
 import { deployRegistry, orgIdFor } from '@/lib/chain/deploy';
 import type { Deployment } from '@/lib/chain/deployment';
 import { registryAbi } from '@/lib/chain/registry-artifact';
@@ -152,7 +152,7 @@ describe('the audit log’s head on chain (#94)', () => {
     // Two mode changes, three events, the head's three: nothing new since the head.
     expect(await checkAuditChain(prisma, orgId, witness())).toMatchObject({ ok: true, count: 8, chainHeads: 1, queued: null });
     // The watch finds the write in the journal.
-    expect(await watchRegistry({ prisma, publicClient, deployment, firm: { orgId, onChainOrgId: orgIdFor(FIRM) }, fromBlock: BigInt(deployment.deployBlock) })).toMatchObject({ seen: 1, found: [] });
+    expect(await watchRegistry({ prisma, clients: [publicClient, publicClient], deployment, firm: { orgId, onChainOrgId: orgIdFor(FIRM) }, fromBlock: BigInt(deployment.deployBlock) })).toMatchObject({ seen: 1, found: [] });
 
     // Whoever owns the database rewrites event 2 and re-hashes all after it,
     // and rewrites the checks to match: the database alone now vouches for it.
@@ -169,7 +169,7 @@ describe('the audit log’s head on chain (#94)', () => {
     const forged = await sendAs(issuer, { functionName: 'recordAuditHead', args: [h('a head no log of the firm holds')] });
     await mine();
     expect(await checkAuditChain(prisma, orgId, witness())).toEqual({ ok: false, seq: null, reason: 'ANCHORED_HEAD_MISSING', missing: [0] });
-    const report = await watchRegistry({ prisma, publicClient, deployment, firm: { orgId, onChainOrgId: orgIdFor(FIRM) }, fromBlock: BigInt(deployment.deployBlock) });
+    const report = await watchRegistry({ prisma, clients: [publicClient, publicClient], deployment, firm: { orgId, onChainOrgId: orgIdFor(FIRM) }, fromBlock: BigInt(deployment.deployBlock) });
     expect(report.found).toEqual([expect.objectContaining({ kind: 'AUDIT_HEAD', recordId: h('a head no log of the firm holds'), txHash: forged, issuer: issuer.address })]);
 
     // An issuer key cannot void it; the owner can.
@@ -178,6 +178,39 @@ describe('the audit log’s head on chain (#94)', () => {
     await mine();
     // Two mode changes, two events, and the watch's finding.
     expect(await checkAuditChain(prisma, orgId, witness())).toMatchObject({ ok: true, count: 5, chainHeads: 0 });
+  });
+
+  it('holds a log only to the heads of its key’s firm, and queues heads only for that firm (#141)', async () => {
+    await append(2);
+    // The database calls the firm otherwise than the key was registered under: its heads would be read under a name nobody files any under.
+    await prisma.issuerOrg.update({ where: { id: orgId }, data: { name: 'Example Audit Ltd' } });
+    expect(await checkAllAuditChains(prisma, witness(), clock)).toEqual([{ orgId, chainBound: true, outcome: { ok: false, seq: null, reason: 'FIRM_MISMATCH' } }]);
+    expect(await prisma.chainWrite.count({ where: { kind: 'AUDIT_HEAD' } })).toBe(0);
+
+    // Named as registered, plus a second firm in the database: only the key's firm has heads queued and is held to them.
+    await prisma.issuerOrg.update({ where: { id: orgId }, data: { name: FIRM } });
+    const other = await prisma.issuerOrg.create({ data: { name: 'Another Firm' } });
+    await prisma.$transaction((tx) => appendAuditEvent(tx, { orgId: other.id, actorId: null, action: 'engagement.created', subjectType: 'Engagement', subjectId: 'theirs', data: {} }));
+    const results = await checkAllAuditChains(prisma, witness(), clock);
+    expect(results).toEqual([
+      { orgId, chainBound: true, outcome: expect.objectContaining({ ok: true, queued: expect.any(String) }) },
+      { orgId: other.id, chainBound: false, outcome: expect.objectContaining({ ok: true, chainHeads: 0, queued: null }) },
+    ]);
+    expect(await prisma.chainWrite.findMany({ where: { kind: 'AUDIT_HEAD' }, select: { orgId: true } })).toEqual([{ orgId }]);
+
+    // Written by the key, its head holds the firm's log and no other.
+    await pass();
+    await mine();
+    await pass();
+    await mine();
+    expect((await checkAllAuditChains(prisma, witness(), clock)).map((r) => [r.orgId, r.outcome.ok, r.outcome.ok && r.outcome.chainHeads])).toEqual([
+      [orgId, true, 1],
+      [other.id, true, 0],
+    ]);
+
+    // Two firms by the key's name cannot be told apart: refused, by name.
+    await prisma.issuerOrg.update({ where: { id: other.id }, data: { name: FIRM } });
+    await expect(checkAllAuditChains(prisma, witness(), clock)).rejects.toMatchObject({ code: 'FIRM_AMBIGUOUS' });
   });
 
   it('fails closed when the two endpoints disagree about the heads', async () => {

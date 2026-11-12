@@ -77,7 +77,8 @@
     "auditBroken": "The audit log failed its nightly check at event #{seq}. Its history may have been changed: find out why before relying on it.",
     "auditBrokenNoEvent": "The audit log failed its nightly check: {reason}. Find out why before relying on it.",
     "unjournaled": "{count, plural, one {# write} other {# writes}} on chain by the firm’s issuer keys that the console did not make.",
-    "rpcDisagree": "The worker's two RPC endpoints have disagreed about the chain since {since} UTC. Anchors and revocations they disagree about wait until they agree: find out which endpoint is wrong (docs/runbooks/rpc-outage.md)."
+    "rpcDisagree": "The worker's two RPC endpoints have disagreed about the chain since {since} UTC. Anchors and revocations they disagree about wait until they agree: find out which endpoint is wrong (docs/runbooks/rpc-outage.md).",
+    "team": "Team"
   },
   "login": {
     "title": "Sign in",
@@ -112,7 +113,8 @@
       "ANCHORED": "Anchored",
       "COMPLETE": "Complete",
       "REVOKED": "Revoked"
-    }
+    },
+    "truncated": "Only the {cap} newest engagements are listed. Find an older one through its client."
   },
   "engagement": {
     "newTitle": "New engagement",
@@ -186,7 +188,13 @@
     "COPY_IN_FLIGHT": "The stamped copy is still on its way to the chain. Approve the revocation once it is final.",
     "ALREADY_REVIEWED": "This write has already been marked as reviewed.",
     "RECIPIENT_EXISTS": "This address is already a recipient of this engagement.",
-    "RECIPIENT_LIMIT": "This engagement already has 50 recipients. Remove one to add another."
+    "RECIPIENT_LIMIT": "This engagement already has 50 recipients. Remove one to add another.",
+    "CONFLICT": "This cannot be saved. If it keeps happening, tell an admin.",
+    "MFA_REQUIRED": "Set up two-step sign-in first: your role needs it before it can do anything else.",
+    "RATE_LIMITED": "Too many changes in a minute. Wait a moment and try again.",
+    "ALREADY_ENABLED": "Two-step sign-in is already set up.",
+    "NO_SETUP_IN_PROGRESS": "Start setting up two-step sign-in again.",
+    "CODE_INVALID": "The code is wrong or has expired. Enter the current code from your authenticator app."
   },
   "viewer": {
     "failed": "The PDF could not be shown.",
@@ -427,7 +435,8 @@
       "DEPLOYMENT_UNAVAILABLE": "The registry's deployment record is missing or does not match this build.",
       "RPC_URLS_MISSING": "VERIFY_RPC_URL_1 and VERIFY_RPC_URL_2 must both be set.",
       "RPC_URLS_INVALID": "The verifier's RPC endpoints must be https URLs without credentials.",
-      "RPC_URLS_NOT_INDEPENDENT": "The verifier's two RPC endpoints must be on different hosts."
+      "RPC_URLS_NOT_INDEPENDENT": "The verifier's two RPC endpoints must be on different hosts.",
+      "SEAL_ROOTS_INVALID": "SEAL_TRUST_ANCHORS is set, but its file cannot be read or holds no valid certificate."
     },
     "verdict": {
       "AUTHENTIC_LATEST": {
@@ -437,6 +446,10 @@
       "AUTHENTIC_SUPERSEDED": {
         "title": "Authentic, superseded",
         "body": "This file is byte for byte the file the issuer anchored, but the issuer has since anchored version {latest} of this report. Rely on the latest version."
+      },
+      "AUTHENTIC_AS_OF_CHECKPOINT": {
+        "title": "Authentic, as of the checkpoint",
+        "body": "This file is byte for byte the file the issuer anchored, and it was the latest version when the registry was checkpointed, at the block named below. A newer version or a withdrawal since then would show only in the registry, which could not be read now."
       },
       "REVOKED": {
         "title": "Revoked",
@@ -826,7 +839,8 @@
       "TRUNCATED": "events that an earlier check saw are gone",
       "REWRITTEN": "an event that an earlier check saw has been replaced",
       "ANCHORED_HEAD_MISSING": "a head of this log written on chain is no longer in it: the log was rewritten or cut since",
-      "CHAIN_UNREADABLE": "the chain could not be read, so the log could not be held to its heads there"
+      "CHAIN_UNREADABLE": "the chain could not be read, so the log could not be held to its heads there",
+      "FIRM_MISMATCH": "the issuer key that writes this log’s heads is registered to another firm on chain, so its heads are not this log’s: the firm’s name in the database must be the one in the deployment record"
     },
     "events": "Events, newest first",
     "empty": "No events yet",
@@ -837,6 +851,7 @@
       "subject": "Subject"
     },
     "worker": "Automatic (worker, mailer or watch)",
+    "named": "{email}, named at the command line, not signed in",
     "details": "Details",
     "hash": "Hash: {hash}",
     "older": "Older events",
@@ -893,5 +908,35 @@
       "FAILED": "Withdrawal of version {version}: could not be sent",
       "CANCELLED": "Withdrawal of version {version}: cancelled"
     }
+  },
+  "team": {
+    "title": "Team",
+    "intro": "The firm’s people. Resetting a second factor or disabling someone ends every session they hold at once; each act is in the audit log. You cannot do either to yourself: another admin must.",
+    "adminOnly": "Only an admin can manage the firm’s people.",
+    "you": "You",
+    "disabled": "Disabled",
+    "columns": {
+      "person": "Person",
+      "role": "Role",
+      "mfa": "Two-step sign-in",
+      "actions": "Actions"
+    },
+    "mfa": {
+      "NOT_REQUIRED": "Not needed for this role",
+      "ENABLED": "Set up",
+      "NOT_SET_UP": "Not set up yet"
+    },
+    "reset": "Reset two-step sign-in",
+    "disable": "Disable",
+    "enable": "Enable",
+    "resetTitle": "Reset {name}’s two-step sign-in?",
+    "resetBody": "Their authenticator and recovery codes stop working, and every session they hold ends. They set up two-step sign-in again the next time they sign in with their password. Do this only once you know it is them who lost access.",
+    "resetConfirm": "Reset",
+    "disableTitle": "Disable {name}?",
+    "disableBody": "Every session they hold ends now, and they cannot sign in until an admin enables them again.",
+    "disableConfirm": "Disable",
+    "enableTitle": "Enable {name}?",
+    "enableBody": "They can sign in again with their password (and their second factor, if their role needs one).",
+    "enableConfirm": "Enable"
   }
 }

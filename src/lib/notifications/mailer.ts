@@ -11,6 +11,14 @@ import { EMAIL_LOCALES, revokedEmail, supersededEmail, type EmailLocale } from '
  *
  * Each message is built here, from the database, when it is sent: names, the
  * version and the links, never the report, the opinion or a figure.
+ *
+ * A failed send waits before it is tried again (#148), the wait doubling from
+ * a minute up to four hours. A server that turns the address away for good (a
+ * 5xx reply) is given MAX_PERMANENT_ATTEMPTS, a quarter of an hour in all; one
+ * that cannot be reached, answers "try later" (4xx), or refuses the firm's own
+ * sign-in is given MAX_TRANSIENT_ATTEMPTS, about three days, since that is
+ * the firm's outage and not the recipient's address. Either way a FAILED
+ * notice is for a person.
  */
 
 export interface MailMessage {
@@ -29,7 +37,7 @@ export interface MailerDeps {
   /** The app's public origin: links point at <appUrl>/r/<familyId>/latest and <appUrl>/verify. */
   appUrl: string;
   now?: () => Date;
-  /** After this many failed attempts a notice is FAILED, for a person to look at. */
+  /** After this many failed attempts, the last a permanent rejection, a notice is FAILED, for a person to look at. */
   maxAttempts?: number;
   leaseMs?: number;
 }
@@ -41,13 +49,38 @@ export interface MailerReport {
   cancelled: string[];
 }
 
+/** Attempts at a notice the server rejects for good: about a quarter of an hour, by the waits below. */
+export const MAX_PERMANENT_ATTEMPTS = 5;
+/** Attempts at a notice while the server cannot be reached or asks to try later: about three days. */
+export const MAX_TRANSIENT_ATTEMPTS = 24;
+const FIRST_WAIT_MS = 60_000;
+const LONGEST_WAIT_MS = 4 * 3_600_000;
+
+/** How long a notice waits after its `attempts`th failure: doubling from a minute, at most four hours. */
+export function retryWaitMs(attempts: number): number {
+  return Math.min(FIRST_WAIT_MS * 2 ** Math.max(0, Math.min(attempts - 1, 30)), LONGEST_WAIT_MS);
+}
+
+/**
+ * Whether the server turned the message away for good: a 5xx reply
+ * (nodemailer's `responseCode`), unless it refused the firm's own sign-in,
+ * which no number of attempts at this address will change. Anything without
+ * a reply (a connection refused, a timeout, a TLS failure) is not.
+ */
+export function isPermanentRejection(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const { code, responseCode } = error as { code?: unknown; responseCode?: unknown };
+  if (code === 'EAUTH' || code === 'ENOAUTH') return false;
+  return typeof responseCode === 'number' && responseCode >= 500 && responseCode < 600;
+}
+
 /** A name for an error, never its message: an SMTP reply can echo addresses and content. */
 const errorName = (error: unknown) =>
   error instanceof Error ? (('code' in error && typeof error.code === 'string' && error.code) || error.name) : typeof error;
 
 export async function deliverNotifications(deps: MailerDeps): Promise<MailerReport> {
   const now = deps.now ?? (() => new Date());
-  const maxAttempts = deps.maxAttempts ?? 5;
+  const maxAttempts = deps.maxAttempts ?? MAX_PERMANENT_ATTEMPTS;
   const leaseMs = deps.leaseMs ?? 60_000;
   const appUrl = deps.appUrl.replace(/\/+$/, '');
   const report: MailerReport = { sent: [], retrying: [], failed: [], cancelled: [] };
@@ -120,9 +153,11 @@ export async function deliverNotifications(deps: MailerDeps): Promise<MailerRepo
       await deps.transport.send({ to: recipient.email, subject, text });
     } catch (error) {
       const reason = errorName(error);
-      const final = row.attempts >= maxAttempts;
+      const final = row.attempts >= (isPermanentRejection(error) ? maxAttempts : Math.max(maxAttempts, MAX_TRANSIENT_ATTEMPTS));
+      // Not tried again before the wait is over: the claim takes only a lease that has run out.
+      const retryAt = new Date(now().getTime() + retryWaitMs(row.attempts));
       await deps.prisma.$transaction(async (tx) => {
-        await tx.notification.updateMany({ where: { id: notice.id, status: 'PENDING' }, data: { status: final ? 'FAILED' : 'PENDING', lastError: reason, leaseUntil: null } });
+        await tx.notification.updateMany({ where: { id: notice.id, status: 'PENDING' }, data: { status: final ? 'FAILED' : 'PENDING', lastError: reason, leaseUntil: final ? null : retryAt } });
         if (final) {
           await appendAuditEvent(tx, { orgId: org.id, actorId: null, action: 'notification.failed', subjectType: 'Notification', subjectId: notice.id, data: { recipientId: recipient.id, reportVersionId: version.id, reason, attempts: row.attempts } }, now());
         }
@@ -131,9 +166,18 @@ export async function deliverNotifications(deps: MailerDeps): Promise<MailerRepo
       continue;
     }
 
+    // It went out: recorded as sent whatever happened meanwhile (#158). A recipient
+    // removed during the send cancelled a notice that was delivered all the same.
     await deps.prisma.$transaction(async (tx) => {
-      await tx.notification.updateMany({ where: { id: notice.id, status: 'PENDING' }, data: { status: 'SENT', sentAt: now(), lastError: null, leaseUntil: null } });
-      await appendAuditEvent(tx, { orgId: org.id, actorId: null, action: 'notification.sent', subjectType: 'Notification', subjectId: notice.id, data: { recipientId: recipient.id, reportVersionId: version.id } }, now());
+      const sentAt = now();
+      const sent = { status: 'SENT' as const, sentAt, lastError: null, leaseUntil: null };
+      const { count } = await tx.notification.updateMany({ where: { id: notice.id, status: 'PENDING' }, data: sent });
+      const cancelledMeanwhile = count === 0 && (await tx.notification.updateMany({ where: { id: notice.id, status: 'CANCELLED' }, data: sent })).count === 1;
+      await appendAuditEvent(
+        tx,
+        { orgId: org.id, actorId: null, action: 'notification.sent', subjectType: 'Notification', subjectId: notice.id, data: { recipientId: recipient.id, reportVersionId: version.id, ...(cancelledMeanwhile ? { cancelledMeanwhile: true } : {}) } },
+        sentAt,
+      );
     });
     report.sent.push(notice.id);
   }

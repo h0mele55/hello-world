@@ -1,9 +1,10 @@
 import fs from 'node:fs';
+import http from 'node:http';
 import path from 'node:path';
 import { p256 } from '@noble/curves/nist';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { cscSigner, ecdsaDer, type CscConfig } from '@/lib/eseal/csc';
-import { providerUrl } from '@/lib/eseal/http';
+import { cscSigner, ecdsaDer, providerEcdsaDer, type CscConfig } from '@/lib/eseal/csc';
+import { post, providerUrl } from '@/lib/eseal/http';
 import { checkSeal, sealPdf } from '@/lib/eseal/pades';
 import { rfc3161Timestamper } from '@/lib/eseal/tsa';
 import { SealError, type SealSigner, type Timestamper } from '@/lib/eseal/types';
@@ -88,6 +89,23 @@ describe('sealing through a CSC v2 service and an RFC 3161 authority', () => {
     expect(Buffer.from(ecdsaDer(signature.toCompactRawBytes())).equals(Buffer.from(signature.toDERRawBytes()))).toBe(true);
   });
 
+  it('reads r ‖ s as r ‖ s even when r begins with 0x30, the first byte of DER (#181)', () => {
+    const key = p256.utils.randomPrivateKey();
+    const digest = (i: number) => new Uint8Array(32).map((_, j) => (j < 4 ? (i >>> (8 * j)) & 0xff : 7));
+    let thirties = 0;
+    for (let i = 0; i < 20_000 && thirties < 5; i++) {
+      const signature = p256.sign(digest(i), key);
+      const der = signature.toDERRawBytes();
+      // Either encoding comes out as the one DER.
+      expect(Buffer.from(providerEcdsaDer(der)).equals(Buffer.from(der))).toBe(true);
+      expect(Buffer.from(providerEcdsaDer(signature.toCompactRawBytes())).equals(Buffer.from(der)), `signature ${i}`).toBe(true);
+      if (signature.toCompactRawBytes()[0] === 0x30) thirties += 1;
+    }
+    expect(thirties).toBe(5);
+    // Neither DER nor an even-length r ‖ s: refused, never passed on.
+    expect(() => providerEcdsaDer(new Uint8Array([0x30, 0x03, 0x02, 0x01, 0x01]))).toThrow(SealError);
+  });
+
   it('gives an explicit credential its PIN, and refuses to wait on a person', async () => {
     provider.behaviour = { authMode: 'explicit', pin: '246810' };
     await checkSeal(await seal(csc(provider, { pin: '246810' }), tsa(provider)), [rsa.rootDer], stamped);
@@ -124,6 +142,19 @@ describe('sealing through a CSC v2 service and an RFC 3161 authority', () => {
       expect(await codeOf(seal(csc(provider), tsa(provider)))).toBe(code);
     }
     provider.behaviour = { authMode: 'implicit' };
+  });
+
+  it('refuses, for a person, a provider that redirects, rather than waits on it for ever (#144)', async () => {
+    const server = http.createServer((_, res) => res.writeHead(302, { location: 'https://elsewhere.example/tsa' }).end());
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const url = new URL(`http://127.0.0.1:${(server.address() as { port: number }).port}/tsa`);
+    try {
+      for (const side of ['SIGNER', 'TIMESTAMP', 'REVOCATION'] as const) {
+        expect(await codeOf(post({ url, headers: {}, side, timeoutMs: 5_000, maxBytes: 1_000, fetch }))).toBe(`${side}_REFUSED`);
+      }
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
   });
 
   it('asks the authority for a policy, and holds the token to it', async () => {

@@ -84,8 +84,9 @@ describe('the nightly audit-chain check', () => {
     expect(results).toHaveLength(2);
     expect(results).toEqual(
       expect.arrayContaining([
-        { orgId, outcome: expect.objectContaining({ ok: true, count: 5 }) },
-        { orgId: other, outcome: expect.objectContaining({ ok: true, count: 0 }) },
+        // No witness: held to no chain.
+        { orgId, chainBound: false, outcome: expect.objectContaining({ ok: true, count: 5 }) },
+        { orgId: other, chainBound: false, outcome: expect.objectContaining({ ok: true, count: 0 }) },
       ]),
     );
   });

@@ -6,6 +6,7 @@ import type { Deployment } from '@/lib/chain/deployment';
 import { createRegistryReader } from '@/lib/chain/reader';
 import type { RegistryRecord } from '@/lib/chain/records';
 import { registryAbi } from '@/lib/chain/registry-artifact';
+import { REVOCATION_CODES } from '@/lib/revocation-reasons';
 
 /**
  * The firm's database held to the chain (#111): every version's state
@@ -38,6 +39,12 @@ export type Difference =
   | { code: 'REVOKED_ON_CHAIN'; versionId: string; reasonCode: number; effectiveAt: number }
   /** On chain a revocation waits out the registry's delay; the database holds none scheduled. */
   | { code: 'REVOCATION_PENDING_ON_CHAIN'; versionId: string; reasonCode: number; effectiveAt: number }
+  /**
+   * The database holds a scheduled revocation, and the chain a pending one with
+   * another reason or time (#141): the owner cancelled the firm's and someone,
+   * a stolen key perhaps, asked again.
+   */
+  | { code: 'REVOCATION_DIFFERS'; versionId: string; revocationId: string; fields: ('reason' | 'effectiveAt')[]; reasonCode: number; effectiveAt: number }
   /** The database holds a scheduled revocation the chain no longer has: the owner cancelled it. */
   | { code: 'SCHEDULED_NOT_ON_CHAIN'; versionId: string; revocationId: string }
   /** A record written by one of the firm's issuer keys that no version accounts for: lost with the database. */
@@ -90,7 +97,7 @@ export async function reconcileWithChain(deps: ReconcileDeps): Promise<Reconcile
       copyDocHash: true,
       copyRecordId: true,
       engagement: { select: { familyId: true } },
-      revocations: { where: { status: 'SCHEDULED' }, select: { id: true } },
+      revocations: { where: { status: 'SCHEDULED' }, select: { id: true, reason: true, effectiveAt: true } },
     },
     orderBy: { createdAt: 'asc' },
   });
@@ -127,6 +134,16 @@ export async function reconcileWithChain(deps: ReconcileDeps): Promise<Reconcile
         differences.push({ code: 'REVOCATION_PENDING_ON_CHAIN', versionId: v.id, reasonCode: original.revokeReason, effectiveAt: original.revokeEffectiveAt });
       }
       if (!pending && !original.revoked) for (const r of v.revocations) differences.push({ code: 'SCHEDULED_NOT_ON_CHAIN', versionId: v.id, revocationId: r.id });
+      if (pending) {
+        for (const r of v.revocations) {
+          const fields: ('reason' | 'effectiveAt')[] = [];
+          if (REVOCATION_CODES[r.reason] !== original.revokeReason) fields.push('reason');
+          if (r.effectiveAt === null || Math.floor(r.effectiveAt.getTime() / 1000) !== original.revokeEffectiveAt) fields.push('effectiveAt');
+          if (fields.length) {
+            differences.push({ code: 'REVOCATION_DIFFERS', versionId: v.id, revocationId: r.id, fields, reasonCode: original.revokeReason, effectiveAt: original.revokeEffectiveAt });
+          }
+        }
+      }
     } else if (v.status === 'REVOKED') {
       differences.push({ code: 'REVOKED_NOT_ON_CHAIN', versionId: v.id });
     }

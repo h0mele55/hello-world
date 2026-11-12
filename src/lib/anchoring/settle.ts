@@ -5,6 +5,7 @@ import { appendAuditEvent } from '@/lib/audit';
 import type { Deployment } from '@/lib/chain/deployment';
 import { anyKnown, firstReceipt, hashesOfWrite, issuerLockArgs } from './chain-reads';
 import { classifySendError } from './send';
+import { RECORD_MISMATCH_RELEASED } from './worker';
 
 /**
  * The operator's remedy for a write the worker cannot settle (#78): it is
@@ -16,6 +17,11 @@ import { classifySendError } from './send';
  *
  * It never resends the write: only one transaction per nonce can be mined, so
  * whichever lands decides, and the worker reads which.
+ *
+ * The operator is NAMED, not signed in (#140): `--operator` is whatever the
+ * person at the command line typed, so the audit event records it in its data
+ * as `namedOperatorId`, with no actor, and the viewer says so. What
+ * authenticates the act is access to the issuer key or the database.
  */
 
 export type ReleaseRefusal =
@@ -25,7 +31,8 @@ export type ReleaseRefusal =
   | 'NOT_INDETERMINATE'
   | 'TX_ON_CHAIN_OR_KNOWN'
   | 'NONCE_NOT_NEXT'
-  | 'ISSUER_LOCKED';
+  | 'ISSUER_LOCKED'
+  | 'NOT_RECORD_MISMATCH';
 
 export class ReleaseError extends Error {
   constructor(readonly code: ReleaseRefusal | 'SEND_REJECTED' | 'SEND_UNKNOWN', detail?: string) {
@@ -57,8 +64,7 @@ export async function releaseStuckNonce(deps: ReleaseDeps, input: { chainWriteId
     });
     if (!write) throw new ReleaseError('NOT_FOUND');
     const orgId = write.orgId;
-    const operator = await prisma.user.findUnique({ where: { email: input.operatorEmail.toLowerCase() } });
-    if (!operator || operator.role !== 'APPROVER' || operator.orgId !== orgId) throw new ReleaseError('OPERATOR_NOT_APPROVER');
+    const operator = await approverOf(prisma, orgId, input.operatorEmail);
     if (write.chainId !== deployment.chainId || getAddress(write.registry) !== getAddress(deployment.address) || getAddress(write.issuer) !== account.address) {
       throw new ReleaseError('WRONG_ISSUER', 'the write belongs to another chain, registry or issuer key');
     }
@@ -93,11 +99,12 @@ export async function releaseStuckNonce(deps: ReleaseDeps, input: { chainWriteId
     await prisma.$transaction((tx) =>
       appendAuditEvent(tx, {
         orgId,
-        actorId: operator.id,
-        action: 'anchor.nonce_released',
+        actorId: null,
+        // An audit-log head's events are never anchor.* (#140).
+        action: write.kind === 'AUDIT_HEAD' ? 'audit_head.nonce_released' : 'anchor.nonce_released',
         subjectType: 'ChainWrite',
         subjectId: write.id,
-        data: { reportVersionId: write.reportVersionId, nonce: write.nonce, txHash, stuckTxHashes: hashes },
+        data: { reportVersionId: write.reportVersionId, kind: write.kind, nonce: write.nonce, txHash, stuckTxHashes: hashes, namedOperatorId: operator.id },
       }),
     );
     try {
@@ -111,4 +118,45 @@ export async function releaseStuckNonce(deps: ReleaseDeps, input: { chainWriteId
   } finally {
     await deps.lockClient.query('SELECT pg_advisory_unlock($1::int, hashtext($2))', lockArgs);
   }
+}
+
+async function approverOf(prisma: PrismaClient, orgId: string, email: string) {
+  const operator = await prisma.user.findUnique({ where: { email: email.toLowerCase() } });
+  if (!operator || operator.role !== 'APPROVER' || operator.orgId !== orgId) throw new ReleaseError('OPERATOR_NOT_APPROVER');
+  return operator;
+}
+
+/**
+ * The exit from a RECORD_MISMATCH hold (#140): a write whose transaction is
+ * final but whose record is not what it should have written. The worker holds
+ * it INDETERMINATE, which holds the issuer key, because what to make of it is
+ * a person's call. An approver who has looked at it (docs/runbooks/stuck-writes.md)
+ * releases it here. This touches no chain: it marks the row released, in one
+ * transaction with its audit event, and the worker then reads the receipt and
+ * the record again on both endpoints at an agreed finalized block. If they
+ * still do not match, the write is FAILED with RECORD_MISMATCH_RESOLVED,
+ * keeping its nonce and hash (its transaction used them), and the key is
+ * free; an anchor or revocation returns to approval, as any failed write's.
+ */
+export async function releaseRecordMismatch(prisma: PrismaClient, input: { chainWriteId: string; operatorEmail: string }): Promise<{ chainWriteId: string }> {
+  const write = await prisma.chainWrite.findUnique({ where: { id: input.chainWriteId } });
+  if (!write) throw new ReleaseError('NOT_FOUND');
+  const operator = await approverOf(prisma, write.orgId, input.operatorEmail);
+  if (write.status !== 'INDETERMINATE' || write.error !== 'RECORD_MISMATCH') throw new ReleaseError('NOT_RECORD_MISMATCH');
+  await prisma.$transaction(async (tx) => {
+    const { count } = await tx.chainWrite.updateMany({
+      where: { id: write.id, status: 'INDETERMINATE', error: 'RECORD_MISMATCH' },
+      data: { error: RECORD_MISMATCH_RELEASED },
+    });
+    if (count !== 1) throw new ReleaseError('NOT_RECORD_MISMATCH', 'the write changed meanwhile; look again');
+    await appendAuditEvent(tx, {
+      orgId: write.orgId,
+      actorId: null,
+      action: write.kind === 'AUDIT_HEAD' ? 'audit_head.mismatch_released' : 'anchor.mismatch_released',
+      subjectType: 'ChainWrite',
+      subjectId: write.id,
+      data: { reportVersionId: write.reportVersionId, kind: write.kind, nonce: write.nonce, txHash: write.txHash, namedOperatorId: operator.id },
+    });
+  });
+  return { chainWriteId: write.id };
 }

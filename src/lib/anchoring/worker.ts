@@ -482,6 +482,8 @@ function headAction(action: AuditAction): AuditAction {
   if (!(AUDIT_HEAD_ACTIONS as readonly string[]).includes(named)) throw new ChainError('ACTION_UNKNOWN', `no audit-head action for ${action}`);
   return named as AuditAction;
 }
+/** The error a person's release of a RECORD_MISMATCH row leaves for the worker to act on (#140). */
+export const RECORD_MISMATCH_RELEASED = 'RECORD_MISMATCH_RELEASED';
 const AUDIT_HEAD_ACTIONS = ['audit_head.simulated', 'audit_head.broadcast', 'audit_head.replaced', 'audit_head.indeterminate', 'audit_head.final', 'audit_head.failed'] as const;
 
 /** What a version write's transition does to its version, in the same transaction. */
@@ -713,8 +715,11 @@ async function startCopy(ctx: Context, write: Write): Promise<StepReport> {
   if (await issuerBlocked(ctx)) return release(ctx, write, { error: 'ISSUER_BLOCKED' }, 'waiting: an INDETERMINATE write must be settled first');
 
   let copyDocHash = version.copyDocHash;
-  if (!copyDocHash) {
-    const stamped = await stampCopy(ctx, write);
+  // A copy stored unsealed, before sealing was turned on, is made again sealed
+  // unless it is already on chain (#140): while sealing is on, no copy is anchored unsealed.
+  const unsealed = copyDocHash !== null && ctx.seal !== null && version.copySealedAt === null && !(await ctx.reader.findByDocHash(copyDocHash as Hex));
+  if (!copyDocHash || unsealed) {
+    const stamped = await stampCopy(ctx, write, unsealed ? copyDocHash : null);
     if (!stamped.ok && stamped.wait) return release(ctx, write, { error: stamped.reason }, 'waiting: the seal provider did not answer; tried again on the next pass');
     if (!stamped.ok) return fail(ctx, write, `STAMP_${stamped.reason}`);
     copyDocHash = stamped.docHash;
@@ -878,7 +883,7 @@ async function originalRecordOk(ctx: Context, version: { recordId: string | null
  * check passes. A seal provider that does not answer leaves the copy to wait
  * (`wait`); one that refuses fails it, for a person.
  */
-async function stampCopy(ctx: Context, write: Write): Promise<{ ok: true; docHash: string } | { ok: false; reason: string; wait?: true }> {
+async function stampCopy(ctx: Context, write: Write, replacing: string | null = null): Promise<{ ok: true; docHash: string } | { ok: false; reason: string; wait?: true }> {
   const version = write.reportVersion;
   if (!(await originalRecordOk(ctx, version))) return { ok: false, reason: 'ORIGINAL_RECORD_MISMATCH' };
   if (!version.anchorTxHash) return { ok: false, reason: 'ORIGINAL_TX_UNKNOWN' };
@@ -932,7 +937,8 @@ async function stampCopy(ctx: Context, write: Write): Promise<{ ok: true; docHas
     await ctx.prisma.$transaction(async (tx) => {
       const file = await tx.storedFile.create({ data: stored, select: { id: true } });
       const { count } = await tx.reportVersion.updateMany({
-        where: { id: version.id, status: 'ANCHORED', copyDocHash: null },
+        // Replacing only the unsealed copy that was read, never one stored meanwhile.
+        where: replacing ? { id: version.id, status: 'ANCHORED', copyDocHash: replacing, copySealedAt: null } : { id: version.id, status: 'ANCHORED', copyDocHash: null },
         data: { copyDocHash: docHash, copyStoredFileId: file.id, copySealedAt: seal?.sealedAt ?? null },
       });
       if (count !== 1) throw new ChainError('VERSION_NOT_ANCHORED', `version ${version.id} already has a copy or is not ANCHORED`);
@@ -944,7 +950,14 @@ async function stampCopy(ctx: Context, write: Write): Promise<{ ok: true; docHas
           action: 'version.stamped',
           subjectType: 'ReportVersion',
           subjectId: version.id,
-          data: { chainWriteId: write.id, recordId: fields.recordId, copyDocHash: docHash, sealed: seal !== null, timestampSerial: seal?.timestampSerial ?? null },
+          data: {
+            chainWriteId: write.id,
+            recordId: fields.recordId,
+            copyDocHash: docHash,
+            sealed: seal !== null,
+            timestampSerial: seal?.timestampSerial ?? null,
+            ...(replacing ? { replacedUnsealedCopy: replacing } : {}),
+          },
         },
         ctx.now(),
       );
@@ -1301,12 +1314,22 @@ async function startAuditHead(ctx: Context, write: Row): Promise<StepReport> {
   return signAndSend(ctx, write);
 }
 
+/**
+ * What a final, successful transaction whose record does not match its write
+ * comes to: held INDETERMINATE for a person (RECORD_MISMATCH), or, once a
+ * person released it (#140), FAILED with its nonce kept.
+ */
+type OnMismatch = 'HOLD' | 'FAIL';
+const mismatch = (ctx: Context, write: Row, onMismatch: OnMismatch, settled: { txHash: Hash; replacedTxHashes: string[]; blockNumber: bigint }) =>
+  onMismatch === 'HOLD' ? indeterminate(ctx, write, 'RECORD_MISMATCH', settled) : fail(ctx, write, 'RECORD_MISMATCH_RESOLVED', settled);
+
 /** Final once its own transaction's event, as both endpoints read it, names this head and this key. */
 function settleAuditHead(
   ctx: Context,
   write: Row,
   receipt: NonNullable<ReturnType<typeof receiptSummary>>,
   settled: { txHash: Hash; replacedTxHashes: string[]; blockNumber: bigint },
+  onMismatch: OnMismatch,
 ): Promise<StepReport> {
   let index: number | null = null;
   for (const log of receipt.logs) {
@@ -1320,7 +1343,7 @@ function settleAuditHead(
       // Not one of the registry's events.
     }
   }
-  if (index === null) return indeterminate(ctx, write, 'RECORD_MISMATCH', settled);
+  if (index === null) return mismatch(ctx, write, onMismatch, settled);
   return transition(ctx, write, 'FINAL', { txHash: settled.txHash, replacedTxHashes: settled.replacedTxHashes, blockNumber: settled.blockNumber, error: null }, {
     audit: { action: 'anchor.final', data: { head: write.auditHead, index, txHash: settled.txHash, blockNumber: Number(settled.blockNumber) } },
   });
@@ -1351,7 +1374,18 @@ async function trackBroadcast(ctx: Context, row: Row): Promise<StepReport> {
     if (pendingFor >= ctx.options.replaceAfterMs) return replace(ctx, write);
     return release(ctx, write, {}, 'pending');
   }
+  return settleLanded(ctx, row, receipt, hashes, 'HOLD');
+}
 
+/** A mined transaction of a write: settled once final and read alike on both endpoints. */
+async function settleLanded(
+  ctx: Context,
+  row: Row,
+  receipt: NonNullable<Awaited<ReturnType<typeof firstReceipt>>>,
+  hashes: Hash[],
+  onMismatch: OnMismatch,
+): Promise<StepReport> {
+  const write = row;
   const landed = receipt.transactionHash;
   const settled = { txHash: landed, replacedTxHashes: hashes.filter((h) => h !== landed), blockNumber: receipt.blockNumber };
 
@@ -1365,8 +1399,8 @@ async function trackBroadcast(ctx: Context, row: Row): Promise<StepReport> {
   // only once final and agreed: a revert in a block later reorged out may be
   // mined again, and succeed.
   if (again.status !== 'success') return fail(ctx, write, 'TX_REVERTED', settled);
-  if (row.kind === 'AUDIT_HEAD') return settleAuditHead(ctx, row, again, settled);
-  return settleVersionWrite(ctx, versionOf(row), again, receipt.blockNumber, finalized, settled);
+  if (row.kind === 'AUDIT_HEAD') return settleAuditHead(ctx, row, again, settled, onMismatch);
+  return settleVersionWrite(ctx, versionOf(row), again, receipt.blockNumber, finalized, settled, onMismatch);
 }
 
 async function settleVersionWrite(
@@ -1376,6 +1410,7 @@ async function settleVersionWrite(
   blockNumber: bigint,
   finalized: bigint,
   settled: { txHash: Hash; replacedTxHashes: string[]; blockNumber: bigint },
+  onMismatch: OnMismatch,
 ): Promise<StepReport> {
   const landed = settled.txHash;
   const receipt = { blockNumber };
@@ -1383,10 +1418,10 @@ async function settleVersionWrite(
   if (write.kind === 'REVOKE') {
     // The request is judged by the transaction's own event: the owner may have cancelled it since.
     const effectiveAt = isRevokeTarget(record, write) ? requestedEffectiveAt(again, ctx, write) : null;
-    if (effectiveAt === null) return indeterminate(ctx, write, 'RECORD_MISMATCH', settled);
+    if (effectiveAt === null) return mismatch(ctx, write, onMismatch, settled);
     return finalize(ctx, write, { txHash: landed, blockNumber: receipt.blockNumber, recordId: write.recordId!, linked: false, revokeEffectiveAt: effectiveAt, data: { replacedTxHashes: settled.replacedTxHashes } });
   }
-  if (!recordMatches(record, write, ctx.issuer, receipt.blockNumber)) return indeterminate(ctx, write, 'RECORD_MISMATCH', settled);
+  if (!recordMatches(record, write, ctx.issuer, receipt.blockNumber)) return mismatch(ctx, write, onMismatch, settled);
   return finalize(ctx, write, { txHash: landed, blockNumber: receipt.blockNumber, recordId: write.recordId!, linked: false, data: { replacedTxHashes: settled.replacedTxHashes } });
 }
 
@@ -1460,6 +1495,14 @@ async function reconcile(ctx: Context, write: Row): Promise<StepReport> {
   if (write.nonce === null || !write.txHash) return release(ctx, write, {}, 'nothing to reconcile');
   // A record that does not match what was sent needs a person, not another loop.
   if (write.error === 'RECORD_MISMATCH') return release(ctx, write, {}, 'held for a person: the record does not match the write');
+  // A person released it (#140): read it again on both endpoints at an agreed
+  // finalized block; a match still settles it, a mismatch fails it, keeping its nonce.
+  if (write.error === RECORD_MISMATCH_RELEASED) {
+    const hashes = hashesOf(write);
+    const receipt = await firstReceipt(ctx.publicClient, hashes);
+    if (!receipt) return release(ctx, write, {}, 'released by a person, but none of its transactions is mined; held');
+    return settleLanded(ctx, write, receipt, hashes, 'FAIL');
+  }
   // Read the finalized nonce before the receipts: a transaction mined in
   // between then shows up as a receipt rather than as someone else's nonce.
   const finalizedNonce = await ctx.publicClient.getTransactionCount({ address: ctx.issuer, blockTag: 'finalized' });

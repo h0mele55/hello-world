@@ -161,7 +161,7 @@ export default async function AuditLogPage({ searchParams }: { searchParams: Pro
                   <tr key={e.seq} data-testid="audit-event" data-seq={e.seq} data-action={e.action}>
                     <td className="tabular-nums">{e.seq}</td>
                     <td className="whitespace-nowrap">{when(e.at)}</td>
-                    <td>{e.actor ?? <span className="text-content-muted">{t('worker')}</span>}</td>
+                    <td>{e.actor ?? <span className="text-content-muted">{e.named ? t('named', { email: e.named }) : t('worker')}</span>}</td>
                     <td>
                       <code className="font-mono text-sm">{e.action}</code>
                       <details className="mt-tight">

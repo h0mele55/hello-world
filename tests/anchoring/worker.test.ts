@@ -30,7 +30,7 @@ import type { SessionUser } from '@/auth';
 import { PrismaClient } from '@/generated/prisma/client';
 import { approveVersion, requeueCopy, setChainWriteMode } from '@/lib/anchoring/approve';
 import { approveRevocation, requestRevocation } from '@/lib/anchoring/revocation';
-import { releaseStuckNonce } from '@/lib/anchoring/settle';
+import { releaseRecordMismatch, releaseStuckNonce } from '@/lib/anchoring/settle';
 import { AnchoringError } from '@/lib/anchoring/errors';
 import type { AnchorTarget } from '@/lib/anchoring/target';
 import { runWorkerPass, type WorkerDeps } from '@/lib/anchoring/worker';
@@ -468,7 +468,9 @@ describe('a worker that dies, and writes whose outcome is unknown', () => {
     const released = await releaseStuckNonce(settleDeps, { chainWriteId: lost, operatorEmail: approver.email });
     expect(released.nonce).toBe(0);
     await publicClient.waitForTransactionReceipt({ hash: released.txHash });
-    expect(await prisma.auditEvent.findFirstOrThrow({ where: { action: 'anchor.nonce_released' } })).toMatchObject({ actorId: approver.id, subjectId: lost });
+    // The approver is named at the command line, not signed in: recorded as named, never as the actor (#140).
+    const releasedEvent = await prisma.auditEvent.findFirstOrThrow({ where: { action: 'anchor.nonce_released' } });
+    expect(releasedEvent).toMatchObject({ actorId: null, subjectId: lost, data: expect.objectContaining({ namedOperatorId: approver.id, kind: 'ANCHOR' }) });
     expect(await refusal(releaseStuckNonce(settleDeps, { chainWriteId: lost, operatorEmail: approver.email }))).toBe('NONCE_NOT_NEXT');
     await mine();
     const settled = await pass();
@@ -479,6 +481,74 @@ describe('a worker that dies, and writes whose outcome is unknown', () => {
     expect(await writeOf(lost)).toMatchObject({ error: 'NONCE_CONSUMED', nonce: null });
     expect(await versionOf(a)).toMatchObject({ status: 'CONFIRMED' });
     expect(await writeOf(next)).toMatchObject({ nonce: 1 });
+  });
+
+  it('holds a write whose record does not match it, and fails it, keeping its nonce, once an approver releases it (#140)', async () => {
+    await goLive();
+    const a = await confirmedVersion((await engagement()).id, 'en-unmodified.pdf');
+    const { chainWriteId: odd } = await approveVersion(approver, a, target);
+    await pass();
+    // The journal names another parent than the transaction carried, as a record written differently from what was meant would.
+    await prisma.chainWrite.update({ where: { id: odd }, data: { parentId: `0x${'ab'.repeat(32)}` } });
+    await mine();
+    await pass();
+    const held = await writeOf(odd);
+    expect(held).toMatchObject({ status: 'INDETERMINATE', error: 'RECORD_MISMATCH', nonce: 0 });
+
+    // Held for a person on every pass, and the key with it.
+    expect((await pass()).steps).toEqual([expect.objectContaining({ writeId: odd, to: 'INDETERMINATE', note: 'held for a person: the record does not match the write' })]);
+    const b = await confirmedVersion((await engagement()).id, 'en-qualified.pdf');
+    const { chainWriteId: next } = await approveVersion(approver, b, target);
+    await pass();
+    expect(await writeOf(next)).toMatchObject({ status: 'INTENT', error: 'ISSUER_BLOCKED' });
+
+    // Only an approver of the firm releases it, and only a held mismatch; the release touches no chain.
+    const refusal = (promise: Promise<unknown>) => promise.then(() => null, (e: { code?: string }) => e.code);
+    expect(await refusal(releaseRecordMismatch(prisma, { chainWriteId: odd, operatorEmail: preparer.email }))).toBe('OPERATOR_NOT_APPROVER');
+    expect(await refusal(releaseRecordMismatch(prisma, { chainWriteId: next, operatorEmail: approver.email }))).toBe('NOT_RECORD_MISMATCH');
+    expect(await refusal(releaseRecordMismatch(prisma, { chainWriteId: 'nothing', operatorEmail: approver.email }))).toBe('NOT_FOUND');
+    const nonceBefore = await nonceOf('pending');
+    await releaseRecordMismatch(prisma, { chainWriteId: odd, operatorEmail: approver.email });
+    expect(await refusal(releaseRecordMismatch(prisma, { chainWriteId: odd, operatorEmail: approver.email }))).toBe('NOT_RECORD_MISMATCH');
+    expect(await nonceOf('pending')).toBe(nonceBefore);
+    expect(await prisma.auditEvent.findFirstOrThrow({ where: { action: 'anchor.mismatch_released' } })).toMatchObject({
+      actorId: null,
+      subjectId: odd,
+      data: expect.objectContaining({ namedOperatorId: approver.id, txHash: held.txHash, nonce: 0 }),
+    });
+
+    // Read again on both endpoints, it still does not match: FAILED, keeping the nonce and hash its transaction used.
+    const settled = await pass();
+    expect(settled.steps.map((s) => [s.writeId, s.to])).toEqual([
+      [odd, 'FAILED'],
+      [next, 'BROADCAST'],
+    ]);
+    expect(await writeOf(odd)).toMatchObject({ status: 'FAILED', error: 'RECORD_MISMATCH_RESOLVED', nonce: 0, txHash: held.txHash });
+    expect(await versionOf(a)).toMatchObject({ status: 'CONFIRMED' });
+    expect(await writeOf(next)).toMatchObject({ nonce: 1 });
+    expect(await verifyAuditChain(prisma, admin.orgId)).toMatchObject({ ok: true });
+  });
+
+  it('settle-write names an audit-log head’s release under its own prefix (#140)', async () => {
+    const nonce = await nonceOf('pending');
+    const head = await prisma.chainWrite.create({
+      data: {
+        orgId: admin.orgId,
+        kind: 'AUDIT_HEAD',
+        auditHead: `0x${'5'.repeat(64)}`,
+        mode: 'LIVE',
+        status: 'INDETERMINATE',
+        chainId: 31337,
+        registry: deployment.address,
+        issuer: issuer.address,
+        nonce,
+        txHash: `0x${'6'.repeat(64)}`,
+        error: 'SEND_OUTCOME_UNKNOWN',
+      },
+    });
+    const released = await releaseStuckNonce({ prisma, lockClient, publicClient, account: issuer, deployment }, { chainWriteId: head.id, operatorEmail: approver.email });
+    expect(released.nonce).toBe(nonce);
+    expect((await prisma.auditEvent.findMany({ where: { subjectId: head.id } })).map((e) => e.action)).toEqual(['audit_head.nonce_released']);
   });
 
   it('replaces a transaction stuck for 10 minutes at the same nonce with higher fees', async () => {
@@ -1316,6 +1386,40 @@ describe('the firm’s electronic seal on the distribution copy (#70)', () => {
     const stamped = await prisma.auditEvent.findFirstOrThrow({ where: { action: 'version.stamped', subjectId: versionId } });
     expect(stamped.data).toMatchObject({ sealed: true, timestampSerial: check.timestampSerial, copyDocHash: version.copyDocHash });
     expect(await verifyAuditChain(prisma, admin.orgId)).toMatchObject({ ok: true });
+  });
+
+  it('never anchors a copy stored unsealed before sealing was turned on: it is made again, sealed (#140)', async () => {
+    await goLive();
+    const versionId = await confirmedVersion((await engagement()).id, 'en-unmodified.pdf');
+    await approveVersion(approver, versionId, target);
+    await pass();
+    await mine();
+    // Sealing is off: the copy is stamped and stored unsealed, then the worker dies before sending it.
+    await pass({ faults: { afterBuild: async () => Promise.reject(new Error('killed')) } });
+    const unsealed = await versionOf(versionId);
+    expect(unsealed).toMatchObject({ status: 'ANCHORED', copySealedAt: null });
+    expect(unsealed.copyDocHash).toMatch(/^0x/);
+    expect(await nonceOf('pending')).toBe(1);
+
+    // Restarted with sealing on: the stored copy is not on chain, so it is stamped again and sealed.
+    advance(120_001);
+    await pass(sealWith());
+    await mine();
+    await pass(sealWith());
+    const version = await versionOf(versionId);
+    expect(version.status).toBe('COMPLETE');
+    expect(version.copyDocHash).not.toBe(unsealed.copyDocHash);
+    expect(version.copySealedAt).not.toBeNull();
+    const copy = await storedCopy(versionId);
+    expect(docHashOf(copy)).toBe(version.copyDocHash);
+    await checkSeal(copy, [pki.rootDer]);
+    expect((await reader.getRecord(version.copyRecordId as Hex))?.docHash).toBe(version.copyDocHash);
+    expect(await reader.findByDocHash(unsealed.copyDocHash as Hex)).toBeNull();
+    const stamped = await prisma.auditEvent.findMany({ where: { action: 'version.stamped', subjectId: versionId }, orderBy: { seq: 'asc' } });
+    expect(stamped.map((e) => e.data)).toEqual([
+      expect.objectContaining({ sealed: false, copyDocHash: unsealed.copyDocHash }),
+      expect.objectContaining({ sealed: true, copyDocHash: version.copyDocHash, replacedUnsealedCopy: unsealed.copyDocHash }),
+    ]);
   });
 
   it('waits while the seal provider does not answer, says so after an hour, and seals once it answers', async () => {

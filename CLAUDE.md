@@ -604,7 +604,14 @@ to one inflect-compliance commit.
   owner may still cancel it. Do not send
   mail from a use case or the worker: only the mailer sends
   (`src/lib/notifications/mailer.ts`, run by `scripts/mailer.ts`), at least
-  once, under a lease, giving up after five attempts (FAILED).
+  once, under a lease. A failed send waits before the next attempt
+  (`retryWaitMs`: a minute, doubling to four hours, held in `leaseUntil`).
+  Only a permanent 5xx rejection spends attempts quickly
+  (`MAX_PERMANENT_ATTEMPTS`, about a quarter of an hour). A server that cannot
+  be reached, answers 4xx or refuses the firm's own sign-in gets
+  `MAX_TRANSIENT_ATTEMPTS` (about three days), so a short SMTP outage fails
+  nothing (#148). The monitor reports a notice still failing after six
+  attempts (`NOTICE_RETRYING`).
 - **The email carries no PDF, no opinion and no figure** (decision #8):
   names, the engagement's reference, the period end, the version number and
   two links, as plain text with no attachment (`supersededEmail`,

@@ -1,6 +1,5 @@
-import { fork } from 'node:child_process';
-import path from 'node:path';
 import { z } from 'zod';
+import { childScriptPath, runIsolated } from './isolated';
 
 /**
  * Parses an untrusted PDF without letting it near the server process.
@@ -9,7 +8,8 @@ import { z } from 'zod';
  * the server's address space, and V8's heap limit does not cover the
  * ArrayBuffers a decompression bomb inflates into. A child can be killed
  * outright, and if the operating system kills it for memory, the server lives
- * on. Every outcome is either a parsed PDF or a named refusal (CLAUDE.md
+ * on. runIsolated (./isolated.ts) caps its heap, its whole memory and its
+ * time, gives it an empty environment and runs a few at once (#154). Every outcome is either a parsed PDF or a named refusal (CLAUDE.md
  * rule 7); nothing here logs PDF bytes or text.
  */
 
@@ -18,6 +18,8 @@ export const PDF_LIMITS = {
   maxPages: 500,
   timeoutMs: 20_000,
   heapMb: 512,
+  /** The child's whole memory, ArrayBuffers included, which the heap cap does not count (#154). */
+  memoryMb: 1024,
   maxTextChars: 2_000_000,
   maxXmpChars: 1_000_000,
 } as const;
@@ -69,14 +71,8 @@ const EOF_MARKER = Buffer.from('%%EOF', 'latin1');
 /** How far from the end the last "%%EOF" may sit; writers pad with a little whitespace. */
 const EOF_WINDOW = 1024;
 
-/**
- * The child script lives in the source tree and runs under plain Node. The
- * bundler is told to leave the path alone: the script must run as its own
- * process, not be bundled into the server.
- */
-export function parserChildPath(): string {
-  return path.join(/*turbopackIgnore: true*/ process.cwd(), 'src', 'lib', 'pdf', 'parse-child.mjs');
-}
+/** The parser's child script, run under plain Node (see childScriptPath). */
+export const parserChildPath = (): string => childScriptPath('parse-child.mjs');
 
 const FLAG_OF_NAME: Record<string, keyof PdfFlags> = {
   ByteRange: 'signed',
@@ -127,49 +123,10 @@ export async function parsePdf(bytes: Uint8Array, overrides: Partial<PdfLimits> 
   return { ok: true, pdf: { ...answer.pdf, flags } };
 }
 
-// How a V8 out-of-memory abort ends a process: SIGTRAP or SIGABRT on Unix
-// (Node 22 traps), a breakpoint or fast-fail status on Windows.
-const OOM_SIGNALS = new Set(['SIGTRAP', 'SIGABRT']);
-const OOM_EXIT_CODES = new Set([133, 134, 0x80000003, 0xc0000409]);
-
-function runChild(bytes: Uint8Array, limits: PdfLimits): Promise<ParseResult> {
-  return new Promise((resolve) => {
-    let settled = false;
-    let timedOut = false;
-    const child = fork(parserChildPath(), [], {
-      execArgv: [`--max-old-space-size=${limits.heapMb}`],
-      serialization: 'advanced',
-      stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
-    });
-    const settle = (result: ParseResult) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
-      resolve(result);
-    };
-    const timer = setTimeout(() => {
-      timedOut = true;
-      settle({ ok: false, reason: 'TIMEOUT' });
-    }, limits.timeoutMs);
-
-    child.once('message', (message) => {
-      const parsed = ChildAnswer.safeParse(message);
-      settle(parsed.success ? parsed.data : { ok: false, reason: 'PARSER_CRASHED', detail: 'malformed answer' });
-    });
-    child.once('error', () => settle({ ok: false, reason: 'PARSER_CRASHED', detail: 'could not start the parser' }));
-    // 'close', not 'exit': it fires only after the IPC channel has drained, so
-    // an answer sent just before exiting is never mistaken for a crash.
-    child.once('close', (code, signal) => {
-      if (timedOut) return;
-      if ((signal !== null && OOM_SIGNALS.has(signal)) || (code !== null && OOM_EXIT_CODES.has(code >>> 0))) {
-        settle({ ok: false, reason: 'RESOURCE_LIMIT' });
-      } else {
-        settle({ ok: false, reason: 'PARSER_CRASHED', detail: `exit ${code ?? signal}` });
-      }
-    });
-
-    const { maxPages, maxTextChars, maxXmpChars } = limits;
-    child.send({ bytes, limits: { maxPages, maxTextChars, maxXmpChars } });
-  });
+async function runChild(bytes: Uint8Array, limits: PdfLimits): Promise<ParseResult> {
+  const { maxPages, maxTextChars, maxXmpChars } = limits;
+  const outcome = await runIsolated(parserChildPath(), { bytes, limits: { maxPages, maxTextChars, maxXmpChars } }, limits);
+  if (!outcome.ok) return outcome.reason === 'CRASHED' ? { ok: false, reason: 'PARSER_CRASHED', detail: outcome.detail } : { ok: false, reason: outcome.reason };
+  const parsed = ChildAnswer.safeParse(outcome.answer);
+  return parsed.success ? parsed.data : { ok: false, reason: 'PARSER_CRASHED', detail: 'malformed answer' };
 }

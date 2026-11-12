@@ -326,6 +326,14 @@ old (`sweepOrphanFiles`, hourly), so a backup whose dump still names a file
 finds it. `verify-restore` names a row whose file a restore lacks
 (`FILE_MISSING`).
 
+Both `backup.sh` and `restore.sh` use the PostgreSQL client tools of the
+server's own major version (#184): `/usr/lib/postgresql/<major>/bin` when
+installed (`postgresql-client-16` for this app's PostgreSQL 16), otherwise the
+tools on PATH only if their major matches, and otherwise they refuse, naming the
+package to install. A newer `pg_restore` sets parameters an older server refuses,
+and an older one cannot read a newer dump. `PG_BIN` names the tools to use
+instead.
+
 **Keys are not in the backup.** Without `FILE_ENCRYPTION_KEY`, the files and
 every sealed column (opinions, manifests, notes, TOTP secrets) cannot be read.
 Keep the key in a secret manager, never next to the backups.

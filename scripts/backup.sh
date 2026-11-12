@@ -28,7 +28,10 @@ url=$(printf '%s' "$DATABASE_URL" | sed -E 's/([?&])schema=[^&]*&?/\1/; s/[?&]$/
 umask 077
 out="$BACKUP_DIR/$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$out"
-pg_dump --format=custom --no-owner --no-privileges --dbname="$url" --file="$out/db.dump"
+# The client tools of the server's own major version (#184).
+. "$(dirname "$0")/pg-tools.sh"
+pg_tools_for "$url"
+"$PG_BIN/pg_dump" --format=custom --no-owner --no-privileges --dbname="$url" --file="$out/db.dump"
 tar -C "$FILE_STORAGE_DIR" -cf "$out/files.tar" .
 (cd "$out" && sha256sum db.dump files.tar > SHA256SUMS)
 echo "$out"

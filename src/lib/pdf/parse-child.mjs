@@ -18,6 +18,8 @@ async function extract(bytes, limits) {
       disableFontFace: true,
       useSystemFonts: false,
       enableXfa: false,
+      // No code built from strings: a parser bug cannot be turned into an eval (#154).
+      isEvalSupported: false,
       isOffscreenCanvasSupported: false,
       verbosity: 0,
     }).promise;

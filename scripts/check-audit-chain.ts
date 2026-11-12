@@ -19,7 +19,7 @@ import { PrismaPg } from '@prisma/adapter-pg';
 import { createPublicClient, getAddress, http, isAddress, type PublicClient } from 'viem';
 import { PrismaClient } from '../src/generated/prisma/client';
 import { registryHeadWitness } from '../src/lib/anchoring/audit-head';
-import { checkAllAuditChains } from '../src/lib/audit-check';
+import { AuditCheckRefused, checkAllAuditChains } from '../src/lib/audit-check';
 import { ChainError } from '../src/lib/chain/errors';
 import { isNetworkName, loadDeployment, loadDeploymentFile, NETWORKS, rpcUrlFor, secondRpcUrlFor } from '../src/lib/chain/networks';
 
@@ -49,8 +49,16 @@ async function main() {
   const target = { network, chainId: deployment.chainId, registry: getAddress(deployment.address), issuer: getAddress(issuer) };
   const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString: url }) });
   try {
-    const results = await checkAllAuditChains(prisma, registryHeadWitness({ clients, deployment, target }));
-    for (const { orgId, outcome } of results) {
+    let results;
+    try {
+      results = await checkAllAuditChains(prisma, registryHeadWitness({ clients, deployment, target }));
+    } catch (error) {
+      if (error instanceof AuditCheckRefused) refuse(error.message);
+      throw error;
+    }
+    for (const { orgId, outcome, chainBound } of results) {
+      // Another firm than the key's is held to the database alone (#141): say so every night.
+      if (!chainBound) console.warn(JSON.stringify({ level: 'warn', message: 'firm not held to heads on chain: the issuer key is registered to another firm', orgId }));
       if (outcome.ok) {
         console.log(JSON.stringify({ level: 'info', message: 'audit chain intact', orgId, count: outcome.count, head: outcome.head, chainHeads: outcome.chainHeads, queued: outcome.queued }));
       } else {

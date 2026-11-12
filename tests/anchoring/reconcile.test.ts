@@ -15,6 +15,7 @@ import { runWorkerPass } from '@/lib/anchoring/worker';
 import { deployRegistry, orgIdFor } from '@/lib/chain/deploy';
 import type { Deployment } from '@/lib/chain/deployment';
 import { ChainError } from '@/lib/chain/errors';
+import { createRegistryReader } from '@/lib/chain/reader';
 import { ZERO_HASH } from '@/lib/chain/records';
 import { registryAbi } from '@/lib/chain/registry-artifact';
 import { createFileStore, type FileStore } from '@/lib/file-store';
@@ -194,6 +195,28 @@ describe('reconciling the database with the chain (#111)', () => {
     ]);
     await prisma.$executeRawUnsafe(`UPDATE "ReportVersion" SET status = 'REVOKED', "revokedAt" = now() WHERE id = '${v1.id}'`);
     expect((await reconcile()).differences).toContainEqual({ code: 'REVOKED_NOT_ON_CHAIN', versionId: v1.id });
+  });
+
+  it('names a scheduled revocation the chain now holds with another reason or time (#141)', async () => {
+    const v1 = await complete(await confirmedVersion('en-unmodified.pdf'));
+    await issuerWrite({ functionName: 'revoke', args: [v1.recordId as Hex, 1] });
+    await mine();
+    const asked = (await createRegistryReader(publicClient, deployment).getRecord(v1.recordId as Hex))!;
+    const revocation = await prisma.revocation.create({
+      data: { reportVersionId: v1.id, reason: 'WITHDRAWN', note: new Uint8Array([1]), status: 'SCHEDULED', requestedById: admin.id, approvedById: approver.id, approvedAt: clock, effectiveAt: new Date(asked.revokeEffectiveAt * 1000) },
+    });
+    expect((await reconcile()).differences).toEqual([]);
+
+    // The owner cancels it, and the key asks again with another reason, an hour later.
+    const owner = createWalletClient({ chain: foundry, transport: http(anvil.url), account: getAddress((await createWalletClient({ chain: foundry, transport: http(anvil.url) }).getAddresses())[0]) });
+    await publicClient.waitForTransactionReceipt({ hash: await owner.writeContract({ address: deployment.address, abi: registryAbi, functionName: 'cancelRevocation', args: [v1.recordId as Hex] }) });
+    await testClient.increaseTime({ seconds: 3600 });
+    await issuerWrite({ functionName: 'revoke', args: [v1.recordId as Hex, 2] });
+    await mine();
+    const now = (await createRegistryReader(publicClient, deployment).getRecord(v1.recordId as Hex))!;
+    expect((await reconcile()).differences).toEqual([
+      { code: 'REVOCATION_DIFFERS', versionId: v1.id, revocationId: revocation.id, fields: ['reason', 'effectiveAt'], reasonCode: 2, effectiveAt: now.revokeEffectiveAt },
+    ]);
   });
 
   it('refuses, rather than answers, when the two endpoints disagree', async () => {

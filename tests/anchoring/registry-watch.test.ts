@@ -5,7 +5,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { PrismaPg } from '@prisma/adapter-pg';
 import { afterAll, beforeAll, beforeEach, afterEach, describe, expect, it } from 'vitest';
-import { createPublicClient, createTestClient, createWalletClient, getAddress, http, keccak256, parseEther, toBytes, type Hex, type PublicClient, type TestClient } from 'viem';
+import { createPublicClient, createTestClient, createWalletClient, custom, encodeEventTopics, getAddress, http, keccak256, parseEther, toBytes, type Hex, type PublicClient, type TestClient } from 'viem';
 import { generatePrivateKey, privateKeyToAccount, type PrivateKeyAccount } from 'viem/accounts';
 import { foundry } from 'viem/chains';
 import type { SessionUser } from '@/auth';
@@ -55,7 +55,7 @@ let refCounter = 0;
 
 const mine = (blocks = 3) => testClient.mine({ blocks });
 const watch = (overrides: Partial<WatchDeps> = {}) =>
-  watchRegistry({ prisma, publicClient, deployment, firm: { orgId, onChainOrgId: orgIdFor(FIRM) }, fromBlock: BigInt(deployment.deployBlock), now: () => new Date('2026-10-25T12:00:00Z'), ...overrides });
+  watchRegistry({ prisma, clients: [publicClient, publicClient], deployment, firm: { orgId, onChainOrgId: orgIdFor(FIRM) }, fromBlock: BigInt(deployment.deployBlock), now: () => new Date('2026-10-25T12:00:00Z'), ...overrides });
 
 /** A write as the issuer key's holder would send it, outside the app. */
 async function sendAs(account: PrivateKeyAccount, call: { functionName: 'anchor'; args: readonly [Hex, number, Hex, Hex, Hex, Hex] } | { functionName: 'anchorDistributionCopy'; args: readonly [Hex, Hex] } | { functionName: 'revoke'; args: readonly [Hex, number] }) {
@@ -165,6 +165,43 @@ describe('the registry watch', () => {
     const events = await prisma.auditEvent.findMany({ where: { orgId, action: 'registry_watch.unjournaled' } });
     expect(events).toHaveLength(3);
     expect(await verifyAuditChain(prisma, orgId)).toMatchObject({ ok: true });
+  });
+
+  it('reads every range on two endpoints, and stops without moving its checkpoint when one leaves a revocation out (#141)', async () => {
+    /** An endpoint to the same chain, whose answers a test may change. */
+    const endpoint = (answer: (method: string, params: unknown[], forward: () => Promise<unknown>) => Promise<unknown> = (_, __, forward) => forward()) => {
+      const upstream = http(anvil.url)({ chain: foundry });
+      return createPublicClient({
+        chain: foundry,
+        transport: custom({
+          request: ({ method, params }: { method: string; params?: unknown }) => {
+            const list = (params ?? []) as unknown[];
+            return answer(method, list, () => upstream.request({ method, params: list } as Parameters<typeof upstream.request>[0]));
+          },
+        }),
+      }) as PublicClient;
+    };
+    await forgedV1(issuer, 'hidden');
+    const original = recordIdFor(31337, deployment.address, h('family:hidden'), 1, 'ORIGINAL');
+    const revocation = await sendAs(issuer, { functionName: 'revoke', args: [original, 1] });
+    await mine();
+    // A provider that leaves out every RevocationRequested event, as a lagging or truncating index would.
+    const [requested] = encodeEventTopics({ abi: registryAbi, eventName: 'RevocationRequested' });
+    const hiding = endpoint(async (method, params, forward) => {
+      const answer = await forward();
+      if (method !== 'eth_getLogs') return answer;
+      const topics = (params[0] as { topics?: (string | null)[] }).topics ?? [];
+      return topics[0]?.toLowerCase() === requested.toLowerCase() ? [] : answer;
+    });
+
+    // Read alone, it would move the checkpoint past the revocation and report only the anchor.
+    await expect(watch({ clients: [endpoint(), hiding] })).rejects.toMatchObject({ code: 'RPC_DISAGREE' });
+    expect(await prisma.registryWatch.count()).toBe(0);
+    expect(await prisma.unjournaledWrite.count()).toBe(0);
+
+    // Two endpoints that agree report both.
+    const report = await watch({ clients: [endpoint(), endpoint()] });
+    expect(report.found).toEqual([expect.objectContaining({ kind: 'ANCHOR', recordId: original }), expect.objectContaining({ kind: 'REVOCATION', recordId: original, txHash: revocation.hash })]);
   });
 
   it('ignores another firm’s keys', async () => {

@@ -1,6 +1,7 @@
 import { Prisma, type PrismaClient } from '@/generated/prisma/client';
 import type { AnchorTarget } from '@/lib/anchoring/target';
 import { appendAuditEvent, verifyAuditChain } from '@/lib/audit';
+import { orgIdFor } from '@/lib/chain/deploy';
 
 /**
  * The nightly audit-chain check (Phase 5 hardening, #57; #94). Re-deriving
@@ -21,7 +22,16 @@ import { appendAuditEvent, verifyAuditChain } from '@/lib/audit';
  * Runs outside the app (scripts/check-audit-chain.ts), so it takes a client.
  */
 
-export type ChainCheckReason = 'SEQ_GAP' | 'PREV_HASH_MISMATCH' | 'HASH_MISMATCH' | 'TRUNCATED' | 'REWRITTEN' | 'ANCHORED_HEAD_MISSING' | 'CHAIN_UNREADABLE';
+export type ChainCheckReason =
+  | 'SEQ_GAP'
+  | 'PREV_HASH_MISMATCH'
+  | 'HASH_MISMATCH'
+  | 'TRUNCATED'
+  | 'REWRITTEN'
+  | 'ANCHORED_HEAD_MISSING'
+  | 'CHAIN_UNREADABLE'
+  /** The key that writes the heads is registered to another firm than this one (#141): its heads are not this log's. */
+  | 'FIRM_MISMATCH';
 
 export type ChainCheckOutcome =
   | {
@@ -50,6 +60,20 @@ export interface AuditHeadWitness {
   heads(org: { id: string; name: string }): Promise<{ index: number; head: string; recordedAt: number }[]>;
   /** Where a new head is written; null queues nothing. */
   target: AnchorTarget | null;
+  /**
+   * The org id on chain of the key that writes the heads (#141), read on both
+   * endpoints. When given, only the database firm of that name is held to the
+   * heads and has heads queued. Throws when the chain cannot be read.
+   */
+  firm?(): Promise<string>;
+}
+
+/** The nightly check cannot tell which firm the key belongs to (#141). */
+export class AuditCheckRefused extends Error {
+  constructor(readonly code: 'FIRM_AMBIGUOUS', detail: string) {
+    super(`${code}: ${detail}`);
+    this.name = 'AuditCheckRefused';
+  }
 }
 
 /** For a chain with no heads and nothing to queue: a firm before #94, and the database-only tests. */
@@ -78,7 +102,12 @@ export async function checkAuditChain(prisma: PrismaClient, orgId: string, witne
   if (outcome.ok) {
     let heads: { index: number; head: string; recordedAt: number }[] | null = null;
     try {
-      heads = await witness.heads(org);
+      // Held only to heads written by a key registered to this very firm (#141).
+      if (witness.firm && orgIdFor(org.name).toLowerCase() !== (await witness.firm()).toLowerCase()) {
+        outcome = { ok: false, seq: null, reason: 'FIRM_MISMATCH' };
+      } else {
+        heads = await witness.heads(org);
+      }
     } catch {
       outcome = { ok: false, seq: null, reason: 'CHAIN_UNREADABLE' };
     }
@@ -145,10 +174,34 @@ async function queueHead(
   }
 }
 
-/** Checks every firm's chain; the caller alerts on any that is not intact. */
+/**
+ * Checks every firm's chain; the caller alerts on any that is not intact.
+ * With a witness that names its key's firm (#141), that firm alone is held to
+ * the heads on chain and has heads queued; any other firm in the database is
+ * checked on the database alone (`chainBound: false`), since the key writes
+ * none of its heads. When no firm is the key's, each fails FIRM_MISMATCH;
+ * when two are, nothing can be told apart, and the check is refused.
+ */
 export async function checkAllAuditChains(prisma: PrismaClient, witness: AuditHeadWitness, now = new Date()) {
   const orgs = await prisma.issuerOrg.findMany({ select: { id: true, name: true }, orderBy: { createdAt: 'asc' } });
-  const results: { orgId: string; outcome: ChainCheckOutcome }[] = [];
-  for (const org of orgs) results.push({ orgId: org.id, outcome: await checkAuditChain(prisma, org.id, witness, now) });
+  let bound: Set<string> | null = null;
+  if (witness.firm) {
+    let keyOrg: string | null = null;
+    try {
+      keyOrg = (await witness.firm()).toLowerCase();
+    } catch {
+      // Unreadable: each firm's check records CHAIN_UNREADABLE.
+    }
+    if (keyOrg !== null) {
+      const ofKey = orgs.filter((org) => orgIdFor(org.name).toLowerCase() === keyOrg);
+      if (ofKey.length > 1) throw new AuditCheckRefused('FIRM_AMBIGUOUS', `${ofKey.length} firms in the database have the name the key is registered under`);
+      if (ofKey.length === 1) bound = new Set(ofKey.map((org) => org.id));
+    }
+  }
+  const results: { orgId: string; outcome: ChainCheckOutcome; chainBound: boolean }[] = [];
+  for (const org of orgs) {
+    const chainBound = bound === null || bound.has(org.id);
+    results.push({ orgId: org.id, outcome: await checkAuditChain(prisma, org.id, chainBound ? witness : NO_WITNESS, now), chainBound: chainBound && witness !== NO_WITNESS });
+  }
   return results;
 }

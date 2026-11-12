@@ -2,6 +2,7 @@ import { getAddress, type Address, type Hash, type Hex, type PublicClient } from
 import { Prisma, type PrismaClient } from '@/generated/prisma/client';
 import type { UnjournaledKind } from '@/generated/prisma/enums';
 import { appendAuditEvent } from '@/lib/audit';
+import { agreedFinalizedBlock, readOnBoth } from '@/lib/chain/agree';
 import type { Deployment } from '@/lib/chain/deployment';
 import { createRegistryReader } from '@/lib/chain/reader';
 import { registryAbi } from '@/lib/chain/registry-artifact';
@@ -21,6 +22,12 @@ import { registryAbi } from '@/lib/chain/registry-artifact';
  * takes effect, which is the owner's deadline to cancel it (#95,
  * docs/runbooks/stolen-issuer-key.md).
  *
+ * Everything is read on two endpoints from different providers, at a
+ * finalized block both have reached and agree on (#141, as the worker does,
+ * #92): one endpoint that lags or leaves events out could otherwise move the
+ * checkpoint past a stolen key's revocation for good. Endpoints that disagree
+ * stop the run with RPC_DISAGREE, and the checkpoint stays where it was.
+ *
  * The checkpoint (the last block read) and the findings are written in one
  * transaction per range, so a run that stops halfway resumes where it stopped,
  * and a finding is never reported twice. A finding stays open until an admin
@@ -39,7 +46,8 @@ export interface WatchFirm {
 
 export interface WatchDeps {
   prisma: PrismaClient;
-  publicClient: PublicClient;
+  /** Two endpoints from different providers (#141); one client twice on a local chain. */
+  clients: readonly [PublicClient, PublicClient];
   deployment: Deployment;
   firm: WatchFirm;
   /** Where a first run starts: the registry's deploy block. */
@@ -74,7 +82,7 @@ export interface WatchReport {
 const isUniqueViolation = (error: unknown) => error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002';
 
 export async function watchRegistry(deps: WatchDeps): Promise<WatchReport> {
-  const { prisma, publicClient, deployment, firm } = deps;
+  const { prisma, clients, deployment, firm } = deps;
   const now = deps.now ?? (() => new Date());
   const range = BigInt(deps.rangeBlocks ?? WATCH_RANGE_BLOCKS);
   const registry = getAddress(deployment.address);
@@ -82,8 +90,8 @@ export async function watchRegistry(deps: WatchDeps): Promise<WatchReport> {
   const key = { orgId: firm.orgId, chainId, registry };
 
   // The wrong chain or contract is a refusal, never a quiet "nothing found" (rule 7).
-  await createRegistryReader(publicClient, deployment).assertDeployment();
-  const finalized = (await publicClient.getBlock({ blockTag: 'finalized' })).number;
+  await Promise.all(clients.map((client) => createRegistryReader(client, deployment).assertDeployment()));
+  const finalized = await agreedFinalizedBlock(clients);
   const checkpoint = await prisma.registryWatch.findUnique({ where: { orgId_chainId_registry: key } });
   const start = checkpoint ? checkpoint.lastBlock + 1n : (deps.fromBlock ?? 0n);
 
@@ -92,7 +100,9 @@ export async function watchRegistry(deps: WatchDeps): Promise<WatchReport> {
   async function isFirms(issuer: Address) {
     const known = firmOf.get(issuer);
     if (known !== undefined) return known;
-    const [orgId] = await publicClient.readContract({ address: registry, abi: registryAbi, functionName: 'issuers', args: [issuer] });
+    const [orgId] = await readOnBoth(clients, `the firm of key ${issuer}`, (client) =>
+      client.readContract({ address: registry, abi: registryAbi, functionName: 'issuers', args: [issuer], blockNumber: finalized }),
+    );
     const firms = orgId.toLowerCase() === firm.onChainOrgId.toLowerCase();
     firmOf.set(issuer, firms);
     return firms;
@@ -102,27 +112,12 @@ export async function watchRegistry(deps: WatchDeps): Promise<WatchReport> {
   let seen = 0;
   for (let from = start; from <= finalized; from += range) {
     const to = from + range - 1n < finalized ? from + range - 1n : finalized;
-    const [anchored, requested, heads] = await Promise.all([
-      publicClient.getContractEvents({ address: registry, abi: registryAbi, eventName: 'Anchored', fromBlock: from, toBlock: to }),
-      publicClient.getContractEvents({ address: registry, abi: registryAbi, eventName: 'RevocationRequested', fromBlock: from, toBlock: to }),
-      // A head is filed under its key's firm, so the firm's are asked for by name (#94).
-      publicClient.getContractEvents({ address: registry, abi: registryAbi, eventName: 'AuditHeadRecorded', args: { orgId: firm.onChainOrgId }, fromBlock: from, toBlock: to }),
-    ]);
+    // Both endpoints must report the same writes in the range, or nothing is concluded from it.
+    const events = await readOnBoth(clients, `the registry's writes in blocks ${from} to ${to}`, (client) => writesIn(client, registry, firm.onChainOrgId, from, to));
     const writes: UnjournaledFinding[] = [];
-    for (const event of anchored) {
-      const { recordId, kind, issuer } = event.args;
-      if (!recordId || kind === undefined || !issuer || !(await isFirms(getAddress(issuer)))) continue;
-      writes.push({ kind: kind === 0 ? 'ANCHOR' : 'ANCHOR_COPY', recordId, txHash: event.transactionHash, blockNumber: event.blockNumber, issuer: getAddress(issuer), effectiveAt: null });
-    }
-    for (const event of requested) {
-      const { recordId, effectiveAt, issuer } = event.args;
-      if (!recordId || effectiveAt === undefined || !issuer || !(await isFirms(getAddress(issuer)))) continue;
-      writes.push({ kind: 'REVOCATION', recordId, txHash: event.transactionHash, blockNumber: event.blockNumber, issuer: getAddress(issuer), effectiveAt: Number(effectiveAt) });
-    }
-    for (const event of heads) {
-      const { head, issuer } = event.args;
-      if (!head || !issuer) continue;
-      writes.push({ kind: 'AUDIT_HEAD', recordId: head, txHash: event.transactionHash, blockNumber: event.blockNumber, issuer: getAddress(issuer), effectiveAt: null });
+    for (const event of events) {
+      if (event.kind !== 'AUDIT_HEAD' && !(await isFirms(event.issuer))) continue;
+      writes.push(event);
     }
     seen += writes.length;
 
@@ -197,6 +192,33 @@ export async function watchRegistry(deps: WatchDeps): Promise<WatchReport> {
 
   const open = await prisma.unjournaledWrite.count({ where: { orgId: firm.orgId, reviewedAt: null } });
   return { from: start, to: finalized, seen, found, open };
+}
+
+/** Every write in a range as one endpoint reports it, in plain values both endpoints can be compared on. */
+async function writesIn(client: PublicClient, registry: Address, onChainOrgId: Hex, from: bigint, to: bigint): Promise<UnjournaledFinding[]> {
+  const [anchored, requested, heads] = await Promise.all([
+    client.getContractEvents({ address: registry, abi: registryAbi, eventName: 'Anchored', fromBlock: from, toBlock: to }),
+    client.getContractEvents({ address: registry, abi: registryAbi, eventName: 'RevocationRequested', fromBlock: from, toBlock: to }),
+    // A head is filed under its key's firm, so the firm's are asked for by name (#94).
+    client.getContractEvents({ address: registry, abi: registryAbi, eventName: 'AuditHeadRecorded', args: { orgId: onChainOrgId }, fromBlock: from, toBlock: to }),
+  ]);
+  const writes: UnjournaledFinding[] = [];
+  for (const event of anchored) {
+    const { recordId, kind, issuer } = event.args;
+    if (!recordId || kind === undefined || !issuer) continue;
+    writes.push({ kind: kind === 0 ? 'ANCHOR' : 'ANCHOR_COPY', recordId, txHash: event.transactionHash, blockNumber: event.blockNumber, issuer: getAddress(issuer), effectiveAt: null });
+  }
+  for (const event of requested) {
+    const { recordId, effectiveAt, issuer } = event.args;
+    if (!recordId || effectiveAt === undefined || !issuer) continue;
+    writes.push({ kind: 'REVOCATION', recordId, txHash: event.transactionHash, blockNumber: event.blockNumber, issuer: getAddress(issuer), effectiveAt: Number(effectiveAt) });
+  }
+  for (const event of heads) {
+    const { head, issuer } = event.args;
+    if (!head || !issuer) continue;
+    writes.push({ kind: 'AUDIT_HEAD', recordId: head, txHash: event.transactionHash, blockNumber: event.blockNumber, issuer: getAddress(issuer), effectiveAt: null });
+  }
+  return writes;
 }
 
 /** Another watch run got to these blocks first; this one leaves them to it. */

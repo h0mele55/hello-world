@@ -13,6 +13,7 @@
  *   DATABASE_URL=<source> RESTORE_DATABASE_URL=… RESTORE_FILE_STORAGE_DIR=… \
  *   FILE_ENCRYPTION_KEY=… npx tsx scripts/verify-restore.ts [--expect-identical]
  */
+import fs from 'node:fs';
 import path from 'node:path';
 import { PrismaPg } from '@prisma/adapter-pg';
 import pg from 'pg';
@@ -66,6 +67,11 @@ async function main() {
       )
     ).rows;
     for (const file of stored) {
+      // A row whose file is not in the restored store is named as such (#158), not as an unreadable file.
+      if (!fs.existsSync(path.join(dir, path.basename(file.path)))) {
+        failures.push({ check: 'FILE_MISSING', detail: `${file.id}: ${file.path}` });
+        continue;
+      }
       try {
         await files.read({ path: file.path, iv: new Uint8Array(file.iv), authTag: new Uint8Array(file.authTag), keyVersion: file.keyVersion, sha256: file.sha256, size: file.size });
       } catch (error) {

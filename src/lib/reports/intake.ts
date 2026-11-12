@@ -355,5 +355,6 @@ export async function discardDraft(user: SessionUser, versionId: string) {
     return true;
   });
   if (!deleted) throw new IntakeError('NOT_DRAFT');
-  await discardStoredFile(version.storedFile.path);
+  // The file stays until the orphan sweep (src/lib/file-sweep.ts, #158): a backup
+  // whose dump was taken before this commit still names it, and must find it.
 }

@@ -128,15 +128,18 @@ export async function createKmsAccount({ client, keyName }: KmsAccountOptions): 
   const [publicKey] = await client.getPublicKey({ name: keyName });
   if (publicKey.algorithm !== 'EC_SIGN_SECP256K1_SHA256') throw new KmsSignerError('NOT_SECP256K1', `the KMS key's algorithm is ${String(publicKey.algorithm)}, not EC_SIGN_SECP256K1_SHA256`);
   if (!publicKey.pem) throw new KmsSignerError('PUBLIC_KEY_UNREADABLE', 'KMS returned no public key');
+  // Every integrity field is required (#142): one KMS leaves out is not checked, so it fails closed.
   const pemCrc = int64(publicKey.pemCrc32c);
-  if (pemCrc !== null && pemCrc !== crc32c(new TextEncoder().encode(publicKey.pem))) throw new KmsSignerError('PUBLIC_KEY_CORRUPTED', 'the public key does not match its CRC32C');
+  if (pemCrc === null) throw new KmsSignerError('PUBLIC_KEY_CORRUPTED', 'KMS returned the public key without its CRC32C');
+  if (pemCrc !== crc32c(new TextEncoder().encode(publicKey.pem))) throw new KmsSignerError('PUBLIC_KEY_CORRUPTED', 'the public key does not match its CRC32C');
+  if (publicKey.name !== keyName) throw new KmsSignerError('WRONG_KEY_VERSION', 'KMS returned the public key of another key version, or did not say which');
   const address = addressOfPem(publicKey.pem);
 
   async function signHash(hash: Hex): Promise<Signature> {
     const digest = new Uint8Array(Buffer.from(hash.slice(2), 'hex'));
     const [response] = await client.asymmetricSign({ name: keyName, digest: { sha256: digest }, digestCrc32c: { value: crc32c(digest) } });
     if (response.verifiedDigestCrc32c !== true) throw new KmsSignerError('DIGEST_CORRUPTED', 'KMS did not confirm the digest it signed');
-    if (response.name && response.name !== keyName) throw new KmsSignerError('WRONG_KEY_VERSION', 'KMS signed with another key version');
+    if (response.name !== keyName) throw new KmsSignerError('WRONG_KEY_VERSION', 'KMS signed with another key version, or did not say which');
     if (!response.signature) throw new KmsSignerError('SIGNATURE_UNREADABLE', 'KMS returned no signature');
     const der = bytesOf(response.signature);
     if (int64(response.signatureCrc32c) !== crc32c(der)) throw new KmsSignerError('SIGNATURE_CORRUPTED', 'the signature does not match its CRC32C');

@@ -29,7 +29,7 @@ export class BytecodeMismatchError extends ChainError {
 
 /** No deployment file, or one that does not describe this build. */
 export class DeploymentError extends ChainError {
-  constructor(code: 'DEPLOYMENT_MISSING' | 'DEPLOYMENT_INVALID' | 'DEPLOYMENT_STALE', message: string) {
+  constructor(code: 'DEPLOYMENT_MISSING' | 'DEPLOYMENT_INVALID' | 'DEPLOYMENT_STALE' | 'DEPLOYMENT_PENDING', message: string) {
     super(code, message);
   }
 }

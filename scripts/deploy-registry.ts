@@ -27,13 +27,20 @@
  *
  * Refuses to overwrite an existing deployment file: a second registry would
  * split every family's history in two.
+ *
+ * The record is written as soon as the registry's bytecode checks, with its
+ * issuer marked pending, and completed once the issuer is registered (#142).
+ * A run that fails in between leaves the registry recorded; running the
+ * script again with the same settings finishes that registry rather than
+ * deploying another. Nothing reads a pending record (DEPLOYMENT_PENDING).
  */
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
-import { createPublicClient, createWalletClient, encodeAbiParameters, formatEther, getAddress, http, isAddress, isHex, parseEther, type PublicClient } from 'viem';
+import { createPublicClient, createWalletClient, encodeAbiParameters, formatEther, getAddress, http, isAddress, isHex, parseEther, type Address, type Hash, type PublicClient } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
 import { deployRegistry, orgIdFor } from '../src/lib/chain/deploy';
+import { registryRuntimeBytecodeHash } from '../src/lib/chain/registry-artifact';
 import { CHOSEN_PRODUCTION_NETWORK, deploymentPath, isNetworkName, NETWORKS, PRODUCTION_NETWORKS, REHEARSAL_NETWORK, rpcUrlFor, rpcUrlVariable } from '../src/lib/chain/networks';
 
 const ROOT = path.resolve(import.meta.dirname, '..');
@@ -82,7 +89,14 @@ async function main() {
 
   // DEPLOYMENT_FILE writes the record elsewhere, as the worker reads one from elsewhere (rehearsals, tests).
   const target = process.env.DEPLOYMENT_FILE ? path.resolve(process.env.DEPLOYMENT_FILE) : deploymentPath(network, ROOT);
-  if (fs.existsSync(target)) fail(`${path.relative(ROOT, target)} already exists`);
+  // A record left pending by a run that stopped after deploying is finished, never deployed again (#142).
+  let pending: { address: Address; deployTxHash: Hash; deployBlock: number; issuer: { address: string; orgName: string } } | null = null;
+  if (fs.existsSync(target)) {
+    const existing = JSON.parse(fs.readFileSync(target, 'utf8'));
+    if (existing?.issuer?.pending !== true) fail(`${path.relative(ROOT, target)} already exists`);
+    if (existing.network !== network) fail(`${path.relative(ROOT, target)} is pending for ${existing.network}, not ${network}`);
+    pending = existing;
+  }
 
   const key = env('DEPLOYER_PRIVATE_KEY');
   if (!isHex(key) || key.length !== 66) fail('DEPLOYER_PRIVATE_KEY is not a 32-byte hex key');
@@ -91,6 +105,9 @@ async function main() {
   if (!isAddress(issuerAddress)) fail('ISSUER_ADDRESS is not an address');
   if (getAddress(issuerAddress) === deployer.address) fail('the issuer key must not be the deployer key');
   const orgName = env('ISSUER_ORG_NAME');
+  if (pending && (getAddress(pending.issuer.address) !== getAddress(issuerAddress) || pending.issuer.orgName !== orgName)) {
+    fail(`${path.relative(ROOT, target)} is pending for issuer ${pending.issuer.address} of ${pending.issuer.orgName}; resume it with the same ISSUER_ADDRESS and ISSUER_ORG_NAME`);
+  }
   const delay = revocationDelaySeconds(network);
 
   const transport = http(rpcUrl);
@@ -106,32 +123,46 @@ async function main() {
     fail(`the deployer holds ${formatEther(balance)} ETH; move all but ${formatEther(MAX_DEPLOYER_BALANCE)} to the issuer key, which pays for anchoring`);
   }
 
-  console.log(`Deploying AuditReportRegistry to ${network} from ${deployer.address}, revocation delay ${delay / 3600} h…`);
+  const issuer = { address: getAddress(issuerAddress), orgId: orgIdFor(orgName), orgName };
+  const write = (record: object) => {
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, `${JSON.stringify(record, null, 2)}\n`);
+  };
+  const recordOf = (d: { chainId: number; address: Address; deployTxHash: Hash; deployBlock: number; revocationDelaySeconds: number }) => ({
+    network,
+    chainId: d.chainId,
+    address: d.address,
+    runtimeBytecodeHash: registryRuntimeBytecodeHash,
+    deployTxHash: d.deployTxHash,
+    deployBlock: d.deployBlock,
+    owner: deployer.address,
+    revocationDelaySeconds: d.revocationDelaySeconds,
+  });
+
+  console.log(
+    pending
+      ? `Resuming the registry at ${pending.address} on ${network}: registering its issuer…`
+      : `Deploying AuditReportRegistry to ${network} from ${deployer.address}, revocation delay ${delay / 3600} h…`,
+  );
   const deployment = await deployRegistry({
     publicClient,
     walletClient,
-    issuer: { address: getAddress(issuerAddress), orgId: orgIdFor(orgName) },
+    issuer: { address: issuer.address, orgId: issuer.orgId },
     revocationDelaySeconds: delay,
+    resume: pending ? { address: getAddress(pending.address), deployTxHash: pending.deployTxHash, deployBlock: pending.deployBlock } : undefined,
+    // Recorded before the issuer is registered, so a failure there cannot lose the registry.
+    onDeployed: (d) => {
+      write({ ...recordOf(d), issuer: { ...issuer, pending: true } });
+      console.log(`Deployed at ${d.address} (block ${d.deployBlock}). Recorded in ${path.relative(ROOT, target)}; registering the issuer…`);
+    },
   });
 
-  const record = {
-    network,
-    chainId: deployment.chainId,
-    address: deployment.address,
-    runtimeBytecodeHash: deployment.runtimeBytecodeHash,
-    deployTxHash: deployment.deployTxHash,
-    deployBlock: deployment.deployBlock,
-    owner: deployer.address,
-    revocationDelaySeconds: deployment.revocationDelaySeconds,
-    issuer: { address: getAddress(issuerAddress), orgId: orgIdFor(orgName), orgName, setIssuerTxHash: deployment.issuerTxHash },
-  };
-  fs.mkdirSync(path.dirname(target), { recursive: true });
-  fs.writeFileSync(target, `${JSON.stringify(record, null, 2)}\n`);
-  console.log(`Deployed at ${deployment.address} (block ${deployment.deployBlock}). Wrote ${path.relative(ROOT, target)}.`);
+  write({ ...recordOf(deployment), issuer: { ...issuer, setIssuerTxHash: deployment.issuerTxHash ?? null } });
+  console.log(`Deployed at ${deployment.address} (block ${deployment.deployBlock}), issuer registered. Wrote ${path.relative(ROOT, target)}.`);
 
   if (network === 'local') return;
   // One Etherscan key covers every chain here; forge picks the explorer by chain id.
-  const constructorArgs = encodeAbiParameters([{ type: 'address' }, { type: 'uint32' }], [deployer.address, delay]);
+  const constructorArgs = encodeAbiParameters([{ type: 'address' }, { type: 'uint32' }], [deployer.address, deployment.revocationDelaySeconds]);
   const verify = ['verify-contract', deployment.address, 'src/AuditReportRegistry.sol:AuditReportRegistry', '--chain', String(chain.id), '--constructor-args', constructorArgs, '--watch'];
   if (!process.env.ETHERSCAN_API_KEY) {
     console.log(`ETHERSCAN_API_KEY is not set. Verify the source later with:\n  (cd contracts && forge ${verify.join(' ')})`);

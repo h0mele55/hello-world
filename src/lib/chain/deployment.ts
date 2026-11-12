@@ -28,6 +28,10 @@ export function parseDeployment(value: unknown, source: string): Deployment {
     isHex(d.runtimeBytecodeHash) &&
     d.runtimeBytecodeHash.length === 66;
   if (!valid) throw new DeploymentError('DEPLOYMENT_INVALID', `${source} is not a valid deployment record`);
+  // Deployed, but its issuer not yet registered (#142): finish it with the deploy script before anything uses it.
+  if ((d as { issuer?: { pending?: unknown } }).issuer?.pending === true) {
+    throw new DeploymentError('DEPLOYMENT_PENDING', `${source} records a registry whose issuer is not registered yet; run the deploy script again to finish it`);
+  }
   if (d.runtimeBytecodeHash !== registryRuntimeBytecodeHash) {
     throw new DeploymentError(
       'DEPLOYMENT_STALE',

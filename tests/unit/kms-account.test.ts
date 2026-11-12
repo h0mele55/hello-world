@@ -68,12 +68,17 @@ describe('the KMS account', () => {
     await expect(codeOf(kmsAccount({ tamper: 'algorithm' }))).resolves.toBe('NOT_SECP256K1');
     await expect(codeOf(kmsAccount({ tamper: 'curve' }))).resolves.toBe('NOT_SECP256K1');
     await expect(codeOf(kmsAccount({ tamper: 'pemCrc' }))).resolves.toBe('PUBLIC_KEY_CORRUPTED');
+    // A field KMS leaves out is not a check passed (#142).
+    await expect(codeOf(kmsAccount({ tamper: 'pemCrcMissing' }))).resolves.toBe('PUBLIC_KEY_CORRUPTED');
+    await expect(codeOf(kmsAccount({ tamper: 'publicKeyNameMissing' }))).resolves.toBe('WRONG_KEY_VERSION');
+    await expect(codeOf(kmsAccount({ tamper: 'publicKeyOtherVersion' }))).resolves.toBe('WRONG_KEY_VERSION');
   });
 
   it.each([
     ['digestUnverified', 'DIGEST_CORRUPTED'],
     ['signatureCrc', 'SIGNATURE_CORRUPTED'],
     ['otherVersion', 'WRONG_KEY_VERSION'],
+    ['signatureNameMissing', 'WRONG_KEY_VERSION'],
     ['garbage', 'SIGNATURE_UNREADABLE'],
     ['otherKey', 'RECOVERY_FAILED'],
   ] as const)('refuses a signature when KMS answers with %s: %s, and never returns one', async (tamper, code) => {

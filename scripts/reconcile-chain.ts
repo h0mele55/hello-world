@@ -26,7 +26,7 @@ import { PrismaClient } from '../src/generated/prisma/client';
 import { reconcileWithChain } from '../src/lib/anchoring/reconcile';
 import { orgIdFor } from '../src/lib/chain/deploy';
 import { ChainError } from '../src/lib/chain/errors';
-import { deploymentPath, isNetworkName, loadDeploymentFile, NETWORKS, rpcUrlFor, secondRpcUrlFor } from '../src/lib/chain/networks';
+import { deploymentPath, isNetworkName, loadDeploymentFile, logRangeFor, NETWORKS, rpcUrlFor, secondRpcUrlFor } from '../src/lib/chain/networks';
 
 function refuse(message: string): never {
   console.error(JSON.stringify({ level: 'error', message: `reconcile-chain refused: ${message}` }));
@@ -34,7 +34,8 @@ function refuse(message: string): never {
 }
 
 const DeploymentRecord = z.object({
-  deployBlock: z.number().int().nonnegative().optional(),
+  // Required: without it every scan of the registry's events would start at genesis (#142).
+  deployBlock: z.number().int().nonnegative(),
   issuer: z.object({ orgId: z.string().regex(/^0x[0-9a-fA-F]{64}$/), orgName: z.string().min(1) }),
 });
 
@@ -46,7 +47,7 @@ async function main() {
   const file = process.env.DEPLOYMENT_FILE ? path.resolve(process.env.DEPLOYMENT_FILE) : deploymentPath(network);
   const deployment = loadDeploymentFile(network, file);
   const record = DeploymentRecord.safeParse(JSON.parse(fs.readFileSync(file, 'utf8')));
-  if (!record.success) refuse(`${path.basename(file)} does not name the firm (issuer.orgId, issuer.orgName)`);
+  if (!record.success) refuse(`${path.basename(file)} does not name the firm (issuer.orgId, issuer.orgName) and the block the registry was deployed in (deployBlock)`);
   const onChainOrgId = record.data.issuer.orgId.toLowerCase() as `0x${string}`;
   if (orgIdFor(record.data.issuer.orgName).toLowerCase() !== onChainOrgId) refuse(`the deployment record's org id is not keccak256 of its org name`);
   let clients: [PublicClient, PublicClient];
@@ -67,7 +68,8 @@ async function main() {
       clients,
       deployment,
       firm: { orgId: org.id, onChainOrgId },
-      fromBlock: BigInt(record.data.deployBlock ?? 0),
+      fromBlock: BigInt(record.data.deployBlock),
+      rangeBlocks: logRangeFor(network),
     });
     for (const difference of report.differences) console.error(JSON.stringify({ level: 'error', message: 'DIFFERENCE BETWEEN THE DATABASE AND THE CHAIN', ...difference }));
     console.log(JSON.stringify({ level: 'info', message: 'reconciled with the chain', network, block: Number(report.block), versions: report.versions, records: report.records, differences: report.differences.length }));

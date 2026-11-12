@@ -94,7 +94,7 @@ npm run contracts:artifact     # regenerate src/lib/chain/registry-artifact.ts a
 npm run test:integration       # chain adapter and verifier against throwaway Anvil nodes
 npx tsx scripts/deploy-registry.ts <network>             # deploy (sepolia, local, base-sepolia, …); of the production networks only arbitrum, after arbitrum-sepolia (#63); REVOCATION_DELAY_HOURS (default 24, local 0)
 npx tsx scripts/measure-chain-costs.ts                   # today's cost per report and finality lag on the production candidates
-npx tsx scripts/owner-call.ts <sepolia|local> <add-issuer|remove-issuer|cancel-revocation|void-audit-head|record-reanchor-root|void-reanchor-root|transfer-owner|accept-owner> [address|recordId|index|archive.json]   # prints the owner's transaction; sends nothing
+npx tsx scripts/owner-call.ts <network> <add-issuer|remove-issuer|cancel-revocation|void-audit-head|record-reanchor-root|void-reanchor-root|transfer-owner|accept-owner> [address|recordId|index|archive.json]   # prints the owner's transaction; sends nothing
 npx tsx scripts/reanchor.ts build <source> <target>      # archive every record of a retiring registry, with a proof per record (#65)
 npx tsx scripts/reanchor.ts check <dir> <target>         # every proof against the root the owner recorded; exit 1 on any failure
 npx tsx scripts/kms-address.ts <KMS key version name>     # the address of a Cloud KMS issuer key, to register it
@@ -185,10 +185,27 @@ Locally, Playwright needs the browser of its own version:
   script refuses the other `PRODUCTION_NETWORKS`, and deploys to Arbitrum One
   only once `deployments/arbitrum-sepolia.json` exists (#123). A monthly root
   of its records goes to Bitcoin through OpenTimestamps (#122).
-- **All chain access goes through `src/lib/chain/`.** `createChainAdapter`
-  checks the chain id and the code at the registry address, then simulates,
-  before every write, so a refusal is a named `RegistryRevertError` and nothing
-  is broadcast. A returned `txHash` is not an anchor: call `waitFinal`.
+- **All chain access goes through `src/lib/chain/`.** The app's only chain
+  writer is the worker, through the journal (rule 3); the scripts write as the
+  owner (`owner-call.ts`) or deploy (#142). `createChainAdapter`, which checks
+  the chain id and the code, simulates, signs without a journal and reads one
+  endpoint, is for tests and rehearsals only: never use it to write from the
+  app. A returned `txHash` is not an anchor: it counts once its block is
+  `finalized`.
+- **Scripts that scan the registry's events** (the watch, reconcile, the
+  checkpoint, re-anchoring) read `getLogs` in `LOG_RANGE_BLOCKS[network]`
+  windows, `<NETWORK>_LOG_RANGE` to override, from the record's `deployBlock`,
+  which is required: without it a scan would start at genesis. A month's
+  checkpoint scans only the blocks since the last one, whose records it reads
+  again at its own block (#142).
+- **The deploy script records the registry before registering its issuer**
+  (#142): the record is written, issuer `pending`, as soon as the bytecode
+  checks, and a rerun with the same settings finishes it rather than deploying
+  another. Nothing loads a pending record (`DEPLOYMENT_PENDING`).
+- **The second endpoint's "another provider" check is a heuristic**
+  (`providerOf`): the loopback interface, however spelled, is told apart only
+  by port, and a host name by its registrable domain. It catches a mistake; it
+  cannot prove two providers are independent.
 - **Integration tests start their own Anvil** with `--slots-in-an-epoch 1`, so
   `finalized` trails `latest` by two blocks; mine blocks to reach finality.
 
@@ -395,9 +412,11 @@ to one inflect-compliance commit.
   reviewed (`reviewUnjournaledWrite`).
 - **The owner's acts go through `scripts/owner-call.ts`**, which checks the
   chain and the registry, simulates, and prints the transaction for the owner
-  (the deployer key, later a Safe) to execute. It sends only an issuer change
-  or a cancellation, only with `--send` and `OWNER_PRIVATE_KEY`, and never an
-  ownership move. A revocation the firm did not ask for is
+  (the deployer key, later a Safe) to execute, on any network in `NETWORKS`.
+  With `--send` and `OWNER_PRIVATE_KEY` it sends an issuer change, a
+  cancellation, a void (of an audit head or a re-anchor root) or a re-anchor
+  root, never an ownership move, and says whether the write's block is final
+  yet (`final`). A revocation the firm did not ask for is
   `docs/runbooks/stolen-issuer-key.md`.
 
 ## The verifier

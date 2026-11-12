@@ -39,6 +39,17 @@ export interface FileStore {
   discard(relativePath: string): Promise<void>;
 }
 
+/** Makes a new directory entry durable. Windows cannot open a directory to sync it, and does not need to. */
+async function syncDirectory(dir: string): Promise<void> {
+  if (process.platform === 'win32') return;
+  const handle = await fs.open(dir, 'r');
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
 export function createFileStore(options: { dir: string; current: SealingKey; keys: SealingKey[] }): FileStore {
   const { dir, current, keys } = options;
   const contextOf = (relativePath: string) => `stored-file:${relativePath}`;
@@ -47,8 +58,17 @@ export function createFileStore(options: { dir: string; current: SealingKey; key
       const relativePath = `${randomUUID()}.bin`;
       const sealed = encrypt(current, bytes, contextOf(relativePath));
       await fs.mkdir(dir, { recursive: true, mode: 0o700 });
-      // 'wx': never overwrite an existing file.
-      await fs.writeFile(path.join(dir, relativePath), sealed.ciphertext, { flag: 'wx', mode: 0o600 });
+      // 'wx': never overwrite an existing file. Synced, file and directory
+      // entry, before returning (#156): the row naming it is committed next,
+      // and a crash must not leave a row naming a file the disk never got.
+      const handle = await fs.open(path.join(dir, relativePath), 'wx', 0o600);
+      try {
+        await handle.writeFile(sealed.ciphertext);
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      await syncDirectory(dir);
       return { path: relativePath, iv: sealed.iv, authTag: sealed.authTag, keyVersion: current.version, sha256: sha256(bytes), size: bytes.length };
     },
     async read(record) {

@@ -38,6 +38,7 @@ import { verifyAuditChain } from '@/lib/audit';
 import { deployRegistry, orgIdFor } from '@/lib/chain/deploy';
 import { docHashOf } from '@/lib/commitments';
 import { createFileStore, type FileStore } from '@/lib/file-store';
+import { createLockSession } from '@/lib/anchoring/lock-session';
 import { parsePdf } from '@/lib/pdf/parse';
 import { readStamp } from '@/lib/stamp-fields';
 import type { Deployment } from '@/lib/chain/deployment';
@@ -296,6 +297,27 @@ describe('LIVE anchoring', () => {
     expect(await prisma.auditEvent.count({ where: { action: 'version.certified', subjectId: versionId } })).toBe(1);
   });
 
+  it('certifies no version whose revocation is approved while its certificate is being made (#156)', async () => {
+    await goLive();
+    const versionId = await confirmedVersion((await engagement()).id, 'en-signed.pdf');
+    await approveVersion(approver, versionId, target);
+    await pass();
+    await mine();
+    const { engagementRef } = (await versionOf(versionId)).engagement;
+    // The certificate is made and stored; before it is committed, the version is withdrawn: asked and approved.
+    let revocationId = '';
+    const withdraw = async () => {
+      ({ revocationId } = await requestRevocation(admin, { versionId, reason: 'ISSUED_IN_ERROR', note: 'Issued against the wrong period.', confirmation: engagementRef }));
+      await approveRevocation(approver, revocationId, target);
+    };
+    const report = await pass({ faults: { beforeCertify: withdraw } });
+    expect(report.certified).toEqual([]);
+    expect(await versionOf(versionId)).toMatchObject({ status: 'ANCHORED', certificateStoredFileId: null });
+    expect(await prisma.auditEvent.count({ where: { action: 'version.certified', subjectId: versionId } })).toBe(0);
+    expect(await prisma.revocation.findUniqueOrThrow({ where: { id: revocationId } })).toMatchObject({ status: 'APPROVED' });
+    expect(await verifyAuditChain(prisma, admin.orgId)).toMatchObject({ ok: true });
+  });
+
   it('never stamps a file that is not the anchored original, and lets an approver retry the copy', async () => {
     await goLive();
     const versionId = await confirmedVersion((await engagement()).id, 'en-qualified.pdf');
@@ -430,6 +452,32 @@ describe('a worker that dies, and writes whose outcome is unknown', () => {
     expect(await copyWriteOf(versionId)).toMatchObject({ nonce: 1 });
     const actions = (await prisma.auditEvent.findMany({ where: { subjectId: chainWriteId }, orderBy: { seq: 'asc' } })).map((e) => e.action);
     expect(actions).toEqual(['anchor.indeterminate', 'anchor.broadcast', 'anchor.final']);
+  });
+
+  it('survives its lock session dying: the pass ends before signing, and the next one sends (#156)', async () => {
+    const session = createLockSession(process.env.DATABASE_URL!, 'anchor-issuer-lock-test');
+    try {
+      await goLive();
+      const { chainWriteId } = await approveVersion(approver, await confirmedVersion((await engagement()).id, 'en-unmodified.pdf'), target);
+      // The database ends the session holding the issuer's lock, as a restart or an idle-connection kill does.
+      const kill = async () => {
+        await prisma.$executeRaw`SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE application_name = 'anchor-issuer-lock-test'`;
+        for (let i = 0; i < 100 && !session.lost; i++) await new Promise((r) => setTimeout(r, 20));
+        expect(session.lost).toBe(true);
+      };
+      const report = await pass({ lockClient: session, faults: { afterBuild: kill } });
+      // No unhandled error took the process down; the pass ended, naming why, and nothing was signed or sent.
+      expect(report.reason).toBe('LOCK_LOST');
+      expect(await writeOf(chainWriteId)).toMatchObject({ status: 'INTENT', txHash: null, nonce: null });
+      expect(await nonceOf('pending')).toBe(0);
+
+      advance(120_001);
+      await pass({ lockClient: session });
+      expect(session.lost).toBe(false);
+      expect(await writeOf(chainWriteId)).toMatchObject({ status: 'BROADCAST', nonce: 0 });
+    } finally {
+      await session.end();
+    }
   });
 
   it('holds a write whose bytes never left, blocks the key, and settles it once its nonce is used', async () => {
@@ -898,6 +946,45 @@ describe('revocation', () => {
     expect(await revocationOf(again.revocationId)).toMatchObject({ status: 'SCHEDULED' });
   });
 
+  it.each([
+    ['finds its transaction', true],
+    ['settles from the record alone when its transaction is out of reach', false],
+  ])('settles a cancelled revocation through endpoints that cap a log query’s range: %s (#156)', async (_, reachable) => {
+    // As public endpoints do: a log query over more than 50 blocks is refused.
+    const upstream = http(anvil.url)({ chain: foundry });
+    const capped = createPublicClient({
+      chain: foundry,
+      pollingInterval: 50,
+      transport: custom({
+        request: ({ method, params }: { method: string; params?: unknown }) => {
+          const [filter] = (params ?? []) as { fromBlock?: Hex; toBlock?: Hex }[];
+          if (method === 'eth_getLogs' && filter?.fromBlock && filter.toBlock && BigInt(filter.toBlock) - BigInt(filter.fromBlock) >= 50n) {
+            return Promise.reject(new Error('query exceeds the 50 block range limit'));
+          }
+          return upstream.request({ method, params } as Parameters<typeof upstream.request>[0]);
+        },
+      }),
+    }) as PublicClient;
+    const through = (options: Partial<WorkerDeps['options']> = {}) => pass({ publicClient: capped, checkClient: capped, options: { logRangeBlocks: 50, ...options } });
+
+    {
+      const { versionId, revocationId } = await approvedRevocation();
+      await pass();
+      await mine();
+      await pass();
+      expect(await revocationOf(revocationId)).toMatchObject({ status: 'SCHEDULED' });
+      // The record was anchored long before the cancellation: far more blocks than one query may span.
+      await mine(120);
+      const cancelTx = await cancelAsOwner((await versionOf(versionId)).recordId!);
+      await mine(reachable ? 3 : 120);
+      // With one window only, the cancellation, 120 blocks back, is out of reach: the record still decides.
+      const report = await through(reachable ? {} : { maxLogWindows: 1 });
+      expect(report.revocations).toEqual([{ revocationId, outcome: 'CANCELLED' }]);
+      const cancelled = await prisma.auditEvent.findFirstOrThrow({ where: { subjectId: revocationId, action: 'revocation.cancelled' } });
+      expect(cancelled.data).toMatchObject({ cancelTxHash: reachable ? cancelTx : null });
+    }
+  });
+
   it('settles a request cancelled before it was even final: its own transaction says it asked, the record says it is gone', async () => {
     const { versionId, revocationId, chainWriteId } = await approvedRevocation();
     await pass();
@@ -1310,6 +1397,24 @@ describe('two RPC endpoints (#92)', () => {
     expect((await pass({ checkClient: endpoint() })).steps[0]).toMatchObject({ writeId: chainWriteId, to: 'FINAL' });
   });
 
+  it('waits, rather than fails, a copy whose original is not final on an endpoint that lags behind (#156)', async () => {
+    const { versionId, chainWriteId } = await broadcastAnchor();
+    await mine();
+    // The anchor is final on both; its first copy fails on storage handing back the wrong bytes, and an approver queues it again.
+    const wrong: FileStore = { ...files, read: async () => new Uint8Array(fixture('en-adverse.pdf')) };
+    await pass({ checkClient: endpoint(), files: wrong });
+    expect(await writeOf(chainWriteId)).toMatchObject({ status: 'FINAL' });
+    expect(await copyWriteOf(versionId)).toMatchObject({ status: 'FAILED', error: 'STAMP_ORIGINAL_HASH_MISMATCH' });
+    await requeueCopy(approver, versionId, target);
+    // Then the second endpoint falls behind: its finalized block is the genesis block again.
+    const lagging = endpoint((method, params, forward) => (method === 'eth_getBlockByNumber' && params[0] === 'finalized' ? forward(['0x0', params[1]]) : forward()));
+    await pass({ checkClient: lagging });
+    expect(await copyWriteOf(versionId)).toMatchObject({ status: 'INTENT', error: 'ORIGINAL_NOT_FINAL', txHash: null, leaseUntil: null });
+    // Once it catches up, the copy is made and sent.
+    await pass({ checkClient: endpoint() });
+    expect(await copyWriteOf(versionId)).toMatchObject({ status: 'BROADCAST' });
+  });
+
   it('marks a scheduled revocation cancelled only when both endpoints read it gone', async () => {
     const { versionId, chainWriteId: anchorWriteId } = await broadcastAnchor();
     await pass();
@@ -1420,6 +1525,33 @@ describe('the firm’s electronic seal on the distribution copy (#70)', () => {
       expect.objectContaining({ sealed: false, copyDocHash: unsealed.copyDocHash }),
       expect.objectContaining({ sealed: true, copyDocHash: version.copyDocHash, replacedUnsealedCopy: unsealed.copyDocHash }),
     ]);
+  });
+
+  it('never anchors a stored copy it cannot read back: it is made again from the original (#156)', async () => {
+    await goLive();
+    const versionId = await confirmedVersion((await engagement()).id, 'en-unmodified.pdf');
+    await approveVersion(approver, versionId, target);
+    await pass();
+    await mine();
+    // The copy is stored, then the worker dies before sending it.
+    await pass({ faults: { afterBuild: async () => Promise.reject(new Error('killed')) } });
+    const stored = await versionOf(versionId);
+    expect(stored.copyDocHash).toMatch(/^0x/);
+    // The disk lost what the row names, as a crash before the write reached it can.
+    const lostFile = await prisma.storedFile.findUniqueOrThrow({ where: { id: stored.copyStoredFileId! } });
+    fs.truncateSync(path.join(process.env.FILE_STORAGE_DIR!, lostFile.path), 0);
+
+    advance(120_001);
+    await pass();
+    await mine();
+    await pass();
+    const version = await versionOf(versionId);
+    expect(version.status).toBe('COMPLETE');
+    expect(version.copyStoredFileId).not.toBe(lostFile.id);
+    // The copy anchored is one the firm can hand out.
+    expect(docHashOf(await storedCopy(versionId))).toBe(version.copyDocHash);
+    const stamped = await prisma.auditEvent.findMany({ where: { action: 'version.stamped', subjectId: versionId }, orderBy: { seq: 'asc' } });
+    expect(stamped.map((e) => e.data)).toEqual([expect.objectContaining({ copyDocHash: stored.copyDocHash }), expect.objectContaining({ replacedLostCopy: stored.copyDocHash })]);
   });
 
   it('waits while the seal provider does not answer, says so after an hour, and seals once it answers', async () => {

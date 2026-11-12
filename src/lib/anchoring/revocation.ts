@@ -108,7 +108,9 @@ export async function approveRevocation(user: SessionUser, revocationId: string,
     const revocation = await lockRevocation(tx, user, revocationId);
     if (revocation.status !== 'REQUESTED') throw new AnchoringError('NOT_REQUESTED');
     if (revocation.requestedById === user.id) throw new AnchoringError('FOUR_EYES');
-    const version = revocation.reportVersion;
+    // The version row, as the worker locks it to certify an anchor-only version (#156), read again under that lock.
+    await tx.$queryRaw`SELECT "id" FROM "ReportVersion" WHERE "id" = ${revocation.reportVersionId} FOR NO KEY UPDATE`;
+    const version = await tx.reportVersion.findUniqueOrThrow({ where: { id: revocation.reportVersionId }, select: { id: true, status: true, recordId: true } });
     if (!(REVOCABLE as readonly string[]).includes(version.status) || !version.recordId) throw new AnchoringError('NOT_REVOCABLE');
     const copyInFlight = await tx.chainWrite.count({
       where: { reportVersionId: version.id, kind: 'ANCHOR_COPY', status: { in: ['INTENT', 'BROADCAST', 'INDETERMINATE'] } },

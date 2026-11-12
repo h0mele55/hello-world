@@ -4,12 +4,13 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { PrismaPg } from '@prisma/adapter-pg';
-import { bytesToHex, createPublicClient, http, sha256, type Hex, type PublicClient } from 'viem';
+import { bytesToHex, createPublicClient, custom, http, sha256, type Hex, type PublicClient } from 'viem';
 import { foundry } from 'viem/chains';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { PrismaClient } from '@/generated/prisma/client';
 import { exportCheckpoint, runCheckpoint, type CheckpointDeps } from '@/lib/anchoring/checkpoint';
 import { orgIdFor } from '@/lib/chain/deploy';
+import { buildCheckpoint } from '@/lib/chain/reanchor-build';
 import { attestationsOf, parseProof, serializeProof, serializeTimestamp, type Proof, type Timestamp } from '@/lib/ots/format';
 import type { BitcoinTime } from '@/lib/ots/bitcoin';
 import { runOtsPass } from '@/lib/ots/job';
@@ -192,6 +193,40 @@ describe('the monthly checkpoint (#122)', () => {
     expect(new Set(digests.map((d) => d.digest)).size).toBe(2);
   });
 
+  it('makes the next month’s checkpoint from the blocks since the last one only, and still holds every record (#142)', async () => {
+    const last = await prisma.registryCheckpoint.findFirstOrThrow({ orderBy: { block: 'desc' }, select: { block: true, count: true } });
+    const c1 = await anchorOriginal(registry, fixture('en-disclaimer.pdf'), family(0xc1));
+    await finalise(registry);
+    // Endpoints that note every range of logs they are asked for.
+    const asked: { from: bigint; to: bigint }[] = [];
+    const counting = () => {
+      const upstream = http(anvil.url)({ chain: foundry });
+      return createPublicClient({
+        chain: foundry,
+        transport: custom({
+          request: ({ method, params }: { method: string; params?: unknown }) => {
+            if (method === 'eth_getLogs') {
+              const filter = (params as { fromBlock: Hex; toBlock: Hex }[])[0];
+              asked.push({ from: BigInt(filter.fromBlock), to: BigInt(filter.toBlock) });
+            }
+            return upstream.request({ method, params } as Parameters<typeof upstream.request>[0]);
+          },
+        }),
+      }) as PublicClient;
+    };
+    const december = await runCheckpoint({ ...deps, clients: [counting(), counting()], now: () => new Date('2027-01-01T02:00:00Z') });
+    if (december.status !== 'CREATED') throw new Error(december.status);
+    expect(december).toMatchObject({ period: '2026-12', count: last.count + 1 });
+    expect(asked.length).toBeGreaterThan(0);
+    expect(asked.every((range) => range.from > BigInt(last.block))).toBe(true);
+    // The same records, the new one among them, under the same root as a scan from the deploy block gives at that block.
+    const stored = checkReanchorSet(JSON.parse(new TextDecoder().decode((await prisma.registryCheckpoint.findUniqueOrThrow({ where: { id: december.checkpointId } })).file)));
+    expect(stored.records.map((r) => r.recordId)).toContain(c1.recordId.toLowerCase());
+    const { checkpoint: full } = await buildCheckpoint({ clients, source: { ...registry.deployment, deployBlock: 0 }, issuerNames: [ISSUER_ORG], period: '2026-12' });
+    if (full.source.block === december.block) expect(full.root).toBe(december.root);
+    expect(full.records.map((r) => r.recordId).sort()).toEqual(stored.records.map((r) => r.recordId).sort());
+  });
+
   it('is not used while the registry answers', async () => {
     const set = checkReanchorSet(JSON.parse(JSON.stringify(exported)));
     const live = await verifyWithReanchors({ bytes: files['A v2'], config, openView: () => openRegistryView(config), readPdf, sets: [set], bitcoinCheck: bitcoinTime });
@@ -290,3 +325,4 @@ describe('the monthly checkpoint (#122)', () => {
     await expect(run(process.execPath, ['bin/verify-report.mjs', pdf, '--checkpoint', file], { cwd: ROOT })).rejects.toMatchObject({ code: 2 });
   }, 120_000);
 });
+

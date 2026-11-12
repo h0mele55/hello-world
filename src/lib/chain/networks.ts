@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { isIP } from 'node:net';
 import path from 'node:path';
 import { arbitrum, arbitrumSepolia, base, baseSepolia, foundry, mainnet, optimism, optimismSepolia, sepolia } from 'viem/chains';
 import { parseDeployment, type Deployment } from './deployment';
@@ -30,6 +31,34 @@ export const NETWORKS = {
   'arbitrum-sepolia': arbitrumSepolia,
 } as const;
 export type NetworkName = keyof typeof NETWORKS;
+
+/**
+ * Blocks asked for in one getLogs call when a script reads the registry's
+ * events (#142). Public endpoints cap a query's range, and chains differ by an
+ * order of magnitude in blocks a month (Arbitrum makes about ten million), so
+ * the range is per network, and `<NETWORK>_LOG_RANGE` overrides it for the
+ * endpoint in use. A range the endpoint refuses fails the run, never skips.
+ */
+export const LOG_RANGE_BLOCKS: Record<NetworkName, number> = {
+  sepolia: 2_000,
+  local: 2_000,
+  mainnet: 2_000,
+  base: 10_000,
+  'base-sepolia': 10_000,
+  optimism: 10_000,
+  'optimism-sepolia': 10_000,
+  arbitrum: 10_000,
+  'arbitrum-sepolia': 10_000,
+};
+
+export function logRangeFor(network: NetworkName, env: NodeJS.ProcessEnv = process.env): number {
+  const name = `${network.toUpperCase().replace(/-/g, '_')}_LOG_RANGE`;
+  const raw = env[name];
+  if (raw === undefined || raw === '') return LOG_RANGE_BLOCKS[network];
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > 1_000_000) throw new ChainError('ENV_INVALID', `${name} must be a whole number of blocks from 1 to 1000000`);
+  return value;
+}
 
 /** Networks whose anchors would be the firm's real evidence: the candidates measured for the owner (#63). */
 export const PRODUCTION_NETWORKS: readonly NetworkName[] = ['mainnet', 'base', 'optimism', 'arbitrum'];
@@ -83,18 +112,40 @@ export const rpcUrlVariable = (network: NetworkName) => `${network.toUpperCase()
  * something only if different parties run them. A local chain may use one
  * (LOCAL_RPC_URL_2, or the first).
  */
+/** Second-level labels under which a country code's registrable domains sit (example.co.uk). */
+const SECOND_LEVEL = new Set(['ac', 'co', 'com', 'edu', 'gov', 'net', 'org']);
+
+/**
+ * Who serves an endpoint, as far as its URL tells (#142): a heuristic, not
+ * proof that two providers are independent. The loopback interface, however
+ * spelled (127.x, ::1, localhost), is one host, told apart only by port; an IP
+ * literal is itself; a host name is its registrable domain, so two host names
+ * of one provider (eth-sepolia.g.alchemy.com, arb-sepolia.g.alchemy.com) are
+ * one. A path, query or key never makes another provider.
+ */
+export function providerOf(url: string): string {
+  const u = new URL(url);
+  const host = u.hostname.toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  const port = u.port || (u.protocol === 'https:' ? '443' : '80');
+  if (host === 'localhost' || host.endsWith('.localhost') || /^127\./.test(host) || host === '::1' || /^(0+:){7}0*1$/.test(host) || host === '::ffff:127.0.0.1') return `loopback:${port}`;
+  if (isIP(host)) return host;
+  const labels = host.split('.');
+  const keep = labels.length >= 3 && labels.at(-1)!.length === 2 && SECOND_LEVEL.has(labels.at(-2)!) ? 3 : 2;
+  return labels.slice(-keep).join('.');
+}
+
 export function secondRpcUrlFor(network: NetworkName, env: NodeJS.ProcessEnv = process.env): string {
   if (network === 'local') return env.LOCAL_RPC_URL_2 || rpcUrlFor(network, env);
   const name = `${rpcUrlVariable(network)}_2`;
   const url = env[name];
   if (!url) throw new ChainError('ENV_MISSING', `${name} is not set: the worker reads a second endpoint, from another provider (#92)`);
-  let hosts: string[];
+  let providers: string[];
   try {
-    hosts = [rpcUrlFor(network, env), url].map((u) => new URL(u).hostname);
+    providers = [rpcUrlFor(network, env), url].map(providerOf);
   } catch {
     throw new ChainError('ENV_INVALID', `${rpcUrlVariable(network)} or ${name} is not a URL`);
   }
-  if (hosts[0] === hosts[1]) throw new ChainError('RPC_NOT_INDEPENDENT', `${name} must be another provider than ${rpcUrlVariable(network)}`);
+  if (providers[0] === providers[1]) throw new ChainError('RPC_NOT_INDEPENDENT', `${name} must be another provider than ${rpcUrlVariable(network)}`);
   return url;
 }
 

@@ -40,6 +40,12 @@ export interface ReadDeps {
   /** Names of the source's issuer firms, each the one its org id is the hash of. */
   issuerNames?: readonly string[];
   rangeBlocks?: number;
+  /**
+   * The records an earlier read held at its finalized block, a checkpoint of
+   * this very registry (#142): their events are not scanned again, only the
+   * blocks after it. Every record is still read again at the new block.
+   */
+  known?: { block: number; records: readonly { recordId: Hex; txHash: Hash; blockNumber: number }[] };
 }
 
 export interface BuildDeps extends ReadDeps {
@@ -82,8 +88,11 @@ export async function readRegistryRecords(
   const read = <T>(what: string, run: (client: PublicClient) => Promise<T>) => readOnBoth(clients, what, run);
 
   const anchored: { recordId: Hex; txHash: Hash; blockNumber: number }[] = [];
+  const known = deps.known && BigInt(deps.known.block) <= block ? deps.known : null;
+  for (const r of known?.records ?? []) anchored.push({ recordId: r.recordId.toLowerCase() as Hex, txHash: r.txHash.toLowerCase() as Hash, blockNumber: r.blockNumber });
+  const scanFrom = known && known.block + 1 > source.deployBlock ? BigInt(known.block + 1) : BigInt(source.deployBlock);
   const range = BigInt(deps.rangeBlocks ?? RANGE_BLOCKS);
-  for (let from = BigInt(source.deployBlock); from <= block; from += range) {
+  for (let from = scanFrom; from <= block; from += range) {
     const to = from + range - 1n < block ? from + range - 1n : block;
     const events = await read(`the registry's anchors in blocks ${from} to ${to}`, async (c) =>
       (await c.getContractEvents({ address, abi: registryAbi, eventName: 'Anchored', fromBlock: from, toBlock: to })).map((e) => ({

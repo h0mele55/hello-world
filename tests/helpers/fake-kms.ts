@@ -16,7 +16,19 @@ export const P256_PEM = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).
 export interface FakeKmsOptions {
   /** Return the high-s twin of every signature, as KMS may. */
   highS?: boolean;
-  tamper?: 'algorithm' | 'curve' | 'pemCrc' | 'digestUnverified' | 'signatureCrc' | 'otherVersion' | 'garbage' | 'otherKey';
+  tamper?:
+    | 'algorithm'
+    | 'curve'
+    | 'pemCrc'
+    | 'pemCrcMissing'
+    | 'publicKeyNameMissing'
+    | 'publicKeyOtherVersion'
+    | 'digestUnverified'
+    | 'signatureCrc'
+    | 'otherVersion'
+    | 'signatureNameMissing'
+    | 'garbage'
+    | 'otherKey';
 }
 
 export function fakeKms(privateKey: Uint8Array, options: FakeKmsOptions = {}): KmsClient & { signed: number } {
@@ -29,13 +41,13 @@ export function fakeKms(privateKey: Uint8Array, options: FakeKmsOptions = {}): K
       const crc = crc32c(new TextEncoder().encode(pem));
       return [
         {
-          name,
+          name: options.tamper === 'publicKeyNameMissing' ? undefined : options.tamper === 'publicKeyOtherVersion' ? name.replace(/\d+$/, '99') : name,
           pem,
           algorithm: options.tamper === 'algorithm' ? 'EC_SIGN_P256_SHA256' : 'EC_SIGN_SECP256K1_SHA256',
           // KMS sends 64-bit integers as strings.
-          pemCrc32c: { value: String(options.tamper === 'pemCrc' ? crc ^ 1 : crc) },
+          pemCrc32c: options.tamper === 'pemCrcMissing' ? undefined : { value: String(options.tamper === 'pemCrc' ? crc ^ 1 : crc) },
         },
-      ] as [{ name: string; pem: string; algorithm: string; pemCrc32c: { value: string } }];
+      ] as [{ name?: string; pem: string; algorithm: string; pemCrc32c?: { value: string } }];
     },
     async asymmetricSign({ name, digest, digestCrc32c }: { name: string; digest: { sha256: Uint8Array }; digestCrc32c: { value: number } }) {
       fake.signed += 1;
@@ -46,12 +58,12 @@ export function fakeKms(privateKey: Uint8Array, options: FakeKmsOptions = {}): K
       const crc = crc32c(der);
       return [
         {
-          name: options.tamper === 'otherVersion' ? name.replace(/\d+$/, '99') : name,
+          name: options.tamper === 'signatureNameMissing' ? undefined : options.tamper === 'otherVersion' ? name.replace(/\d+$/, '99') : name,
           signature: der,
           signatureCrc32c: { value: String(options.tamper === 'signatureCrc' ? crc ^ 1 : crc) },
           verifiedDigestCrc32c: options.tamper === 'digestUnverified' ? false : crc32c(digest.sha256) === digestCrc32c.value,
         },
-      ] as [{ name: string; signature: Uint8Array; signatureCrc32c: { value: string }; verifiedDigestCrc32c: boolean }];
+      ] as [{ name?: string; signature: Uint8Array; signatureCrc32c: { value: string }; verifiedDigestCrc32c: boolean }];
     },
   };
   return fake;

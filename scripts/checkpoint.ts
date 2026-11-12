@@ -36,7 +36,7 @@ import { PrismaClient } from '../src/generated/prisma/client';
 import { exportCheckpoint, runCheckpoint } from '../src/lib/anchoring/checkpoint';
 import { orgIdFor } from '../src/lib/chain/deploy';
 import { ChainError } from '../src/lib/chain/errors';
-import { deploymentPath, isNetworkName, loadDeploymentFile, NETWORKS, rpcUrlFor, secondRpcUrlFor } from '../src/lib/chain/networks';
+import { deploymentPath, isNetworkName, loadDeploymentFile, logRangeFor, NETWORKS, rpcUrlFor, secondRpcUrlFor } from '../src/lib/chain/networks';
 
 function refuse(message: string): never {
   console.error(JSON.stringify({ level: 'error', message: `checkpoint refused: ${message}` }));
@@ -44,7 +44,8 @@ function refuse(message: string): never {
 }
 
 const DeploymentRecord = z.object({
-  deployBlock: z.number().int().nonnegative().optional(),
+  // Required: without it every scan of the registry's events would start at genesis (#142).
+  deployBlock: z.number().int().nonnegative(),
   issuer: z.object({ orgId: z.string().regex(/^0x[0-9a-fA-F]{64}$/), orgName: z.string().min(1) }),
 });
 
@@ -57,7 +58,7 @@ async function main() {
   const file = process.env.DEPLOYMENT_FILE ? path.resolve(process.env.DEPLOYMENT_FILE) : deploymentPath(network);
   const deployment = loadDeploymentFile(network, file);
   const record = DeploymentRecord.safeParse(JSON.parse(fs.readFileSync(file, 'utf8')));
-  if (!record.success) refuse(`${path.basename(file)} does not name the firm (issuer.orgId, issuer.orgName)`);
+  if (!record.success) refuse(`${path.basename(file)} does not name the firm (issuer.orgId, issuer.orgName) and the block the registry was deployed in (deployBlock)`);
   const name = record.data.issuer.orgName;
   if (orgIdFor(name).toLowerCase() !== record.data.issuer.orgId.toLowerCase()) refuse(`the deployment record's org id is not keccak256 of its org name`);
   if (values.export !== undefined && !/^\d{4}-(0[1-9]|1[0-2])$/.test(values.export)) refuse('--export takes a month, YYYY-MM');
@@ -98,7 +99,8 @@ async function main() {
     const outcome = await runCheckpoint({
       prisma,
       clients,
-      deployment: { chainId: deployment.chainId, address: deployment.address, runtimeBytecodeHash: deployment.runtimeBytecodeHash, deployBlock: record.data.deployBlock ?? 0 },
+      deployment: { chainId: deployment.chainId, address: deployment.address, runtimeBytecodeHash: deployment.runtimeBytecodeHash, deployBlock: record.data.deployBlock },
+      rangeBlocks: logRangeFor(network),
       firm: { orgId: org.id, name },
     });
     console.log(JSON.stringify({ level: 'info', message: 'checkpoint', network, ...outcome }));

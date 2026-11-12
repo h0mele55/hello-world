@@ -114,7 +114,7 @@ describe('the owner’s calls', () => {
     expect(await issuerOf(next)).toEqual([`0x${'0'.repeat(64)}`, false]);
 
     const added = await ownerCall(['add-issuer', next, '--send'], { OWNER_PRIVATE_KEY: ownerKey });
-    expect(added).toMatchObject({ code: 0, out: { message: 'sent', transaction: { hash: expect.stringMatching(/^0x[0-9a-f]{64}$/) } } });
+    expect(added).toMatchObject({ code: 0, out: { final: false, message: expect.stringContaining('not final yet'), transaction: { hash: expect.stringMatching(/^0x[0-9a-f]{64}$/) } } });
     expect(await issuerOf(next)).toEqual([orgId, true]);
     const retired = await ownerCall(['remove-issuer', firstIssuer, '--send'], { OWNER_PRIVATE_KEY: ownerKey });
     expect(retired.code).toBe(0);
@@ -147,7 +147,7 @@ describe('the owner’s calls', () => {
     expect(printed.out!.transaction).toMatchObject({ from: owner.address, to: address, data: encodeFunctionData({ abi: registryAbi, functionName: 'cancelRevocation', args: [recordId] }) });
     expect((await recordOf()).revokeReason).toBe(1);
     await expect(ownerCall(['cancel-revocation', recordId, '--send'], { OWNER_PRIVATE_KEY: generatePrivateKey() })).resolves.toMatchObject({ code: 2, error: expect.stringContaining('is not the owner') });
-    expect(await ownerCall(['cancel-revocation', recordId, '--send'], { OWNER_PRIVATE_KEY: ownerKey })).toMatchObject({ code: 0, out: { message: 'sent' } });
+    expect(await ownerCall(['cancel-revocation', recordId, '--send'], { OWNER_PRIVATE_KEY: ownerKey })).toMatchObject({ code: 0, out: { final: false, message: expect.stringContaining('not final yet') } });
     expect(await recordOf()).toMatchObject({ revoked: false, revokeReason: 0, revokeEffectiveAt: 0 });
 
     // Once in effect, a revocation is terminal.
@@ -175,7 +175,7 @@ describe('the owner’s calls', () => {
     const printed = await ownerCall(['void-audit-head', String(index)]);
     expect(printed.out!.transaction).toMatchObject({ from: owner.address, to: address, data: encodeFunctionData({ abi: registryAbi, functionName: 'voidAuditHead', args: [orgIdFor(ISSUER_ORG), BigInt(index)] }) });
     expect((await headsOf())[index].voided).toBe(false);
-    expect(await ownerCall(['void-audit-head', String(index), '--send'], { OWNER_PRIVATE_KEY: ownerKey })).toMatchObject({ code: 0, out: { message: 'sent' } });
+    expect(await ownerCall(['void-audit-head', String(index), '--send'], { OWNER_PRIVATE_KEY: ownerKey })).toMatchObject({ code: 0, out: { final: false, message: expect.stringContaining('not final yet') } });
     expect((await headsOf())[index]).toMatchObject({ head: forged, voided: true });
     await expect(ownerCall(['void-audit-head', String(index)])).resolves.toMatchObject({ code: 2, error: expect.stringContaining('already voided') });
   });

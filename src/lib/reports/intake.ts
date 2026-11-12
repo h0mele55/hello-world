@@ -275,11 +275,15 @@ export async function confirmOpinion(user: SessionUser, input: Confirmation) {
   if (!isIsoDate(input.reportDate)) throw new IntakeError('INVALID_INPUT', 'reportDate');
   // A choice among candidates is recorded only when there were candidates to choose from (#77).
   let chosen: OpinionPassage | null = null;
+  const extraction = openJson<LocateResult>(sealingKeys(), version.extraction, extractionContext(version.docHash));
   if (input.candidate !== undefined) {
-    const extraction = openJson<LocateResult>(sealingKeys(), version.extraction, extractionContext(version.docHash));
     chosen = extraction.status === 'CANDIDATES' && Number.isInteger(input.candidate) ? (extraction.candidates[input.candidate] ?? null) : null;
     if (!chosen) throw new IntakeError('INVALID_INPUT', 'candidate');
   }
+  // What a verifier's locator would find in the file: the passage found, or the one chosen (#157).
+  const located = extraction.status === 'FOUND' ? extraction : chosen;
+  // Edited when the person corrected its text or type, or typed an opinion the locator did not find.
+  const opinionEdited = !located || normaliseText(located.text) !== text || located.type !== input.opinionType;
 
   const opinionSalt = newSalt();
   const manifestSalt = newSalt();
@@ -306,6 +310,7 @@ export async function confirmOpinion(user: SessionUser, input: Confirmation) {
         opinionType: input.opinionType,
         confirmedOpinion: seal(key, new TextEncoder().encode(text), opinionContext(version.docHash)),
         opinionCandidate: chosen ? input.candidate : null,
+        opinionEdited,
         reportDate: new Date(`${input.reportDate}T00:00:00Z`),
         opinionSalt,
         opinionCommitment,
@@ -328,6 +333,7 @@ export async function confirmOpinion(user: SessionUser, input: Confirmation) {
         manifestHash,
         // Which report the person started from, and whether they changed its text: ids and pages, never the text.
         ...(chosen ? { candidate: input.candidate, pages: chosen.pageRange, edited: text !== chosen.text } : {}),
+        opinionEdited,
       },
     });
     return true;

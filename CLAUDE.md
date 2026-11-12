@@ -423,6 +423,20 @@ to one inflect-compliance commit.
   that binds the stamp's namespace only: an original may bind the same prefix
   to another namespace (#144). A stamp is a claim; only the
   chain says whether the record it names is this file.
+- **The stamp is versioned** (`STAMP_VERSION`, #157). Version 2 adds
+  `opinionEdited`, set from `ReportVersion.opinionEdited`. That column is
+  written at confirmation and is true when the person corrected the text or
+  type the locator found, or typed one it did not find. Readers accept
+  versions 1 and 2; the worker writes 2. For a file that is not an exact
+  match:
+  - an edited v2 opinion is `ALTERED_OPINION_NOT_CHECKABLE`
+    (`OPINION_EDITED_AT_CONFIRMATION`);
+  - a located type differing from the stamp's is CHANGED under v2, and
+    `OPINION_TYPE_DIFFERS` (not checkable) under v1, which cannot say whether
+    the type was corrected.
+
+  A new stamp field is a new version with a reader for the old one, never an
+  edit.
 - **The worker runs from the app's directory** (the PDF parser is found from
   there) and needs `FILE_*` and `APP_PUBLIC_URL` besides its chain settings.
   A failed pass (an endpoint or the database out) is tried again after the

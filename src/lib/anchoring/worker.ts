@@ -901,6 +901,8 @@ async function stampCopy(ctx: Context, write: Write, replacing: string | null = 
     opinionType: version.opinionType,
     opinionSalt: hexOf(version.opinionSalt),
     norm: NORMALISER_VERSION,
+    // Whether the preparer corrected the located opinion (#157): verifiers then do not check a re-render against it.
+    opinionEdited: version.opinionEdited ? 1 : 0,
   };
   const original = await ctx.files.read(version.storedFile);
   // The copy must be of exactly the file that was anchored.

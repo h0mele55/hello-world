@@ -96,7 +96,7 @@ npx tsx scripts/deploy-registry.ts <network>             # deploy (sepolia, loca
 npx tsx scripts/measure-chain-costs.ts                   # today's cost per report and finality lag on the production candidates
 npx tsx scripts/owner-call.ts <network> <add-issuer|remove-issuer|cancel-revocation|void-audit-head|record-reanchor-root|void-reanchor-root|transfer-owner|accept-owner> [address|recordId|index|archive.json]   # prints the owner's transaction; sends nothing
 npx tsx scripts/reanchor.ts build <source> <target>      # archive every record of a retiring registry, with a proof per record (#65)
-npx tsx scripts/reanchor.ts check <dir> <target>         # every proof against the root the owner recorded; exit 1 on any failure
+npx tsx scripts/reanchor.ts check <dir> <target> --source <network>   # every proof against the root the owner recorded, the archive against its source; exit 1 on any failure
 npx tsx scripts/kms-address.ts <KMS key version name>     # the address of a Cloud KMS issuer key, to register it
 
 # Database (Postgres 16: `docker compose up -d`, or any local server; Prisma 7 does not read .env)
@@ -162,8 +162,13 @@ Locally, Playwright needs the browser of its own version:
   root vouches for a whole registry's history. `scripts/reanchor.ts build`
   archives a registry (`src/lib/chain/reanchor-build.ts`, both endpoints at
   one agreed finalized block, refusing while a revocation is pending),
-  `owner-call.ts record-reanchor-root` prints the owner's call, and
-  `reanchor.ts check` holds every proof to the recorded root. A re-anchored
+  `owner-call.ts record-reanchor-root --source <network>` prints the owner's
+  call only once the source registry, read again on both endpoints at the
+  archive's block, holds exactly the archive's records
+  (`checkArchiveAgainstSource`, #155): an archive edited and rebuilt after
+  the build passes every check it can make of itself. `--source-gone` skips
+  that only by name, once the chain is gone. `reanchor.ts check` holds every
+  proof to the recorded root, and the archive to its source the same way. A re-anchored
   family is frozen at the snapshot until #127 is decided.
 - **A record's block is the block its transaction is in (#138).** On Arbitrum
   `block.number` is the L1 block, so `_blockNumber()` asks the ArbSys
@@ -634,6 +639,11 @@ to one inflect-compliance commit.
   PREPARER or ADMIN keeps the list (`manageRecipients`), one live entry per
   lower-cased address (a partial unique index). Removing someone keeps the
   row and cancels what was not yet sent to them.
+- **A delivered notice is recorded as SENT whatever happened meanwhile**
+  (#158). A recipient removed during the send cancelled it, so the mailer
+  then moves it from CANCELLED to SENT, with `cancelledMeanwhile` in
+  `notification.sent`. The log never says "cancelled" for a mail that went
+  out.
 - **Notices are an outbox.** When a version 2 or later becomes COMPLETE, the
   worker queues one `Notification` per live recipient in the same transaction
   (`queueSupersededNotices`, `src/lib/notifications/queue.ts`); when a

@@ -26,6 +26,7 @@ import { parseUnits } from 'viem';
 import { runWorkerPass } from '../src/lib/anchoring/worker';
 import { logRangeFor } from '../src/lib/chain/networks';
 import { createFileStore } from '../src/lib/file-store';
+import { sweepOrphanFiles } from '../src/lib/file-sweep';
 import { standaloneVerifierUrlOf } from '../src/lib/verify-setup';
 import { issuerEnv, refuse, requireEnv, secondPublicClient } from './issuer-env';
 import { sealEnv } from './seal-env';
@@ -33,6 +34,8 @@ import { sealEnv } from './seal-env';
 const fail = (message: string): never => refuse('worker', message);
 /** Passes in a row that may fail before the process gives up: about five minutes at the default interval. */
 const MAX_FAILED_PASSES = 20;
+/** How often the worker removes stored files no row names (#158). */
+const SWEEP_EVERY_MS = 3_600_000;
 const env = (name: string) => requireEnv('worker', name);
 
 async function main() {
@@ -42,7 +45,8 @@ async function main() {
   const keyVersion = Number(process.env.FILE_ENCRYPTION_KEY_VERSION || 1);
   if (!Number.isInteger(keyVersion) || keyVersion < 1) fail('FILE_ENCRYPTION_KEY_VERSION must be a positive integer');
   const sealingKey = { key: new Uint8Array(keyBytes), version: keyVersion };
-  const files = createFileStore({ dir: path.resolve(process.env.FILE_STORAGE_DIR || 'storage'), current: sealingKey, keys: [sealingKey] });
+  const storageDir = path.resolve(process.env.FILE_STORAGE_DIR || 'storage');
+  const files = createFileStore({ dir: storageDir, current: sealingKey, keys: [sealingKey] });
   const verifyBaseUrl = env('APP_PUBLIC_URL');
   if (!/^https?:\/\/[^\s]+$/.test(verifyBaseUrl)) fail('APP_PUBLIC_URL must be an http(s) URL');
   const standaloneVerifierUrl = standaloneVerifierUrlOf();
@@ -68,6 +72,7 @@ async function main() {
   const options = { logRangeBlocks: logRangeFor(network), ...(maxFeeGwei ? { maxFeePerGasWei: parseUnits(maxFeeGwei, 9) } : {}) };
   console.log(JSON.stringify({ level: 'info', message: 'worker started', network, issuer: account.address, registry: deployment.address, sealsCopies: seal !== undefined }));
   let failedPasses = 0;
+  let lastSweep = 0;
   try {
     do {
       let report;
@@ -98,6 +103,16 @@ async function main() {
             rpcDisagreed: report.rpcDisagreed,
           }),
         );
+      }
+      // Files no row names, past their grace period (#158): at most once an hour.
+      if (Date.now() - lastSweep >= SWEEP_EVERY_MS) {
+        lastSweep = Date.now();
+        try {
+          const swept = await sweepOrphanFiles({ prisma, dir: storageDir });
+          if (swept.removed > 0) console.log(JSON.stringify({ level: 'info', message: 'orphan files removed', removed: swept.removed }));
+        } catch (error) {
+          console.error(JSON.stringify({ level: 'error', message: 'orphan sweep failed; tried again in an hour', error: error instanceof Error ? error.name : typeof error }));
+        }
       }
       if (once) break;
       for (let waited = 0; waited < intervalMs && !stopping; waited += 250) await new Promise((r) => setTimeout(r, 250));

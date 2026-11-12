@@ -320,6 +320,11 @@ with the last intact one, not with the break.
 - `SHA256SUMS`.
 
 The dump runs first, so every file a dumped row names is already in the store.
+A file is never deleted with its row (#158): a discarded draft's file stays
+in the store, and the worker removes files no row names once they are 48 hours
+old (`sweepOrphanFiles`, hourly), so a backup whose dump still names a file
+finds it. `verify-restore` names a row whose file a restore lacks
+(`FILE_MISSING`).
 
 Both `backup.sh` and `restore.sh` use the PostgreSQL client tools of the
 server's own major version (#184): `/usr/lib/postgresql/<major>/bin` when

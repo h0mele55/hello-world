@@ -375,6 +375,25 @@ describe('the mailer', () => {
     expect(await prisma.notification.findFirstOrThrow()).toMatchObject({ status: 'SENT', attempts: 2 });
   });
 
+  it('records a notice that went out while its recipient was being removed, and says it was cancelled meanwhile (#158)', async () => {
+    const { recipientIds } = await queued([{ name: 'Maria Petrova', email: 'maria@lender.example', locale: 'en' }]);
+    // The admin removes the recipient while the SMTP server is taking the message.
+    const sent: MailMessage[] = [];
+    const transport: MailTransport = {
+      async send(message) {
+        await removeRecipient(admin, recipientIds[0]);
+        sent.push(message);
+      },
+    };
+    expect((await deliver(transport)).sent).toHaveLength(1);
+    expect(sent).toHaveLength(1);
+    // It went out, so it is recorded as sent: the log never says cancelled for a notice that was delivered.
+    expect(await prisma.notification.findFirstOrThrow()).toMatchObject({ status: 'SENT', sentAt: clock });
+    const event = await prisma.auditEvent.findFirstOrThrow({ where: { action: 'notification.sent' } });
+    expect(event.data).toMatchObject({ cancelledMeanwhile: true });
+    expect(await verifyAuditChain(prisma, admin.orgId)).toMatchObject({ ok: true });
+  });
+
   it('cancels, rather than sends, a notice whose recipient was removed after it was claimed', async () => {
     const { recipientIds } = await queued([{ name: 'Maria Petrova', email: 'maria@lender.example', locale: 'en' }]);
     // Removed by a path that did not cancel it (the use case does; this is the mailer’s own check).

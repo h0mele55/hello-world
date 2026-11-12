@@ -166,9 +166,18 @@ export async function deliverNotifications(deps: MailerDeps): Promise<MailerRepo
       continue;
     }
 
+    // It went out: recorded as sent whatever happened meanwhile (#158). A recipient
+    // removed during the send cancelled a notice that was delivered all the same.
     await deps.prisma.$transaction(async (tx) => {
-      await tx.notification.updateMany({ where: { id: notice.id, status: 'PENDING' }, data: { status: 'SENT', sentAt: now(), lastError: null, leaseUntil: null } });
-      await appendAuditEvent(tx, { orgId: org.id, actorId: null, action: 'notification.sent', subjectType: 'Notification', subjectId: notice.id, data: { recipientId: recipient.id, reportVersionId: version.id } }, now());
+      const sentAt = now();
+      const sent = { status: 'SENT' as const, sentAt, lastError: null, leaseUntil: null };
+      const { count } = await tx.notification.updateMany({ where: { id: notice.id, status: 'PENDING' }, data: sent });
+      const cancelledMeanwhile = count === 0 && (await tx.notification.updateMany({ where: { id: notice.id, status: 'CANCELLED' }, data: sent })).count === 1;
+      await appendAuditEvent(
+        tx,
+        { orgId: org.id, actorId: null, action: 'notification.sent', subjectType: 'Notification', subjectId: notice.id, data: { recipientId: recipient.id, reportVersionId: version.id, ...(cancelledMeanwhile ? { cancelledMeanwhile: true } : {}) } },
+        sentAt,
+      );
     });
     report.sent.push(notice.id);
   }
